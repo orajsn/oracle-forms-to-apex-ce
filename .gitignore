@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.env
+.env.*
+*.key
+*.pem
+test-codex-home/
+test-publish-*/
+test-fixtures/
+test-output/
+test-tools/
+.test-codex-home/

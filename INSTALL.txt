@@ -1,0 +1,23 @@
+Oracle Forms-to-APEX CE Skill - Portable Installation
+
+Windows:
+  py -3 install.py
+
+macOS or Linux:
+  python3 install.py
+
+Optional custom Codex home:
+  python3 install.py --codex-home /path/to/.codex
+
+The installer validates the skill, compiles its Python scripts, creates a
+timestamped backup of any existing installation, verifies copied file hashes,
+and installs the skill under:
+
+  <CODEX_HOME>/skills/oracle-forms-to-apex-ce
+
+Restart Codex or start a new task after installation.
+
+Platform boundary:
+  Windows/Linux can convert raw Forms binaries when Oracle Forms tooling is
+  installed. macOS uses preconverted XML/PLD or an explicitly approved
+  Windows/Linux conversion worker. SQLcl validation is available on macOS.

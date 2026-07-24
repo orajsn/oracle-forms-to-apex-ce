@@ -1,0 +1,4 @@
+interface:
+  display_name: "Oracle Forms-to-APEX CE Workbench"
+  short_description: "Portable Forms assessment and APEX POC workflow"
+  default_prompt: "Use $oracle-forms-to-apex-ce to check this device, assess the supplied Forms evidence, and build a validated non-production APEX POC when prerequisites permit."

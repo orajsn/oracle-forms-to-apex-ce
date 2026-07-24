@@ -1,0 +1,54 @@
+name: Cross-platform install
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        python:
+          - "3.10"
+          - "3.12"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Check installer
+        run: python install.py --dry-run --codex-home .test-codex-home
+
+      - name: Install skill
+        run: python install.py --codex-home .test-codex-home
+
+      - name: Verify installed skill
+        run: >-
+          python -c "from pathlib import Path;
+          p=Path('.test-codex-home/skills/oracle-forms-to-apex-ce/SKILL.md');
+          assert p.is_file(), p;
+          assert 'name: oracle-forms-to-apex-ce' in p.read_text(encoding='utf-8');
+          print(f'Installed and verified: {p}')"
+
+      - name: Compile skill scripts
+        run: >-
+          python -m compileall
+          .test-codex-home/skills/oracle-forms-to-apex-ce/scripts
