@@ -1,4 +1,5 @@
 // Presentation contracts only. Server-side source, proof and mutation gates remain authoritative.
+import {presentVerificationStatus} from './verificationPresentation';
 export type FormReadiness='READY'|'MISSING_INPUT'|'NEEDS_HUMAN'|'UNSUPPORTED';
 export type FindingCategory='MISSING_INPUT'|'NEEDS_HUMAN'|'UNSUPPORTED';
 export type FindingOwner='SOURCE_OWNER'|'BUSINESS_OWNER'|'OPERATOR';
@@ -166,7 +167,7 @@ export type FormRunStatus={module_id:string;state:'queued'|'running'|'generated'
 export type RecoveryAction={kind:'check_status'|'retry_step'|'resume';enabled:boolean;reason?:string;safety:'read_only'|'server_confirmed_safe';label?:string};
 export type ProjectRun={id:string;project_id:string;source_hash:string;state:string;message:string;stage_message?:string;
  artifact_generated?:boolean;technical_verified?:boolean;human_accepted?:boolean;downloadable?:boolean;preview_available?:boolean;review_available?:boolean;
- steps?:RunStep[];forms?:FormRunStatus[];recovery?:RecoveryAction;error?:{message:string;action:string;owner:FindingOwner}};
+ steps?:RunStep[];forms?:FormRunStatus[];recovery?:RecoveryAction;verification_status?:unknown;error?:{message:string;action:string;owner:FindingOwner}};
 export type RunPresentation={label:string;tone:'neutral'|'active'|'attention'|'success';earlierSource:boolean;generated:boolean;technicalVerified:boolean;humanAccepted:boolean;canPreview:boolean;canReview:boolean;canDownload:boolean;downloadReason:string;message:string;stageMessage:string|null;error:{message:string;action:string;owner:FindingOwner}|null;steps:RunStep[];forms:FormRunStatus[];detailsIncomplete:boolean};
 
 export function runBelongsToProject(value:unknown,projectId:string):value is ProjectRun{
@@ -187,15 +188,22 @@ export function presentProjectRun(run:ProjectRun,sourceHash:string,projectId:str
  const canDownload=humanAccepted&&run.downloadable===true;
  const message=text(run.message)?run.message:'No run summary has been reported.';
  const stageMessage=text(run.stage_message)?run.stage_message:null;
- const error=record(run.error)&&text(run.error.message)&&text(run.error.action)&&oneOf(run.error.owner,owners)
+ const reportedError=record(run.error)&&text(run.error.message)&&text(run.error.action)&&oneOf(run.error.owner,owners)
   ?{message:run.error.message,action:run.error.action,owner:run.error.owner}:null;
+ const verification=valid?presentVerificationStatus(run.state,run.verification_status):null;
+ const technicalAttention=verification?.contactOperator===true&&!technicalVerified;
+ const error=reportedError??(technicalAttention?{
+  message:generated?'APEX is generated, but technical checks need attention.':'Technical verification needs operator attention.',
+  action:(generated?'Your generated output is saved. ':'')+'Contact the FOX support team with this run ID. Check run status for updates; do not start another conversion to resume these checks.',
+  owner:'OPERATOR' as const}:null);
  const malformedDetails=!text(run.message)||(run.stage_message!==undefined&&run.stage_message!==null&&!stageMessage)
-  ||(run.error!==undefined&&run.error!==null&&!error);
+  ||(run.error!==undefined&&run.error!==null&&!reportedError);
  const downloadReason=canDownload?'':!generated?'The APEX package has not been reported as generated.':!technicalVerified?'Technical verification must pass before review and release.':!humanAccepted?'Genuine human review is still required before download.':'The server has not enabled download for this package.';
  const missingEvidence=run.state==='VERIFIED'&&!technicalVerified||run.state==='ACCEPTED'&&!humanAccepted;
- return {label:missingEvidence?'Verification evidence unavailable':valid?states[run.state][0]:'Status unavailable',tone:missingEvidence?'attention':valid?states[run.state][1]:'attention',earlierSource,generated,technicalVerified,humanAccepted,
+ return {label:missingEvidence?'Verification evidence unavailable':technicalAttention?'Technical checks need attention':valid?states[run.state][0]:'Status unavailable',tone:missingEvidence||technicalAttention?'attention':valid?states[run.state][1]:'attention',earlierSource,generated,technicalVerified,humanAccepted,
   canPreview:generated&&run.preview_available===true,canReview:technicalVerified&&!humanAccepted&&!earlierSource&&run.review_available===true,
-  canDownload,downloadReason,message,stageMessage,error,steps:duplicateSteps?[]:steps,forms:duplicateForms?[]:forms,
+  canDownload,downloadReason,message:technicalAttention&&error?error.message:message,stageMessage:technicalAttention?null:stageMessage,error,
+  steps:duplicateSteps?[]:steps.map(item=>technicalAttention&&item.id==='technical'?{...item,state:'blocked' as const}:item),forms:duplicateForms?[]:forms,
   detailsIncomplete:!valid||missingEvidence||malformedDetails||duplicateSteps||duplicateForms||(Array.isArray(run.steps)&&steps.length!==run.steps.length)||(Array.isArray(run.forms)&&forms.length!==run.forms.length)};
 }
 

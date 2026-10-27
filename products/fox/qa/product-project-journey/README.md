@@ -110,6 +110,14 @@ and download stayed locked. It does not mean business acceptance or a public
 download occurred. Actual per-form database/runtime evidence remains in the
 managed verifier's immutable records.
 
+If the saved run remains `QA_REQUIRED` but its owner-checked verification status
+reports `attention`, the observer stops with
+`CONVERSION_REQUIRES_OPERATOR_ATTENTION`. It preserves the generated artifact
+and the original one-shot requests; it does not wait out the whole timer or
+generate a replacement job. This is a failed/unfinished observation, never a
+technical pass. A separately authorized recovery and read-only follow-up must
+establish the later outcome without relabeling this original trial.
+
 ## Inspect uncertainty
 
 Do not rerun a dispatched plan, delete its markers or select a different output

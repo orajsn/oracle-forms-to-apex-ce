@@ -8,8 +8,13 @@ export const ROOT=fileURLToPath(new URL('../../../',import.meta.url));
 export const NOW=Date.parse('2026-10-27T00:00:00.000Z');
 export function reseal(input){const p=input.preflight;delete p.receipt_sha256;p.receipt_sha256=receiptHash(p);return input;}
 export function fixture(){
- const files=Object.entries(FIXTURE_FILES).map(([name,sha256])=>({name,sha256,
-  base64:readFileSync(path.join(ROOT,'work/qa-storage-v1/fixture/sources',name)).toString('base64')}));
+ const source=JSON.parse(readFileSync(new URL('../fixtures/ordinary-two-form.json',import.meta.url),'utf8'));
+ if(source.schema_version!==1||source.scope!=='fox-synthetic-project-sources-v1'||!source.files||Object.keys(source.files).length!==4)
+  throw new Error('BUNDLED_SYNTHETIC_SOURCE_REQUIRED');
+ const files=Object.entries(FIXTURE_FILES).map(([name,sha256])=>{
+  if(typeof source.files[name]!=='string')throw new Error('BUNDLED_SYNTHETIC_SOURCE_REQUIRED');
+  const raw=Buffer.from(source.files[name],'utf8');if(sha(raw)!==sha256)throw new Error('SYNTHETIC_FIXTURE_BYTES_CHANGED');
+  return {name,sha256,base64:raw.toString('base64')};});
  return reseal({schema_version:1,scope:'fox-live-project-journey-input-v1',mode:'live',apply:true,origin:ORIGIN,
   attempt_id:'live-'+'f'.repeat(24),output_dir:path.resolve(os.tmpdir(),'synthetic-fox-node-output'),
   credentials:{username:'synthetic-observer',password:'SyntheticOnlyPassword-'+ 'q'.repeat(30)},

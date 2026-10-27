@@ -246,7 +246,7 @@ export function statusProjection(detail,gate){
  need(run.human_accepted!==true&&run.downloadable!==true,'LIVE_ACCEPTANCE_MUST_REMAIN_ABSENT');
  return {state:run.state,artifact_generated:run.artifact_generated===true,technical_verified:run.technical_verified===true,
   human_accepted:false,downloadable:false,forms:Array.isArray(run.forms)?run.forms.map(row=>({module_id:row.module_id,state:row.state})):[],
-  error_reported:Boolean(run.error)};
+  error_reported:Boolean(run.error)||(run.state==='QA_REQUIRED'&&run.verification_status?.configured===true&&run.verification_status.state==='attention')};
 }
 
 export function verifiedEvidence(evidence,detail,gate){
@@ -366,7 +366,7 @@ export async function runBrowser(input,{chromium=null,forward=null}={}){
    const detail=await read(projectPath),status=statusProjection(detail,gate);const encoded=canonical(status);
    if(encoded!==previous){journal.observe({project_id:gate.projectId,run_id:gate.runId,observed_at_utc:utc(),...status});previous=encoded;
     if(!result.states_observed.includes(status.state))result.states_observed.push(status.state);}
-   need(!['ATTENTION','FAILED'].includes(status.state),'CONVERSION_REQUIRES_OPERATOR_ATTENTION');
+   need(!['ATTENTION','FAILED'].includes(status.state)&&!status.error_reported,'CONVERSION_REQUIRES_OPERATOR_ATTENTION');
    if(status.state==='VERIFIED'){finalDetail=detail;break;}
    await page.waitForTimeout(input.poll_seconds*1000);
   }

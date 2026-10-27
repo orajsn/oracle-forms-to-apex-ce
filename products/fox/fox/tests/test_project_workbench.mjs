@@ -14,7 +14,7 @@ import ts from 'typescript';
 const foxRoot=fileURLToPath(new URL('../',import.meta.url));
 const workspace=path.dirname(foxRoot),require=createRequire(import.meta.url);
 const sources={};
-for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','preparedUpload.ts','projectWorkbench.css'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
+for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','preparedUpload.ts','projectWorkbench.css','verificationPresentation.ts'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 function load(source,fileName,imports={}){
  const compiled=ts.transpileModule(source,{fileName,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
@@ -22,7 +22,8 @@ function load(source,fileName,imports={}){
  new Function('require','module','exports',compiled)(name=>Object.hasOwn(imports,name)?imports[name]:name.endsWith('.css')?{}:require(name),module,module.exports);
  return module.exports;
 }
-const api=load(sources['projectConversion.ts'],'projectConversion.ts');
+const verification=load(sources['verificationPresentation.ts'],'verificationPresentation.ts');
+const api=load(sources['projectConversion.ts'],'projectConversion.ts',{'./verificationPresentation':verification});
 const upload=load(sources['preparedUpload.ts'],'preparedUpload.ts');
 const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload});
 const render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
@@ -211,6 +212,50 @@ test('generated, verified and accepted are distinct facts',()=>{
  const accepted=api.presentProjectRun(baseRun({state:'ACCEPTED',human_accepted:true,downloadable:true}),binding().source_hash,project.id);
  assert.equal(accepted.canDownload,true);assert.equal(accepted.canReview,false);
 });
+
+test('queue attention retains generated output, blocks the technical stage and exposes only status checking',()=>{
+ const run=baseRun({state:'QA_REQUIRED',technical_verified:false,human_accepted:true,downloadable:true,
+  verification_status:{configured:true,state:'attention',operator_contact:'recent',message:'PRIVATE_PROVIDER_SENTINEL',claim_token:'PRIVATE_TOKEN_SENTINEL'},
+  steps:[{id:'generation',label:'Generate application',state:'complete'},{id:'technical',label:'Run technical checks',state:'running'}],
+  recovery:{kind:'check_status',enabled:true,safety:'read_only',label:'Check run status'}});
+ const before=clone(run),view=api.presentProjectRun(run,binding().source_hash,project.id);
+ assert.equal(view.label,'Technical checks need attention');assert.equal(view.tone,'attention');
+ assert.equal(view.generated,true);assert.equal(view.technicalVerified,false);assert.equal(view.humanAccepted,false);
+ assert.equal(view.canDownload,false);assert.equal(view.canReview,false);assert.equal(view.canPreview,true);
+ assert.equal(view.steps[0].state,'complete');assert.equal(view.steps[1].state,'blocked');
+ assert.equal(view.error.owner,'OPERATOR');assert.match(view.error.action,/output is saved/);assert.match(view.error.action,/do not start another conversion/);
+ assert.doesNotMatch(JSON.stringify(view),/PRIVATE_PROVIDER_SENTINEL|PRIVATE_TOKEN_SENTINEL/);assert.deepEqual(run,before);
+ const plan=api.readProjectPlan(fixtures.ready,binding());
+ for(const component of [components.OutputRun,components.RunProgress]){
+  const html=render(component,{run,binding:binding(),plan,busy:false,onRecovery:async()=>({status:'confirmed'}),execute:async()=>true,onPreview:()=>{},onDownload:()=>{}});
+  assert.match(html,/role="alert"/);assert.match(html,/Next action:/);assert.match(html,/Who can help:/);
+  assert.match(html,/<button[^>]*>.*?Check run status/s);assert.doesNotMatch(html,/Retry failed step|Continue from saved work/);
+ }
+});
+
+for(const value of [{configured:true,state:'queued',operator_contact:'recent'},{configured:true,state:'running',operator_contact:'recent'}]){
+ test(`recent ${value.state} contact does not turn pending checks into completed checks`,()=>{
+  const view=api.presentProjectRun(baseRun({state:'QA_REQUIRED',technical_verified:false,verification_status:value}),binding().source_hash,project.id);
+  assert.equal(view.label,'Technical checks pending');assert.equal(view.error,null);assert.equal(view.technicalVerified,false);
+ });
+}
+
+for(const value of [undefined,{}, {configured:false,state:'disabled'},{configured:true,state:'running',operator_contact:'stale'},
+ {configured:true,state:'queued',operator_contact:'unknown'},{configured:true,state:'completed',operator_contact:'recent'}]){
+ test('unconfirmed verification status asks for operator help without inventing progress or proof',()=>{
+  const view=api.presentProjectRun(baseRun({state:'QA_REQUIRED',technical_verified:false,verification_status:value}),binding().source_hash,project.id);
+  assert.equal(view.tone,'attention');assert.equal(view.error.owner,'OPERATOR');assert.equal(view.canReview,false);assert.equal(view.canDownload,false);
+ });
+}
+
+test('an attention queue cannot authorize a retry or replace an existing evidence error',()=>{
+ const run=baseRun({state:'QA_REQUIRED',technical_verified:false,verification_status:{configured:true,state:'attention',operator_contact:'recent'},
+  recovery:{kind:'resume',enabled:true,safety:'server_confirmed_safe'},error:{message:'Saved evidence needs checking.',action:'Ask support to inspect this run.',owner:'OPERATOR'}});
+ const view=api.presentProjectRun(run,binding().source_hash,project.id);
+ assert.deepEqual(view.error,run.error);assert.equal(api.recoveryAvailability(run,true).enabled,false);
+ const html=render(components.OutputRun,{run,binding:binding(),plan:api.readProjectPlan(fixtures.ready,binding()),busy:false});
+ assert.match(html,/Saved evidence needs checking/);assert.match(html,/<button[^>]*disabled=""[^>]*>.*?Check run status/s);
+});
 test('legacy state, queue completion and recent contact do not fabricate proof',()=>{
  for(const value of [baseRun({technical_verified:undefined}),baseRun({state:'ACCEPTED',human_accepted:undefined,downloadable:true}),baseRun({artifact_generated:undefined,downloadable:true}),baseRun({state:'QA_REQUIRED',verification_status:{state:'completed',operator_contact:'recent'},technical_verified:false})]){
   const result=api.presentProjectRun(value,binding().source_hash,project.id);
@@ -311,11 +356,16 @@ const sourceFor=p=>({project_id:p.project_id,source_hash:p.source_hash,selected_
 function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState([]),[unknown,setUnknown]=useState(false),[safe,setSafe]=useState(false),[invalid,setInvalid]=useState(false);
  const source=invalid?{...sourceFor(plan),source_hash:'b'.repeat(64)}:sourceFor(plan),contextNote='Automated isolated UI QA only. No model, database, conversion or live acceptance.';
  const run=()=>({id:'fox-'+ 'a'.repeat(20),project_id:project.id,source_hash:f.ready.source_hash,state:'VERIFIED',message:contextNote,artifact_generated:true,technical_verified:true,human_accepted:false,downloadable:false,preview_available:true,review_available:true});
+ window.__showVerificationAttention=()=>setRuns([{...run(),state:'QA_REQUIRED',technical_verified:false,
+  verification_status:{configured:true,state:'attention',operator_contact:'recent'},
+  steps:[{id:'generation',label:'Generate application',state:'complete'},{id:'technical',label:'Run technical checks',state:'running'}],
+  recovery:{kind:'check_status',enabled:true,safety:'read_only',label:'Check run status'}}]);
  return <><div className="fixture-controls" aria-label="Synthetic test controls"><strong>Isolated UI QA only</strong><button onClick={()=>{setPlan(f.human);setRuns([])}}>Show human blocker</button><button onClick={()=>{setPlan(f.ready);setRuns([])}}>Show ready plan</button><button onClick={()=>{setPlan(f.empty);setRuns([])}}>Show empty project</button><button onClick={()=>setPlan(f.changed)}>Change source version</button><button onClick={()=>setUnknown(true)}>Simulate unconfirmed action</button><button onClick={()=>setSafe(true)}>Confirm safe status</button><button onClick={()=>setInvalid(true)}>Invalidate source binding</button><button onClick={()=>setRuns([run()])}>Show verified fixture</button><button onClick={()=>setRuns([{...run(),state:'ACCEPTED',human_accepted:true,downloadable:true}])}>Show accepted fixture</button></div><main><Workbench project={project} source={source} plan={plan} runs={runs} processingNotice={contextNote} versions={fixtureVersions} capabilities={{upload:{enabled:true},generate:{enabled:true},select_version:{enabled:true}}}
  onUpload={async(files,mode,context)=>{window.__events.push({kind:'upload',files:files.map(x=>x.name),mode,context});return{status:'confirmed'}}}
  onGenerate={async(context,confirmations)=>{window.__events.push({kind:'generate',context,confirmations});return{status:unknown?'unconfirmed':'confirmed'}}}
  onRefresh={async(context)=>{window.__events.push({kind:'refresh',context});if(window.__holdRefresh)return new Promise(resolve=>window.__releaseRefresh=resolve);return{status:'confirmed',safe_to_continue:safe}}}
  onReloadProject={async(projectId)=>{window.__events.push({kind:'reload-project',projectId});setInvalid(false);return{status:'confirmed'}}}
+ onRecovery={async(action,context)=>{window.__events.push({kind:'recovery',action,context});if(window.__holdRecovery)return new Promise(resolve=>window.__releaseRecovery=resolve);return{status:'confirmed'}}}
  onSelectVersion={async(id,context)=>{window.__events.push({kind:'select',id,context});setPlan(Object.values(f).find(p=>p.source_hash===fixtureVersions.find(v=>v.id===id).source_hash));return{status:'confirmed'}}}
  onDownload={context=>window.__events.push({kind:'download',context})} onPreview={context=>window.__events.push({kind:'preview',context})}
  renderHumanReview={(_run,context,controls)=><div data-testid="review-slot"><p>Interactive review fixture only. No business acceptance is recorded.</p><label>Synthetic review notes<textarea aria-label="Synthetic review notes"/></label><button data-testid="review-button" onClick={()=>void controls.perform(async()=>{window.__events.push({kind:'synthetic-review',context});if(window.__holdReview)return new Promise(resolve=>window.__releaseReview=resolve);return{status:'confirmed'}})}>Record synthetic review fixture</button></div>}/></main></>;
@@ -333,6 +383,29 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
   await page.setContent('<div id="root"></div>');await page.addStyleTag({content:css+'body{margin:0}.fixture-controls{padding:10px 18px;background:#e6ebe2;display:flex;gap:8px;flex-wrap:wrap}.fixture-controls button{padding:7px 10px;font-size:12px}main{max-width:1280px;padding:32px 40px}'});await page.addScriptTag({content:js});
   await page.getByRole('heading',{name:'Review every form'}).waitFor();
   await page.screenshot({path:path.join(out,'desktop-form-review.png')});
+  await page.evaluate(()=>window.__showVerificationAttention());await page.getByRole('button',{name:'5 Output',exact:true}).click();
+  await page.getByRole('alert',{name:'Run needs attention'}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Download APEX package',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByTestId('review-slot').count(),0);
+  const checkRun=page.getByRole('button',{name:'Check run status',exact:true});assert.equal(await checkRun.isEnabled(),true);
+  await page.evaluate(()=>{window.__holdRecovery=true;});await checkRun.evaluate(button=>{button.click();button.click();});
+  await page.waitForFunction(()=>window.__events.filter(x=>x.kind==='recovery').length===1);
+  assert.equal(await page.evaluate(()=>window.__events.filter(x=>x.kind==='recovery').length),1);
+  const checked=await page.evaluate(()=>window.__events.find(x=>x.kind==='recovery'));
+  assert.equal(checked.action,'check_status');assert.equal(checked.context.project_id,project.id);assert.equal(checked.context.run_source_hash,fixtures.ready.source_hash);
+  assert.equal(await page.evaluate(()=>window.__events.filter(x=>['generate','upload','download','synthetic-review'].includes(x.kind)).length),0);
+  await page.evaluate(()=>{window.__holdRecovery=false;window.__releaseRecovery({status:'confirmed'});});
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(x=>x.textContent==='Check run status'&&!x.disabled));
+  await page.getByRole('article',{name:'Output for run fox-'+'a'.repeat(20),exact:true}).screenshot({path:path.join(out,'desktop-verification-attention.png')});
+  await page.getByRole('button',{name:'4 Convert',exact:true}).click();
+  const progress=page.getByRole('region',{name:'Current conversion progress'});
+  await progress.getByRole('heading',{name:'Technical checks need attention',exact:true}).waitFor();
+  assert.equal(await progress.locator('.fw-run-step-blocked').count(),1);assert.equal(await progress.locator('.fw-run-step-running').count(),0);
+  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'5 Output',exact:true}).click();
+  await page.getByRole('article',{name:'Output for run fox-'+'a'.repeat(20),exact:true}).screenshot({path:path.join(out,'mobile-verification-attention.png')});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.setViewportSize({width:1440,height:1100});await page.getByRole('button',{name:'Show ready plan',exact:true}).click();
+  await page.getByRole('button',{name:'2 Review forms',exact:true}).click();
   await page.getByRole('button',{name:'Simulate unconfirmed action',exact:true}).click();
   await page.getByRole('button',{name:'4 Convert',exact:true}).click();
   const checks=page.getByRole('group',{name:'Confirm before processing this source version'}).getByRole('checkbox');
@@ -407,7 +480,7 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
   await page.getByRole('heading',{name:'Add your source files first',exact:true}).waitFor();
   assert.equal(await page.getByText('This source plan is ready.',{exact:false}).count(),0);
   assert.deepEqual(events,[]);
-  await writeFile(path.join(out,'result.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:true,producer:'actual project_conversion assessment on synthetic source',source_sha256:Object.fromEntries(Object.entries(sources).map(([name,raw])=>[name,sha(raw)])),browser:await browser.version(),page_errors:events,scenarios:['per-form review','unknown-write blocked and read-only refresh','source-change clears consent','raw binary rejected and readable upload bound','duplicate upload blocked across deferred validation','invalid binding has project-only reload','human-meaning blocker','review controls share mutation guard and preserve draft notes','current verified vs historical accepted output','390px no horizontal overflow','empty project is not ready'],backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));
+  await writeFile(path.join(out,'result.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:true,producer:'actual project_conversion assessment on synthetic source',source_sha256:Object.fromEntries(Object.entries(sources).map(([name,raw])=>[name,sha(raw)])),browser:await browser.version(),page_errors:events,scenarios:['per-form review','verification attention preserves generated output and blocks technical spinner','status-only recovery cannot duplicate or start a new conversion','unknown-write blocked and read-only refresh','source-change clears consent','raw binary rejected and readable upload bound','duplicate upload blocked across deferred validation','invalid binding has project-only reload','human-meaning blocker','review controls share mutation guard and preserve draft notes','current verified vs historical accepted output','390px no horizontal overflow','empty project is not ready'],backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));
  }catch(error){await writeFile(path.join(out,'failure.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:false,code:error?.name??'Error',message:String(error?.message??'UI proof failed').slice(0,2000),backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));throw error;}
  finally{await context?.close();await browser.close();}
 });

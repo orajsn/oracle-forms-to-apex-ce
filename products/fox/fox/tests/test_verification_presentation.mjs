@@ -145,6 +145,11 @@ test('existing product rendering and consent proof acceptance download gates rem
  assert.match(ui,/const labVerified=verifiedLabSummary\(run,technical\)/);
  assert.match(ui,/\['REVIEW_REQUIRED','VERIFIED'\]\.includes\(r\.state\)&&r\.source_hash===detail\.inventory\.source_hash&&<Acceptance/);
  assert.match(ui,/r\.state==='ACCEPTED'&&r\.downloadable/);
- assert.match(ui,/disabled=\{busy\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\}/);
+ const legacyAcceptance=ui.slice(ui.indexOf('function Acceptance('),ui.indexOf('function ProjectAcceptance('));
+ const projectAcceptance=ui.slice(ui.indexOf('function ProjectAcceptance('),ui.indexOf('function ProjectEvidence('));
+ assert.match(legacyAcceptance,/disabled=\{sourceBusy\|\|busy\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\}/);
+ assert.match(legacyAcceptance,/!isCurrent\(\)\|\|reviewVersion!==reviewRevision\.current\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)/);
+ assert.match(projectAcceptance,/disabled=\{controls\.disabled\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\}/);
+ assert.match(projectAcceptance,/!controls\.disabled&&tested&&reviewed&&notes\.trim\(\)\)void controls\.perform/);
  assert.match(ui,/!consent\.every\(Boolean\)\|\|!detail\.inventory\.conversion_eligible/);
 });

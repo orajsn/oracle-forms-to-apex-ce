@@ -12,7 +12,7 @@ import {ROOT,fixture,reseal} from './fixtures.mjs';
 const PROJECT='a'.repeat(32),SOURCE_ID='ss-'+'c'.repeat(32),RUN='fox-'+'b'.repeat(20);
 const B=path.join(ROOT,'work/b27a/bundle');
 const PYTHON=path.join(ROOT,'fox/.venv/Scripts/python.exe');
-const PLAYWRIGHT=path.join(os.homedir(),'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
+const PLAYWRIGHT='C:/Users/Jason/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
 
 function files(root,prefix=''){
  const values={};for(const item of readdirSync(path.join(root,prefix),{withFileTypes:true})){
@@ -42,7 +42,7 @@ print(json.dumps(out))
   env:{...process.env,PYTHONDONTWRITEBYTECODE:'1'},timeout:20000}));
 }
 
-test('actual frozen project workbench: one-shot normal UI journey over synthetic HTTP backend only',{
+for(const attention of [false,true])test('actual frozen project workbench: '+(attention?'stop at queue attention without replay':'one-shot normal UI journey')+' over synthetic HTTP backend only',{
  skip:process.env.FOX_PROJECT_JOURNEY_BROWSER_TEST!=='1',timeout:180000,
 },async t=>{
  const input=fixture(),assets=files(path.join(B,'fox/dist'));
@@ -60,11 +60,11 @@ test('actual frozen project workbench: one-shot normal UI journey over synthetic
   forms_source_files:plan.source_files.filter(file=>file.kind==='FORM_XML').map(file=>file.name),
   conversion_eligible:state.uploaded,conversion_blockers:[],conversion_profile:'native-project-v1',
   source_preparation:{mode:'DIRECT_READABLE',matches_current_source:false,scope:'Synthetic metadata only.'}};}
- const run=()=>({id:RUN,project_id:PROJECT,source_hash:SOURCE_SHA,state:state.runReads>2?'VERIFIED':'QA_REQUIRED',message:'Synthetic backend state, not Oracle evidence.',
-  artifact_generated:true,technical_verified:state.runReads>2,human_accepted:false,downloadable:false,preview_available:true,review_available:state.runReads>2,
+ const run=()=>({id:RUN,project_id:PROJECT,source_hash:SOURCE_SHA,state:!attention&&state.runReads>2?'VERIFIED':'QA_REQUIRED',message:'Synthetic backend state, not Oracle evidence.',
+  artifact_generated:true,technical_verified:!attention&&state.runReads>2,human_accepted:false,downloadable:false,preview_available:true,review_available:!attention&&state.runReads>2,
   application_url:APEX_ORIGIN+'/ords/r/forms2apex_poc/f2a_synthetic/',
   steps:[{id:'generate',label:'APEX generated',state:'complete'}],forms:derived.ready.forms.map(form=>({module_id:form.module_id,state:'generated'})),
-  recovery:{kind:'check_status',enabled:true,safety:'read_only'},verification_status:{enabled:false}});
+  recovery:{kind:'check_status',enabled:true,safety:'read_only'},verification_status:{configured:true,state:attention?'attention':'queued',operator_contact:'recent'}});
  const detail=()=>({id:PROJECT,...input.project,file_count:state.uploaded?4:0,run_count:state.processed?1:0,inventory:inventory(),
   project_plan:structuredClone(state.uploaded?derived.ready:derived.empty),project_plan_error:null,
   project_capabilities:{upload:{enabled:true},process:{enabled:state.uploaded},select_version:{enabled:true},local_preparation:{enabled:false}},
@@ -107,9 +107,10 @@ test('actual frozen project workbench: one-shot normal UI journey over synthetic
  };
  const result=await runBrowser(input,{forward});
  t.diagnostic('Synthetic-backend browser artifacts: '+input.output_dir);
- assert.equal(result.status,'SIMULATED_BACKEND_VERIFIED_NOT_LIVE',JSON.stringify(result));
+ assert.equal(result.status,attention?'NOT_CONFIRMED':'SIMULATED_BACKEND_VERIFIED_NOT_LIVE',JSON.stringify(result));
  assert.equal(result.browser_close_returned,true);assert.deepEqual(result.dispatched_actions,['login','create','upload','process']);
- assert.deepEqual(result.states_observed,['QA_REQUIRED','VERIFIED']);assert.equal(state.delayedRefresh,true);
+ assert.deepEqual(result.states_observed,attention?['QA_REQUIRED']:['QA_REQUIRED','VERIFIED']);assert.equal(state.delayedRefresh,!attention);
+ if(attention){assert.equal(result.code,'CONVERSION_REQUIRES_OPERATOR_ATTENTION');assert.equal(state.evidenceRequested,false);}
  assert.equal(result.acceptance_requests,0);assert.equal(result.download_requests,0);
  assert.equal(requests.filter(row=>row.method==='POST').length,4);assert.ok(!requests.some(row=>/accept|download/.test(row.path)));
  assert.equal(Object.keys(result.served_assets).length,Object.keys(assets).length);

@@ -160,6 +160,17 @@ test('state observations need not see short-lived intermediate states',()=>{
  const gate=normalGate();running(gate);assert.equal(statusProjection(detail(gate,'QUEUED'),gate).state,'QUEUED');
  assert.equal(statusProjection(detail(gate,'VERIFIED'),gate).state,'VERIFIED');
 });
+test('owner-checked queue attention is an error even while the saved run is QA_REQUIRED',()=>{
+ const gate=normalGate();running(gate);const value=detail(gate,'QA_REQUIRED');
+ value.runs[0].artifact_generated=true;
+ value.runs[0].verification_status={configured:true,state:'attention',operator_contact:'recent',claim_token:'PRIVATE_SENTINEL'};
+ const projected=statusProjection(value,gate);
+ assert.equal(projected.state,'QA_REQUIRED');assert.equal(projected.artifact_generated,true);assert.equal(projected.technical_verified,false);
+ assert.equal(projected.error_reported,true);assert.ok(!JSON.stringify(projected).includes('PRIVATE_SENTINEL'));
+ for(const status of [{configured:true,state:'queued'},{configured:true,state:'running'},{configured:false,state:'attention'}]){
+  value.runs[0].verification_status=status;assert.equal(statusProjection(value,gate).error_reported,false);
+ }
+});
 test('only whole-project evidence yields verified output without acceptance',()=>{
  const gate=normalGate();running(gate);const result=verifiedEvidence(evidence(gate),detail(gate),gate);
  assert.equal(result.application_id,12345);assert.equal(result.form_ids.length,2);assert.equal(result.public_human_acceptance_recorded,false);

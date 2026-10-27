@@ -35,3 +35,23 @@ LOVs, libraries/triggers, master-detail and external calls may need remediation.
 
 No universal import or behavioral-equivalence guarantee is made. Never upload
 credentials, production records, customer identifiers or restricted material.
+
+## When technical checks need attention
+
+The updated workbench keeps **APEX generated** distinct from technical
+verification and human acceptance. If the managed verifier reports attention,
+or its status/contact cannot be established, the technical-check step no longer
+appears to be actively progressing. The saved generated output remains visible;
+review and download do not become available without their required evidence.
+
+Use **Check run status** to refresh the existing result. This is read-only: it
+does not submit another conversion, select sources, retry SQL/import, or accept
+anything. Give FOX support the run ID. Do not create a new run to bypass an
+uncertain result. A retry or continuation needs a separately established safe
+operator path; no QA tools are exposed to business users.
+
+This clearer failure presentation has passed desktop/mobile isolated browser
+tests in source. It has not yet been activated in the existing lab. The lab's
+first multi-form trial is generated but not technically verified because its
+converter lacks the shared QA module; the original failed observation remains
+retained. Source publication does not establish end-to-end readiness.

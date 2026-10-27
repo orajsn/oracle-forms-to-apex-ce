@@ -96,14 +96,28 @@ function ReviewForms({plan,onResolve,onContinue}:{plan:ProjectConversionPlan;onR
  </>;
 }
 
-function OutputRun({run,binding,plan,busy,reviewControls,onPreview,onDownload,onEvidence,renderHumanReview}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;reviewControls?:HumanReviewControls;onPreview?:ProjectWorkbenchProps['onPreview'];onDownload?:ProjectWorkbenchProps['onDownload'];onEvidence?:ProjectWorkbenchProps['onEvidence'];renderHumanReview?:ProjectWorkbenchProps['renderHumanReview']}){
+type RunExecute=(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;
+
+function RunRecovery({run,binding,plan,busy,onRecovery,execute}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;onRecovery?:ProjectWorkbenchProps['onRecovery'];execute?:RunExecute}){
+ const view=presentProjectRun(run,binding.source_hash,binding.project_id);
+ let context:ProjectActionContext|null=null;
+ try{if(run.project_id===binding.project_id)context=actionContext(binding,plan,run.id,run.source_hash);}catch{/* No action for an incomplete binding. */}
+ const recovery=recoveryAvailability(run,Boolean(onRecovery)&&Boolean(context)&&Boolean(execute),busy);
+ if(!view.error&&!['ATTENTION','FAILED'].includes(run.state))return null;
+ return <>{view.error&&<div className="fw-notice" role="alert" aria-label="Run needs attention"><h3>{view.error.message}</h3><p><strong>Next action:</strong> {view.error.action}</p><p>Who can help: {findingOwnerLabels[view.error.owner]}</p></div>}
+  <div className="fw-inline-action"><button type="button" className="fw-secondary" disabled={!recovery.enabled} onClick={()=>{const bound=context,kind=recovery.kind;if(bound&&kind&&execute&&onRecovery)void execute(()=>onRecovery(kind,bound),kind==='check_status');}}><RefreshCw size={15}/>{recovery.label}</button>{recovery.reason&&<p className="fw-small">{recovery.reason}</p>}<p className="fw-small">Completed work is retained. An uncertain database operation is checked before any repeat is allowed.</p></div>
+ </>;
+}
+
+function OutputRun({run,binding,plan,busy,reviewControls,onPreview,onDownload,onEvidence,renderHumanReview,onRecovery,execute}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;reviewControls?:HumanReviewControls;onPreview?:ProjectWorkbenchProps['onPreview'];onDownload?:ProjectWorkbenchProps['onDownload'];onEvidence?:ProjectWorkbenchProps['onEvidence'];renderHumanReview?:ProjectWorkbenchProps['renderHumanReview'];onRecovery?:ProjectWorkbenchProps['onRecovery'];execute?:RunExecute}){
  const view=presentProjectRun(run,binding.source_hash,binding.project_id);
  let context:ProjectActionContext|null=null;
  try{if(run.project_id===binding.project_id)context=actionContext(binding,plan,run.id,run.source_hash);}catch{/* An incomplete binding is display-only. */}
  return <article className="fw-surface fw-output" aria-label={`Output for run ${run.id}`}>
   <div className="fw-detail-heading"><div><p className="fw-eyebrow">ONE PROJECT · ONE APEX APPLICATION</p><h2>{view.generated?'APEX application generated':'APEX output is not ready yet'}</h2><p className="fw-small">Run <code>{run.id}</code>{view.earlierSource?' · Earlier source version':''}</p></div><span className={`fw-badge fw-${view.tone}`}>{view.label}</span></div>
   <div className="fw-output-facts"><div><CheckCircle2 size={19}/><strong>APEX generated</strong><span>{view.generated?'Reported as generated':'Not confirmed'}</span></div><div><ShieldCheck size={19}/><strong>Technical verification</strong><span>{view.technicalVerified?'Checks passed':'Not yet confirmed'}</span></div><div><HelpCircle size={19}/><strong>Business behavior</strong><span>{view.humanAccepted?'Human review recorded':'Human validation required'}</span></div></div>
-  <p>{view.message}</p>
+  {!view.error&&<p>{view.message}</p>}
+  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute}/>
   {view.earlierSource&&!view.humanAccepted&&<p className="fw-notice">This unaccepted output belongs to an earlier source version. Select that version before reviewing it. It cannot certify the current sources.</p>}
   {view.detailsIncomplete&&<p className="fw-notice" role="status">Some run details are unavailable. No missing check is being shown as passed.</p>}
   <div className="fw-actions"><button type="button" className="fw-secondary" disabled={busy||!context||!view.canPreview||!onPreview} onClick={()=>{if(context)onPreview?.(context);}}>Preview APEX <ArrowRight size={16}/></button><button type="button" disabled={busy||!context||!view.canDownload||!onDownload} onClick={()=>{if(context)onDownload?.(context);}}><Download size={17}/> Download APEX package</button>{onEvidence&&<button type="button" className="fw-text-button" disabled={busy||!context} onClick={()=>{if(context)onEvidence(context);}}>View mapping and remediation</button>}</div>
@@ -214,18 +228,17 @@ export default function ProjectWorkbench(props:ProjectWorkbenchProps){
    </div>{activeRun&&<RunProgress run={activeRun} binding={source} plan={plan} busy={busy} onRecovery={props.onRecovery} execute={execute}/>}
   </section>}
 
-  {step==='output'&&<section aria-label="APEX project output">{projectRuns.length===0?<div className="fw-surface fw-empty"><Layers size={30}/><h2>{runIntegrityIssue?'Output status is unavailable':'Your APEX package will appear here'}</h2><p>{runIntegrityIssue?'Refresh the project before relying on its run history.':'First upload and assess the sources, resolve the required findings, then generate the project application.'}</p><button type="button" className="fw-secondary" onClick={()=>setStep(plan?.can_generate?'convert':'review')}>Back to the project steps <ArrowRight size={16}/></button></div>:projectRuns.map(run=><OutputRun key={run.id} run={run} binding={source} plan={plan} busy={busy} reviewControls={{disabled:busy||unknownOutcome||!bindingValid,perform:action=>execute(action)}} onPreview={props.onPreview} onDownload={props.onDownload} onEvidence={props.onEvidence} renderHumanReview={bindingValid?props.renderHumanReview:undefined}/>)}</section>}
+  {step==='output'&&<section aria-label="APEX project output">{projectRuns.length===0?<div className="fw-surface fw-empty"><Layers size={30}/><h2>{runIntegrityIssue?'Output status is unavailable':'Your APEX package will appear here'}</h2><p>{runIntegrityIssue?'Refresh the project before relying on its run history.':'First upload and assess the sources, resolve the required findings, then generate the project application.'}</p><button type="button" className="fw-secondary" onClick={()=>setStep(plan?.can_generate?'convert':'review')}>Back to the project steps <ArrowRight size={16}/></button></div>:projectRuns.map(run=><OutputRun key={run.id} run={run} binding={source} plan={plan} busy={busy} reviewControls={{disabled:busy||unknownOutcome||!bindingValid,perform:action=>execute(action)}} onPreview={props.onPreview} onDownload={props.onDownload} onEvidence={props.onEvidence} onRecovery={props.onRecovery} execute={execute} renderHumanReview={bindingValid?props.renderHumanReview:undefined}/>)}</section>}
  </section>;
 }
 
 function RunProgress({run,binding,plan,busy,onRecovery,execute}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;onRecovery?:ProjectWorkbenchProps['onRecovery'];execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>}){
- const view=presentProjectRun(run,binding.source_hash,binding.project_id),recovery=recoveryAvailability(run,Boolean(onRecovery)&&run.project_id===binding.project_id,busy);
+ const view=presentProjectRun(run,binding.source_hash,binding.project_id);
  const stageLabels={queued:'Waiting',running:'Processing',generated:'Generated',blocked:'Needs input',failed:'Stopped'};
- return <section className="fw-surface" aria-label="Current conversion progress"><div className="fw-detail-heading"><div><p className="fw-eyebrow">SAVED RUN</p><h2>{view.label}</h2><p>{view.stageMessage||view.message}</p></div><code>{run.id}</code></div>
+ return <section className="fw-surface" aria-label="Current conversion progress"><div className="fw-detail-heading"><div><p className="fw-eyebrow">SAVED RUN</p><h2>{view.label}</h2>{!view.error&&<p>{view.stageMessage||view.message}</p>}</div><code>{run.id}</code></div>
   {view.detailsIncomplete&&<p className="fw-notice" role="status">Some progress or error details could not be read. No missing result is being shown as successful.</p>}
   {view.steps.length>0?<ol className="fw-run-steps">{view.steps.map(item=><li key={item.id} className={`fw-run-step-${item.state}`}><span aria-hidden="true">{item.state==='complete'?<Check size={15}/>:item.state==='running'?<LoaderCircle size={15} className="fw-spinner"/>:item.state==='blocked'?<TriangleAlert size={15}/>:<span className="fw-step-dot"/>}</span><div><strong>{item.label}</strong><small>{item.state==='complete'?'Completed':item.state==='running'?'Reported as in progress':item.state==='blocked'?'Blocked':'Not yet reported complete'}</small>{item.message&&<p>{item.message}</p>}</div></li>)}</ol>:<p className="fw-small">Detailed stage checkpoints have not been reported for this run. No progress percentage is assumed.</p>}
   {view.forms.length>0?<div className="fw-form-progress"><h3>Per-form response</h3>{view.forms.map(item=><div key={item.module_id}><strong>{plan?.forms.find(form=>form.module_id===item.module_id)?.form_name??item.module_id}</strong><span>{stageLabels[item.state]}</span>{item.message&&<p>{item.message}</p>}</div>)}</div>:<p className="fw-small">Per-form processing results have not been reported yet.</p>}
-  {view.error&&<div className="fw-notice"><h3>{view.error.message}</h3><p><strong>Next action:</strong> {view.error.action}</p><p>Who can help: {findingOwnerLabels[view.error.owner]}</p></div>}
-  {run.state==='ATTENTION'||run.state==='FAILED'?<div className="fw-inline-action"><button type="button" className="fw-secondary" disabled={!recovery.enabled} onClick={()=>{if(recovery.kind)void execute(()=>onRecovery!(recovery.kind!,actionContext(binding,plan,run.id,run.source_hash)),recovery.kind==='check_status');}}><RefreshCw size={15}/>{recovery.label}</button>{recovery.reason&&<p className="fw-small">{recovery.reason}</p>}<p className="fw-small">Completed work is retained. An uncertain database operation is checked before any repeat is allowed.</p></div>:null}
+  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute}/>
  </section>;
 }

@@ -172,6 +172,21 @@ test('canonical main: source-bound multi-project workflow and uncertain-write re
   await page.getByText('Check the existing result first.',{exact:true}).waitFor({state:'hidden'});
   await page.getByRole('button',{name:'4 Convert',exact:true}).click();await page.getByRole('heading',{name:'Waiting to start',exact:true}).waitFor();
   assert.equal(await generate.isDisabled(),true);
+  await page.evaluate(()=>{const state=window.__fixture;state.run={...state.pendingRun,state:'QA_REQUIRED',artifact_generated:true,
+   message:'Synthetic queue attention; no live verification.',verification_status:{configured:true,state:'attention',operator_contact:'recent'},
+   steps:[{id:'generation',label:'Generate application',state:'complete'},{id:'technical',label:'Run technical checks',state:'running'}]};});
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByRole('button',{name:'5 Output',exact:true}).click();
+  await page.getByRole('alert',{name:'Run needs attention'}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Download APEX package',exact:true}).isDisabled(),true);
+  assert.equal(await page.getByRole('heading',{name:'Final human review',exact:true}).count(),0);
+  const beforeStatus=await page.evaluate(()=>window.__fixture.events.length);
+  await page.getByRole('button',{name:'Check run status',exact:true}).click();
+  await page.getByRole('button',{name:'Check run status',exact:true}).waitFor({state:'visible'});
+  const statusRequests=await page.evaluate(index=>window.__fixture.events.slice(index),beforeStatus);
+  assert.ok(statusRequests.some(event=>event.method==='GET'&&event.url==='/api/projects/'+'a'.repeat(32)));
+  assert.ok(statusRequests.every(event=>event.method==='GET'),'Status recovery must not generate, accept, import, or select sources.');
+  assert.equal(await page.evaluate(()=>window.__fixture.events.filter(event=>event.method==='POST'&&event.url.endsWith('/runs')).length),1);
+  await page.screenshot({path:path.join(out,'desktop-verification-attention.png')});
   await page.evaluate(()=>{const state=window.__fixture;state.run={...state.pendingRun,state:'VERIFIED',message:'Synthetic verified projection only.',artifact_generated:true,technical_verified:true,human_accepted:false,preview_available:true,review_available:true,application_url:'https://authorized-run.synthetic.test/verified-preview'};});
   await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByRole('button',{name:'5 Output',exact:true}).click();
   await page.getByRole('heading',{name:'Final human review',exact:true}).waitFor();
