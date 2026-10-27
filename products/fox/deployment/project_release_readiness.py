@@ -19,6 +19,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import time
 import types
 
 TARGET_SHA256 = '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3'
@@ -266,7 +267,7 @@ def request(method,payload,token=None,session=None):
  finally:connection.close()
 def probe(packet):
  need(set(packet)=={'bearer_token'} and type(packet['bearer_token']) is str
-  and re.fullmatch(r'[A-Za-z0-9._~+/=-]{32,4096}',packet['bearer_token']),'MCP_TOKEN_SHAPE_INVALID')
+  and re.fullmatch(r'[!-~]{32,4096}',packet['bearer_token']),'MCP_TOKEN_SHAPE_INVALID')
  token=packet['bearer_token'];session=None
  initialize={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':PROTOCOL,
   'capabilities':{},'clientInfo':{'name':'fox-release-readiness','version':'1'}}}
@@ -381,6 +382,143 @@ def _exec(A, release, records, *, role, program, payload, deadline):
         raise ReadinessError(role.upper()+'_READINESS_UNCONFIRMED_NO_AUTOMATIC_RETRY') from None
 
 
+def _curl_scalar(value):
+    need(type(value)is str and not any(c in value for c in ('\r','\n','\0')),'MCP_CURL_CONFIG_VALUE_INVALID')
+    return '"'+value.replace('\\','\\\\').replace('"','\\"')+'"'
+
+
+def _curl_mcp_request(A,release,records,method,payload,*,token=None,session=None,deadline_at=None):
+    """HTTP actually originates in OPAF; credentials occur only on stdin."""
+    before,containers=_guard(A,release,records)
+    headers=['Content-Type: application/json','Accept: application/json, text/event-stream']
+    if token is not None:
+        need(type(token)is str and re.fullmatch('[!-~]{32,4096}',token),'MCP_TOKEN_SHAPE_INVALID')
+        headers.append('Authorization: Bearer '+token)
+    if session is not None:
+        need(type(session)is str and re.fullmatch('[!-~]{1,4096}',session),'MCP_SESSION_HEADER_INVALID')
+        headers += ['Mcp-Session-Id: '+session,'MCP-Protocol-Version: 2025-03-26']
+    lines=['url = '+_curl_scalar('http://10.89.1.3:8090/mcp'),'request = '+_curl_scalar(method)]
+    lines += ['header = '+_curl_scalar(value) for value in headers]
+    if payload is not None:
+        lines.append('data = '+_curl_scalar(json.dumps(payload,separators=(',',':'),ensure_ascii=True,allow_nan=False)))
+    config=('\n'.join(lines)+'\n').encode('ascii')
+    need(len(config)<=32768,'MCP_CURL_CONFIG_BOUND')
+    remaining=20 if deadline_at is None else deadline_at-time.monotonic()
+    need(remaining>0,'MCP_DISCOVERY_DEADLINE_EXPIRED')
+    argv=['/usr/bin/podman','exec','-i',containers['opaf']['Id'],'/usr/bin/curl','-q','--silent','--show-error',
+        '--http1.1','--noproxy','*','--connect-timeout','5','--max-time',str(min(15,remaining)),'--max-filesize','1048576',
+        '--include','--config','-']
+    try:
+        response=subprocess.run(argv,input=config,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=min(20,remaining),
+            env={'PATH':'/usr/bin:/bin','HOME':'/home/opc','XDG_RUNTIME_DIR':'/run/user/1000','LANG':'C.UTF-8'},cwd='/')
+    except Exception:
+        raise ReadinessError('OPAF_CURL_UNCONFIRMED_NO_AUTOMATIC_RETRY') from None
+    need(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=1114112,
+         'OPAF_CURL_UNCONFIRMED_NO_AUTOMATIC_RETRY')
+    raw=response.stdout
+    # No redirects/proxy/credentials are configured. Permit bounded interim
+    # HTTP responses, then parse one exact header block and its unchanged body.
+    for _ in range(4):
+        boundary=raw.find(b'\r\n\r\n')
+        need(0<boundary<=65536,'MCP_HTTP_HEADER_BOUND')
+        head,body=raw[:boundary],raw[boundary+4:]
+        rows=head.decode('iso-8859-1').split('\r\n')
+        match=re.fullmatch(r'HTTP/1\.[01] ([0-9]{3})(?: [^\r\n]*)?',rows[0])
+        need(match is not None,'MCP_HTTP_STATUS_INVALID');status=int(match.group(1))
+        if 100<=status<200:
+            raw=body;continue
+        headers={}
+        for row in rows[1:]:
+            need(':' in row and not row.startswith((' ','\t')),'MCP_HTTP_HEADER_INVALID')
+            name,value=row.split(':',1);name=name.lower();value=value.strip()
+            if name in ('content-type','mcp-session-id'):
+                need(name not in headers,'MCP_HEADER_AMBIGUOUS');headers[name]=value
+        need(len(body)<=1000000,'MCP_RESPONSE_BOUND')
+        after,_=_guard(A,release,records);need(after==before,'CONTAINER_CHANGED_DURING_READINESS')
+        return status,headers,body
+    raise ReadinessError('MCP_TOO_MANY_INTERIM_HEADERS')
+
+
+def _mcp_rpc_reply(raw,content_type,identity):
+    """The same bounded JSON/SSE and exact RPC result contract as the probe."""
+    need(type(raw)is bytes and 0<len(raw)<=1000000,'MCP_RESPONSE_BOUND')
+    def parsed(value):
+        def unique(items):
+            result={}
+            for key,item in items:
+                need(key not in result,'DUPLICATE_JSON_KEY');result[key]=item
+            return result
+        try:
+            return json.loads(value,object_pairs_hook=unique,
+                parse_constant=lambda _:(_ for _ in ()).throw(ReadinessError('NONFINITE_JSON')))
+        except ReadinessError:raise
+        except Exception:raise ReadinessError('MCP_RPC_JSON_INVALID') from None
+    kind=content_type.split(';',1)[0].strip().lower()
+    if kind=='application/json':values=[parsed(raw)]
+    elif kind=='text/event-stream':
+        values=[];data=[]
+        try:lines=raw.decode('utf-8-sig').replace('\r\n','\n').replace('\r','\n').split('\n')+['']
+        except UnicodeError:raise ReadinessError('MCP_RPC_JSON_INVALID') from None
+        for line in lines:
+            if line=='':
+                if data:
+                    joined='\n'.join(data)
+                    if joined.strip():values.append(parsed(joined))
+                data=[]
+            elif line.startswith('data:'):data.append(line[5:].removeprefix(' '))
+            elif line.startswith(':') or line.startswith(('event:','id:','retry:')):pass
+            else:raise ReadinessError('MCP_SSE_FIELD_INVALID')
+        need(len(values)<=128,'MCP_EVENT_BOUND')
+    else:raise ReadinessError('MCP_RESPONSE_TYPE_INVALID')
+    matches=[]
+    for value in values:
+        need(type(value)is dict and value.get('jsonrpc')=='2.0','MCP_RPC_INVALID')
+        if 'id' in value:
+            need(type(value['id'])is int and value['id']==identity,'MCP_RPC_ID_CHANGED');matches.append(value)
+    need(len(matches)==1 and set(matches[0])=={'jsonrpc','id','result'}
+         and type(matches[0]['result'])is dict,'MCP_RPC_RESULT_INVALID')
+    return matches[0]['result']
+
+
+def _probe_mcp_curl(A,release,records,token):
+    need(type(token)is str and re.fullmatch('[!-~]{32,4096}',token),'MCP_TOKEN_SHAPE_INVALID')
+    deadline=time.monotonic()+60
+    def request(method,payload,**kwargs):
+        return _curl_mcp_request(A,release,records,method,payload,deadline_at=deadline,**kwargs)
+    protocol='2025-03-26'
+    initialize={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':protocol,
+        'capabilities':{},'clientInfo':{'name':'fox-release-readiness','version':'1'}}}
+    status,_,_=request('POST',initialize)
+    need(status==401,'MCP_UNAUTHENTICATED_REQUEST_NOT_REJECTED')
+    session=None;terminated=False
+    try:
+        status,headers,raw=request('POST',initialize,token=token)
+        need(status==200,'MCP_INITIALIZE_FAILED')
+        value=_mcp_rpc_reply(raw,headers.get('content-type',''),1)
+        need(value.get('protocolVersion')==protocol and value.get('serverInfo',{}).get('name')=='JSN Forms-to-APEX Converter'
+             and type(value.get('capabilities',{}).get('tools'))is dict,'MCP_SERVER_CHANGED')
+        session=headers.get('mcp-session-id')
+        need(type(session)is str and re.fullmatch('[!-~]{1,4096}',session),'MCP_SESSION_HEADER_INVALID')
+        status,_,_=request('POST',{'jsonrpc':'2.0','method':'notifications/initialized'},token=token,session=session)
+        need(status in (200,202,204),'MCP_INITIALIZED_FAILED')
+        status,headers,raw=request('POST',{'jsonrpc':'2.0','id':2,'method':'tools/list','params':{}},token=token,session=session)
+        need(status==200,'MCP_TOOLS_LIST_FAILED')
+        value=_mcp_rpc_reply(raw,headers.get('content-type',''),2)
+        need(set(value) in ({'tools'},{'tools','_meta'}) and ('_meta' not in value or type(value['_meta'])is dict)
+             and type(value['tools'])is list and len(value['tools'])==5,'MCP_TOOL_COUNT_OR_PAGINATION_CHANGED')
+        names=[tool.get('name') if type(tool)is dict else None for tool in value['tools']]
+        need(len(set(names))==5 and sorted(names)==list(EXPECTED_TOOLS),'MCP_TOOL_NAMES_CHANGED')
+    finally:
+        if session is not None and time.monotonic()<deadline:
+            status,_,_=request('DELETE',None,token=token,session=session)
+            need(status in (200,202,204,404,405),'MCP_SESSION_TERMINATION_UNCONFIRMED')
+            terminated=status in (200,202,204,404)
+    return {'scope':'fox-internal-mcp-discovery-v1','source_container':'oracle-applied-ai-label',
+        'endpoint':'http://10.89.1.3:8090/mcp','server_name':'JSN Forms-to-APEX Converter','protocol_version':protocol,
+        'unauthenticated_http':401,'tool_names':list(EXPECTED_TOOLS),'tool_count':5,'conversion_tools_called':False,
+        'protocol_session_created':True,'session_termination_confirmed':terminated}
+
+
 def run(A, plan, release, candidate_records):
     """Observe services after the caller's C/R admission; recheck both pinned refs.
 
@@ -426,8 +564,11 @@ def run(A, plan, release, candidate_records):
                          payload={'files':converter_files,'target_profile':target}),target)
     _, containers = _guard(A,release,candidate_records)
     token = A.environment(containers['converter']).get('F2A_MCP_BEARER_TOKEN')
-    need(type(token) is str and re.fullmatch(r'[A-Za-z0-9._~+/=-]{32,4096}',token),'MCP_CREDENTIAL_REFERENCE_INVALID')
-    mcp = _validate_mcp(_exec(A,release,candidate_records,role='opaf',program=MCP_PROGRAM,deadline=60,payload={'bearer_token':token}))
+    # StaticTokenVerifier uses an opaque token, not necessarily base64/JWT.
+    # Enforce bounded visible ASCII/no whitespace or controls; actual 401 and
+    # authenticated discovery below establish correctness, never shape alone.
+    need(type(token) is str and re.fullmatch(r'[!-~]{32,4096}',token),'MCP_CREDENTIAL_REFERENCE_INVALID')
+    mcp = _validate_mcp(_probe_mcp_curl(A,release,candidate_records,token))
     del token
     need(fox.get('scope') == 'fox-project-connections-readonly-v1' and fox.get('target_profile_sha256') == TARGET_SHA256
          and fox.get('model_invoked') is False and fox.get('checkpoint_written') is False

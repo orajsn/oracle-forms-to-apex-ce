@@ -540,7 +540,8 @@ def test_ordered_unit_uses_actual_service_template_without_changing_runtime_sett
     original = hosted_service.service_unit(admission, path)
     ordered = M.ordered_service_unit(hosted_service, admission, path)
     inserted = b'After=fox.service forms2apex-mcp.service\nRequires=fox.service forms2apex-mcp.service\n'
-    assert ordered.count(inserted) == 1 and ordered.replace(inserted, b'') == original
+    projected = original.replace(b'WorkingDirectory="/private/release-B"\n',b'WorkingDirectory=/private/release-B\n')
+    assert ordered.count(inserted) == 1 and ordered.replace(inserted, b'') == projected
     assert b'Restart=no\n' in ordered and b'UMask=0077\n' in ordered
     assert b'"-I" "-B"' in ordered and b'"--installation-sha256" "' + b'a' * 64 + b'"' in ordered
 

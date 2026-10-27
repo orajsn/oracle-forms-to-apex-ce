@@ -189,7 +189,12 @@ def run(args):
     private_io.save(output / 'plan.json', plan)
     observed = preflight.observe(plan, args.ssh_key)
     private_io.save(output / 'preflight.json', observed)
-    login = private_io.credentials(args.credentials)
+    if getattr(args,'credentials_dpapi',None):
+        contract.need(bool(args.username),'DPAPI_LOGIN_USERNAME_REQUIRED')
+        login = private_io.dpapi_credentials(args.credentials_dpapi,args.username)
+    else:
+        contract.need(not getattr(args,'username',None),'USERNAME_ONLY_WITH_DPAPI')
+        login = private_io.credentials(args.credentials)
     contract.validate_preflight(observed, plan)
     data = {'schema_version': 1, 'scope': 'fox-live-project-journey-input-v1', 'mode': 'live', 'apply': True,
         'origin': plan['origin'], 'attempt_id': plan['attempt_id'], 'output_dir': str(output / 'browser'),
@@ -323,7 +328,11 @@ def main(argv=None):
         child.add_argument('--plan', required=True); child.add_argument('--plan-sha256', required=True)
         child.add_argument('--ssh-key')
     check.add_argument('--attempt-output'); check.add_argument('--remote', action='store_true')
-    execute.add_argument('--output', required=True); execute.add_argument('--credentials', required=True)
+    execute.add_argument('--output', required=True)
+    credential_mode=execute.add_mutually_exclusive_group(required=True)
+    credential_mode.add_argument('--credentials')
+    credential_mode.add_argument('--credentials-dpapi')
+    execute.add_argument('--username')
     execute.add_argument('--apply', action='store_true')
     args = parser.parse_args(argv)
     if args.mode in ('run', 'inspect') and (not getattr(args, 'attempt_output', None) or getattr(args, 'remote', False)):

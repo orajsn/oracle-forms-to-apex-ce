@@ -26,7 +26,7 @@ import urllib.request
 sys.dont_write_bytecode = True
 SCOPE = 'fox-leased-paired-cutover-v1'
 SHA = re.compile(r'[a-f0-9]{64}\Z')
-READINESS_SHA = 'ad451a9c0f29f801717585393c4fed39ada5bd9edcada032ef64dbb1bb71f28c'
+READINESS_SHA = 'de48c340ebe73fa5a97a6db2bee12e5c2e1a40ef6a22a77c8327af97359e90b3'
 LIVE_ROLLBACK_SCAN = r'''
 import hashlib,json,os,pathlib,re,sqlite3,stat,sys
 def need(ok):
@@ -208,7 +208,30 @@ def ordered_service_unit(service, admission, installation_path):
     need(raw.startswith(prefix) and raw.count(prefix) == 1, 'REVIEWED_UNIT_TEMPLATE_CHANGED')
     # User-unit ordering is installer configuration, not a change to the
     # frozen runtime code or existing FOX/converter units.
-    return raw.replace(prefix,prefix+b'After=fox.service forms2apex-mcp.service\nRequires=fox.service forms2apex-mcp.service\n',1)
+    directory = str(admission.source_root)
+    # systemd 239 parses WorkingDirectory as a path, not an ExecStart word.
+    # Limit this installer compatibility projection to an exact plain POSIX
+    # path; the frozen service source and every ExecStart byte stay unchanged.
+    need(re.fullmatch(r'/[A-Za-z0-9_./-]+',directory) and '..' not in PurePosixPath(directory).parts,
+         'UNIT_WORKING_DIRECTORY_UNSUPPORTED')
+    quoted = ('WorkingDirectory="'+directory+'"\n').encode()
+    need(raw.count(quoted) == 1,'REVIEWED_WORKING_DIRECTORY_TEMPLATE_CHANGED')
+    return raw.replace(prefix,prefix+b'After=fox.service forms2apex-mcp.service\nRequires=fox.service forms2apex-mcp.service\n',1).replace(
+        quoted,('WorkingDirectory='+directory+'\n').encode(),1)
+
+
+def verify_service_unit(A,unit):
+    # systemd-analyze's offline search path omits already-generated Quadlet
+    # units. Supply the real active dependency as an additional input; never
+    # run generators or invent a placeholder dependency to make verification pass.
+    dependency = service_state(A,'forms2apex-network.service')
+    generated = PurePosixPath('/run/user/1000/systemd/generator/forms2apex-network.service')
+    need(dependency['LoadState']=='loaded' and dependency['ActiveState']=='active'
+         and dependency['FragmentPath']==str(generated),'ACTUAL_GENERATED_NETWORK_UNIT_REQUIRED')
+    before = A.read(Path(generated))
+    A.command(['/usr/bin/systemd-analyze','--user','--generators=no','verify',str(unit),str(generated)])
+    need(A.read(Path(generated))==before and service_state(A,'forms2apex-network.service')==dependency,
+         'GENERATED_DEPENDENCY_CHANGED_DURING_VERIFY')
 
 
 def public_health():
@@ -264,6 +287,36 @@ def configuration_signature(A, item):
     # transition. Image, process/configuration, mounts and isolation do not.
     return sha(canonical({key:item.get(key) for key in
         ('Id','Image','Config','HostConfig','Mounts','ProcessLabel','MountLabel')}))
+
+
+def configuration_matches(A, item, expected):
+    """Preserve the exact prestart digest, tolerating only proven OCI additions.
+
+    Podman adds its manager and numeric stop-signal annotations at first start.
+    No container setting/record is changed and no other field is ignored.
+    """
+    if configuration_signature(A,item) == expected:
+        return True
+    state,config = item.get('State'),item.get('Config')
+    if not (type(state) is dict and type(config) is dict
+            and type(state.get('StartedAt')) is str
+            and state['StartedAt'] not in ('','0001-01-01T00:00:00Z')):
+        return False
+    annotations = config.get('Annotations')
+    if type(annotations) is not dict:
+        return False
+    manager,signal = 'io.container.manager','org.opencontainers.image.stopSignal'
+    if not ({manager,signal} & set(annotations)):
+        return False
+    if manager in annotations and annotations[manager] != 'libpod':
+        return False
+    if signal in annotations and not (type(config.get('StopSignal')) is int
+            and 1 <= config['StopSignal'] <= 64 and annotations[signal] == str(config['StopSignal'])):
+        return False
+    projected = dict(item)
+    projected['Config'] = dict(config)
+    projected['Config']['Annotations'] = {key:value for key,value in annotations.items() if key not in (manager,signal)}
+    return configuration_signature(A,projected) == expected
 
 
 def read_idle(A, cid):
@@ -498,9 +551,8 @@ with store._db(False) as db:
             'automatic_g_rollback_permitted':False,'backup_completion_sha256':self.p['backup_completion_sha256']})
         for role,unit,name in (('converter','forms2apex-mcp.service','forms2apex-mcp'),('fox','fox.service','fox')):
             self.effect('start-'+role,['/usr/bin/systemctl','--user','start',unit])
-            item = A.inspect_container(name)
-            need(item['Id'] == self.created['candidates'][role]['id'] and item['State']['Running'] is True
-                 and configuration_signature(A,item) == boundaries[role],'NEW_RUNTIME_START_UNCONFIRMED')
+            self.await_started(role,name,boundaries[role])
+        self.await_fox_health()
         self.require_tls(False)
         checked = self.admission.check()
         need(checked['status'] == 'CHECKED_NOT_STARTED','NEW_HISTORY_ADMISSION_NOT_READY')
@@ -513,13 +565,128 @@ with store._db(False) as db:
         self.record('cutover-prepared.json',result)
         return result
 
+    def await_started(self, role, name, expected, *, timeout=120):
+        """Observe the same single start; never call start/restart while waiting."""
+        deadline = time.monotonic()+timeout
+        while time.monotonic() < deadline:
+            item = self.A.inspect_container(self.created['candidates'][role]['id'])
+            need(item['Id'] == self.created['candidates'][role]['id'] and item['Name'].lstrip('/') == name
+                 and item['Image'].removeprefix('sha256:') == self.release['images'][role][7:],
+                 'STARTED_RUNTIME_IDENTITY_CHANGED')
+            state = item['State']
+            if state['Running'] is True and type(state['Pid']) is int and state['Pid'] > 0:
+                need(configuration_matches(self.A,item,expected),'NEW_RUNTIME_CONFIGURATION_CHANGED')
+                return item
+            need(not (state['Status'] in ('exited','stopped','dead')
+                 and state['StartedAt'] not in ('','0001-01-01T00:00:00Z')),
+                 'NEW_RUNTIME_EXITED_NO_REPLAY')
+            time.sleep(1)
+        raise CutoverError('NEW_RUNTIME_START_TIMEOUT_STATUS_ONLY')
+
+    def await_fox_health(self, *, timeout=120):
+        """Wait for app initialization before the full independent admission read."""
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            try:
+                request=urllib.request.Request('http://127.0.0.1:8100/api/health',method='GET')
+                with urllib.request.urlopen(request,timeout=2) as response:
+                    value=json.loads(response.read(65537))
+                    if response.status==200 and type(value)is dict and value.get('product')=='FOX':
+                        return
+            except (OSError,ValueError):
+                pass
+            time.sleep(1)
+        raise CutoverError('FOX_INITIAL_HEALTH_TIMEOUT_STATUS_ONLY')
+
+    def resume_after_converter_start(self):
+        """One explicit forward continuation; no converter or phase replay."""
+        need(type(self) is HostCutover,'EXACT_FORWARD_CONTROLLER_REQUIRED')
+        A=self.A
+        with A.held_stage(self.stage):
+            self.local_guards();self.require_tls(False);self._backup();self.stopped_idle()
+            need(not (self.stage/'cutover-prepared.json').exists()
+                 and not (self.stage/'forward-activation-intent.json').exists(),
+                 'PRIOR_FORWARD_ACTIVATION_PRESERVED_NO_REPLAY')
+            floor=A.parse(A.read(self.stage/'project-start-floor.json',private=True))
+            need(floor == {'release_sha256':self.R,'project_aware_code_required':True,
+                 'automatic_g_rollback_permitted':False,'backup_completion_sha256':self.p['backup_completion_sha256']},
+                 'ORIGINAL_START_FLOOR_CHANGED')
+            boundaries=A.parse(A.read(self.stage/'cutover-boundaries.json',private=True))
+            for role,name in (('fox','fox'),('converter','forms2apex-mcp')):
+                self.require_stopped(A.BASE[name][0],boundaries['retained_names'][role],A.BASE[name][1])
+            converter=A.inspect_container(self.created['candidates']['converter']['id'])
+            need(converter['Name'].lstrip('/')=='forms2apex-mcp' and converter['State']['Running'] is True
+                 and type(converter['State']['Pid']) is int and converter['State']['Pid']>0
+                 and configuration_matches(A,converter,boundaries['new']['converter']),
+                 'FORWARD_CONVERTER_NOT_EXACT_RUNNING')
+            exited=A.parse(A.read(self.stage/'cutover-start-converter-create-exit.json',private=True))
+            intent=A.parse(A.read(self.stage/'cutover-start-converter-create-intent.json',private=True))
+            need(exited.get('exit_code')==0 and exited.get('observed_original_process') is True
+                 and intent.get('plan_sha256')==self.p['plan_sha256']
+                 and intent.get('argv_sha256')==sha(canonical(['/usr/bin/systemctl','--user','start','forms2apex-mcp.service'])),
+                 'ORIGINAL_CONVERTER_START_NOT_RECONCILED')
+            fox=A.inspect_container(self.created['candidates']['fox']['id']);require_never_started(fox)
+            need(fox['Name'].lstrip('/')=='fox' and configuration_signature(A,fox)==boundaries['new']['fox']
+                 and not (self.stage/'cutover-start-fox-create-intent.json').exists(),
+                 'FORWARD_FOX_MUST_BE_UNATTEMPTED')
+            need(service_state(A,'fox.service')['ActiveState']=='inactive'
+                 and service_state(A,'forms2apex-mcp.service')['ActiveState']=='active',
+                 'FORWARD_SERVICE_STATE_CHANGED')
+            converter_identity = {key:converter['State'][key] for key in ('Pid','StartedAt')}
+            self.record('forward-activation-intent.json',{'release_sha256':self.R,
+                'installation_sha256':self.p['installation']['sha256'],
+                'converter_restart_permitted':False,'g_rollback_permitted':False,
+                'observed_converter_process':converter_identity,
+                'automatic_replay_permitted':False,'controller_sha256':self.p['helper_sha256']})
+            self.effect('forward-start-fox',['/usr/bin/systemctl','--user','start','fox.service'])
+            self.await_started('fox','fox',boundaries['new']['fox']);self.await_fox_health()
+            self.current_pair();self.require_tls(False)
+            current_converter=A.inspect_container(self.created['candidates']['converter']['id'])
+            need({key:current_converter['State'][key] for key in ('Pid','StartedAt')}==converter_identity,
+                 'FORWARD_CONVERTER_PROCESS_CHANGED_DURING_FOX_START')
+            need(self.admission.check()['status']=='CHECKED_NOT_STARTED','NEW_HISTORY_ADMISSION_NOT_READY')
+            read_idle(A,self.created['candidates']['fox']['id'])
+            result={'status':'PROJECT_RUNNING_TLS_HELD','release_sha256':self.R,
+                'installation_sha256':self.p['installation']['sha256'],'admission_sha256':self.created['admission_sha256'],
+                'backup_completion_sha256':self.p['backup_completion_sha256'],'retained_names':boundaries['retained_names'],
+                'retained_g_ids':{role:A.BASE[name][0] for role,name in (('fox','fox'),('converter','forms2apex-mcp'))},
+                'history_checked':True,'verifier_started':False,'tls_released':False,'automatic_replay_permitted':False}
+            self.record('cutover-prepared.json',result)
+            self.record('forward-activation-complete.json',{'status':'FORWARD_ACTIVATION_CONFIRMED',
+                'prepared_sha256':sha(canonical(result)),'converter_restart_requested':False,
+                'source_or_history_relabelled':False,'automatic_replay_permitted':False})
+            return result
+
+    def install_forward_admin_reference(self, secret):
+        """Create the planned private reference, never rotate a DB credential."""
+        need(type(self) is HostCutover,'EXACT_FORWARD_CONTROLLER_REQUIRED')
+        with self.A.held_stage(self.stage):
+            self.local_guards();self.current_pair();self.require_tls(False);self._backup()
+            prepared=self.A.parse(self.A.read(self.stage/'cutover-prepared.json',private=True))
+            need(prepared['status']=='PROJECT_RUNNING_TLS_HELD' and prepared['release_sha256']==self.R,
+                 'FORWARD_PREPARED_RECORD_REQUIRED')
+            self.admission.provider.check_public_mounts()
+            need(type(secret)is str and re.fullmatch(r'[A-Za-z0-9_!#%+.,:=?@^*-]{12,128}',secret),
+                 'PROTECTED_ADMIN_VALUE_INVALID')
+            target=Path(self.provider['admin_secret_file'])
+            need(str(target)=='/home/opc/.config/fox-operator-secrets/admin-password'
+                 and not target.exists() and not target.is_symlink(), 'NEW_ADMIN_REFERENCE_REQUIRED')
+            self.record('forward-admin-reference-intent.json',{'target':str(target),
+                'secret_value_recorded':False,'automatic_replay_permitted':False})
+            raw=(secret+'\n').encode('ascii');self.A.create_file(target,raw)
+            need(self.A.read(target,private=True)==raw,'ADMIN_REFERENCE_READBACK_UNCONFIRMED')
+            result={'status':'PROTECTED_ADMIN_REFERENCE_INSTALLED','secret_value_returned':False,
+                'database_credential_changed':False,'automatic_replay_permitted':False}
+            self.record('forward-admin-reference-complete.json',result)
+            return result
+
     def current_pair(self):
         A = self.A
         boundaries = A.parse(A.read(self.stage/'cutover-boundaries.json',private=True))
         for role,name in (('fox','fox'),('converter','forms2apex-mcp')):
             value = A.inspect_container(name)
             need(value['Id'] == self.created['candidates'][role]['id'] and value['State']['Running'] is True
-                 and configuration_signature(A,value) == boundaries['new'][role],'ACTIVE_PAIRED_RUNTIME_CHANGED')
+                 and configuration_matches(A,value,boundaries['new'][role]),'ACTIVE_PAIRED_RUNTIME_CHANGED')
             self.require_stopped(A.BASE[name][0],boundaries['retained_names'][role],A.BASE[name][1])
         converter = A.inspect_container('forms2apex-mcp')
         need(converter['NetworkSettings']['Networks']['forms2apex']['IPAddress'] == '10.89.1.3',
@@ -590,7 +757,7 @@ with store._db(False) as db:
         need(not (self.stage/'public-release-intent.json').exists(),'PUBLIC_RELEASE_ALREADY_ATTEMPTED_NO_REPLAY')
         need(self.admission.check()['status'] == 'CHECKED_NOT_STARTED','NEW_HISTORY_ADMISSION_NOT_READY')
         read_idle(A,self.created['candidates']['fox']['id'])
-        path = Path(__file__).with_name('project_release_readiness.py');raw = A.read(path,private=True)
+        path = Path(__file__).with_name('project_release_readiness-'+READINESS_SHA+'.py');raw = A.read(path,private=True)
         need(sha(raw) == READINESS_SHA,'READINESS_HELPER_CHANGED')
         spec = importlib.util.spec_from_file_location('_reviewed_paired_readiness',path)
         readiness = importlib.util.module_from_spec(spec);sys.modules[spec.name] = readiness
@@ -613,10 +780,16 @@ with store._db(False) as db:
             'installation_sha256':self.p['installation']['sha256'],'unit_sha256':sha(raw),
             'readiness_sha256':sha(canonical(observed)),'automatic_replay_permitted':False})
         self.local_guards();A.create_file(unit,raw)
+        verify_service_unit(A,unit)
         self.effect('verifier-reload',['/usr/bin/systemctl','--user','daemon-reload'])
         self.effect('verifier-enable',['/usr/bin/systemctl','--user','enable',unit.name])
         self.effect('verifier-start',['/usr/bin/systemctl','--user','start',unit.name])
         witness = self.first_idle()
+        return self.finish_public(raw,witness)
+
+    def finish_public(self,raw,witness):
+        A = self.A
+        unit = Path('/home/opc/.config/systemd/user/fox-product-verifier.service')
         self.record('operator-startup.json',witness)
         need(A.read(unit,private=True) == raw and self.admission.check()['status'] == 'CHECKED_NOT_STARTED',
              'OPERATOR_OR_HISTORY_CHANGED_BEFORE_PUBLIC_RELEASE')
@@ -631,6 +804,77 @@ with store._db(False) as db:
             'business_acceptance_recorded':False,'end_to_end_conversion_proven':False,'automatic_replay_permitted':False}
         self.record('public-release-complete.json',result)
         return result
+
+    def resume_failed_verifier_setting(self):
+        """Repair only the proven parse rejection, never an executed verifier."""
+        A = self.A
+        with A.held_stage(self.stage):
+            self.local_guards();self.current_pair();self.require_tls(False);self._backup()
+            need(not any((self.stage/name).exists() for name in (
+                'verifier-setting-repair-intent.json','operator-startup.json','public-release-complete.json')),
+                'VERIFIER_REPAIR_ALREADY_ATTEMPTED_NO_REPLAY')
+            unit = Path('/home/opc/.config/systemd/user/fox-product-verifier.service')
+            before = A.read(unit,private=True)
+            raw = ordered_service_unit(self.service,self.admission,Path(self.p['installation']['path']))
+            directory = str(self.admission.source_root)
+            expected_before = raw.replace(('WorkingDirectory='+directory+'\n').encode(),
+                ('WorkingDirectory="'+directory+'"\n').encode(),1)
+            intent = A.parse(A.read(self.stage/'public-release-intent.json',private=True))
+            need(before==expected_before and before!=raw and intent=={
+                'release_sha256':self.R,'installation_sha256':self.p['installation']['sha256'],
+                'unit_sha256':sha(before),'readiness_sha256':sha(A.read(self.stage/'paired-readiness.json',private=True)),
+                'automatic_replay_permitted':False},'EXACT_FAILED_UNIT_REQUIRED')
+            for action,code in (('reload',0),('enable',0),('start',1)):
+                recorded = A.parse(A.read(self.stage/('cutover-verifier-'+action+'-create-exit.json'),private=True))
+                need(recorded.get('exit_code')==code and recorded.get('observed_original_process') is True,
+                     'EXACT_FAILED_VERIFIER_ACTION_REQUIRED')
+                request = A.parse(A.read(self.stage/('cutover-verifier-'+action+'-create-intent.json'),private=True))
+                argv = ['/usr/bin/systemctl','--user']+(['daemon-reload'] if action=='reload' else [action,unit.name])
+                need(request.get('plan_sha256')==self.p['plan_sha256']
+                     and request.get('argv_sha256')==sha(canonical(argv)),'FAILED_VERIFIER_ACTION_CHANGED')
+            state = service_state(A,unit.name)
+            need(state['LoadState']=='bad-setting' and state['ActiveState']=='inactive'
+                 and state['SubState']=='dead' and state['MainPID']=='0','VERIFIER_PARSE_REJECTION_REQUIRED')
+            journal = self.admission.provider.path('journal')/self.R[:16]
+            need(not journal.exists() and not journal.is_symlink(),'VERIFIER_EXECUTION_REQUIRES_RECONCILIATION')
+            need(self.admission.check()['status']=='CHECKED_NOT_STARTED','NEW_HISTORY_ADMISSION_NOT_READY')
+            read_idle(A,self.created['candidates']['fox']['id'])
+            # Actual host parser first. Preserve the failed bytes and all old
+            # intents/exits. The app pair and completed enable stay untouched.
+            candidate = unit.with_name('fox-product-verifier-setting-'+sha(raw)+'.service')
+            if candidate.exists() or candidate.is_symlink():
+                need(A.read(candidate,private=True)==raw,'EXISTING_UNEXECUTED_UNIT_CANDIDATE_CHANGED')
+            else:
+                A.create_file(candidate,raw)
+            verify_service_unit(A,candidate)
+            self.record('verifier-unit-before-setting-repair.json',{
+                'sha256':sha(before),'bytes_base64':base64.b64encode(before).decode()})
+            self.record('verifier-setting-repair-intent.json',{
+                'release_sha256':self.R,'parent_intent_sha256':sha(canonical(intent)),
+                'old_unit_sha256':sha(before),'new_unit_sha256':sha(raw),'automatic_replay_permitted':False})
+            self.local_guards();self.current_pair();self.require_tls(False)
+            need(A.read(unit,private=True)==before and A.read(candidate,private=True)==raw,
+                 'UNIT_CHANGED_BEFORE_SETTING_REPAIR')
+            os.replace(candidate,unit)
+            self.effect('verifier-setting-repair-reload',['/usr/bin/systemctl','--user','daemon-reload'])
+            state = service_state(A,unit.name)
+            need(state['LoadState']=='loaded' and state['ActiveState']=='inactive' and state['MainPID']=='0',
+                 'REPAIRED_VERIFIER_UNIT_NOT_LOADED')
+            self.effect('verifier-setting-repair-start',['/usr/bin/systemctl','--user','start',unit.name])
+            witness = self.first_idle()
+            self.record('verifier-setting-repair-complete.json',{
+                'old_unit_sha256':sha(before),'new_unit_sha256':sha(raw),'operator_process':witness['identity'],
+                'parent_failed_start_replayed':False,'automatic_replay_permitted':False})
+            path = Path(__file__).with_name('project_release_readiness-'+READINESS_SHA+'.py')
+            source = A.read(path,private=True);need(sha(source)==READINESS_SHA,'READINESS_HELPER_CHANGED')
+            spec = importlib.util.spec_from_file_location('_repaired_release_readiness',path)
+            readiness = importlib.util.module_from_spec(spec);sys.modules[spec.name]=readiness
+            exec(compile(source,str(path),'exec'),readiness.__dict__)
+            observed = readiness.run(A,self.plan,self.release,self.created['candidates'])
+            need(observed.get('status')=='READ_ONLY_CONNECTIVITY_CONFIRMED' and observed.get('release_sha256')==self.R,
+                 'PAIRED_READINESS_NOT_CONFIRMED')
+            self.record('paired-readiness-after-setting-repair.json',observed)
+            return self.finish_public(raw,witness)
 
     def recover_prestart(self):
         """Explicit availability recovery only; never revive the retired G pump."""
@@ -788,6 +1032,87 @@ def execute_under_lock(context, capture_authority, *, plan_raw, plan_sha256, ins
     need(result.get('status') == {'stop':'G_STOPPED_TLS_HELD','activate':'PROJECT_RUNNING_TLS_HELD',
          'recover':'G_AVAILABILITY_RECOVERED_OPERATOR_REMAINS_RETIRED','release':'PAIRED_SERVICE_ACTIVATED'}[phase]
          and result.get('automatic_replay_permitted') is False,'CUTOVER_RESULT_UNCONFIRMED_NO_REPLAY')
+    return result
+
+
+def execute_forward_under_lock(context, *, operation, plan_raw, plan_sha256, installation_reference,
+        snapshot_configuration_raw, snapshot_configuration_sha256, backup_operation,
+        backup_completion_sha256, restore_operation, restore_completion_sha256,
+        parent_result_sha256, expected_source_sha256, apply=False, admin_value=None):
+    """Fresh retired-history leases for a specific reconciled forward state.
+
+    This never mints/reuses an expired snapshot capability and exposes no backup,
+    stop, rename, converter restart or G rollback action. Host-side genuine
+    archive/restore checks and the actual stage lock govern every continuation.
+    """
+    need(apply is True and operation in ('finish-activation','install-admin-reference','release','repair-verifier-setting')
+         and SHA.fullmatch(expected_source_sha256 or '') and SHA.fullmatch(parent_result_sha256 or ''),
+         'EXPLICIT_FORWARD_CONTINUATION_REQUIRED')
+    need((admin_value is None) if operation!='install-admin-reference' else
+         (type(admin_value)is str and re.fullmatch(r'[A-Za-z0-9_!#%+.,:=?@^*-]{12,128}',admin_value)),
+         'FORWARD_SECRET_BOUNDARY_INVALID')
+    source=Path(__file__).read_bytes()
+    need(sha(source)==expected_source_sha256 and sha(plan_raw)==plan_sha256
+         and sha(snapshot_configuration_raw)==snapshot_configuration_sha256,
+         'FORWARD_SOURCE_OR_CONFIGURATION_CHANGED')
+    from qa.operator.preactivation_retirement import PreActivationRetirementContext
+    need(type(context) is PreActivationRetirementContext,'REAL_FORWARD_WINDOWS_CONTEXT_REQUIRED')
+    try:
+        context.require_active()
+        PreActivationRetirementContext._leases(context)  # Genuine fd leases, not an instance callback.
+    except Exception:
+        raise CutoverError('ACTUAL_RETIRED_HISTORY_LEASES_REQUIRED') from None
+    config=json.loads(snapshot_configuration_raw)
+    need(config.get('mode')=='pre-hosted-g' and config.get('operator_release_sha256')==context.release
+         and config['runtime']['fox']==context.configuration['infrastructure']['fox']
+         and config['runtime']['converter']==context.configuration['infrastructure']['forms2apex-mcp']
+         and sha(context.source_files()['preactivation/preactivation_retirement.py'])==config['authority_source_sha256'],
+         'FORWARD_RETIRED_SOURCE_BINDING_CHANGED')
+    need(SHA.fullmatch(backup_completion_sha256 or '') and SHA.fullmatch(restore_completion_sha256 or ''),
+         'EXACT_FORWARD_BACKUP_AND_RESTORE_REQUIRED')
+    install=PurePosixPath(installation_reference['path'])
+    need(install.is_absolute() and str(install)==installation_reference['path'] and '..' not in install.parts,
+         'FORWARD_INSTALLATION_PATH_INVALID')
+    helper_path=str(install.parent/('cutover_project_release-'+expected_source_sha256+'.py'))
+    packet={'schema_version':1,'scope':SCOPE,'phase':'release' if operation in ('release','repair-verifier-setting') else 'activate',
+        'plan':json.loads(plan_raw),'plan_sha256':plan_sha256,'installation':installation_reference,
+        'snapshot_configuration':base64.b64encode(snapshot_configuration_raw).decode(),
+        'snapshot_configuration_sha256':snapshot_configuration_sha256,'backup_operation':backup_operation,
+        'backup_completion_sha256':backup_completion_sha256,'restore_operation':restore_operation,
+        'restore_completion_sha256':restore_completion_sha256,'helper_sha256':expected_source_sha256}
+    envelope={'operation':operation,'packet':packet,'helper_path':helper_path,
+        'parent_result_sha256':parent_result_sha256,'admin_value':admin_value}
+    loader=r'''
+import hashlib,importlib.util,json,pathlib,re,sys
+value=json.load(sys.stdin);p=value['packet'];path=pathlib.Path(value['helper_path']);raw=path.read_bytes()
+if hashlib.sha256(raw).hexdigest()!=p['helper_sha256']:raise RuntimeError('FORWARD_HOST_SOURCE_CHANGED')
+spec=importlib.util.spec_from_file_location('leased_forward_controller',path)
+m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;exec(compile(raw,str(path),'exec'),m.__dict__)
+try:
+ h=m.HostCutover(p);op=value['operation']
+ if op=='finish-activation':result=h.resume_after_converter_start()
+ elif op=='install-admin-reference':result=h.install_forward_admin_reference(value['admin_value'])
+ elif op=='release':result=h.execute()
+ elif op=='repair-verifier-setting':result=h.resume_failed_verifier_setting()
+ else:raise RuntimeError('FORWARD_OPERATION_INVALID')
+except BaseException as error:
+ code=str(error)
+ result={'status':'ATTENTION','code':code if re.fullmatch('[A-Z0-9_]{1,160}',code) else 'FORWARD_INTERNAL_FAILURE_DETAILS_WITHHELD',
+  'automatic_replay_permitted':False,'next_action':'RECONCILE_SAME_FORWARD_STEP_NO_REPLAY'}
+print(json.dumps(result,sort_keys=True))
+'''
+    wire=base64.b64encode(loader.encode())+b'\n'+canonical(envelope)
+    raw=context.components.clean.run_process([*context.components.clean.SSH,config['python']['path']+
+        " -I -B -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))'"],data=wire,timeout=900)
+    context.require_active();PreActivationRetirementContext._leases(context)
+    result=json.loads(raw)
+    expected={'finish-activation':'PROJECT_RUNNING_TLS_HELD','install-admin-reference':'PROTECTED_ADMIN_REFERENCE_INSTALLED',
+              'release':'PAIRED_SERVICE_ACTIVATED','repair-verifier-setting':'PAIRED_SERVICE_ACTIVATED'}[operation]
+    if result.get('status')=='ATTENTION':
+        code=result.get('code','')
+        raise CutoverError(code if type(code)is str and re.fullmatch('[A-Z0-9_]{1,160}',code) else 'FORWARD_OUTCOME_UNCONFIRMED_NO_REPLAY')
+    need(result.get('status')==expected and result.get('automatic_replay_permitted') is False,
+         'FORWARD_OUTCOME_UNCONFIRMED_NO_REPLAY')
     return result
 
 

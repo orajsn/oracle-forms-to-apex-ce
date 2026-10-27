@@ -113,3 +113,42 @@ def credentials(path):
     need(all(not any(ord(char) < 32 or 0xD800 <= ord(char) <= 0xDFFF for char in text)
              for text in value.values()), 'NORMAL_LOGIN_CREDENTIALS_REQUIRED')
     return value
+
+
+def dpapi_credentials(path,username):
+    """Windows user-scoped password reference; never persist a plaintext file."""
+    need(os.name=='nt','WINDOWS_DPAPI_REQUIRED')
+    need(type(username)is str and 0<len(username)<=100 and not any(ord(c)<32 or 0xD800<=ord(c)<=0xDFFF for c in username),
+         'NORMAL_LOGIN_CREDENTIALS_REQUIRED')
+    path=private(path);encrypted=read(path,maximum=32768)
+    buffer=ctypes.create_unicode_buffer(32768)
+    count=ctypes.windll.kernel32.GetWindowsDirectoryW(buffer,len(buffer))
+    need(0<count<len(buffer),'WINDOWS_SECURITY_API_UNAVAILABLE')
+    executable=Path(buffer.value)/'System32/WindowsPowerShell/v1.0/powershell.exe'
+    program=r'''$ErrorActionPreference='Stop'
+$ProgressPreference='SilentlyContinue'
+try {
+ $v=([Console]::In.ReadToEnd()|ConvertFrom-Json)
+ $secure=ConvertTo-SecureString ([IO.File]::ReadAllText($v.path))
+ $credential=New-Object Management.Automation.PSCredential($v.username,$secure)
+ $value=@{username=$v.username;password=$credential.GetNetworkCredential().Password}|ConvertTo-Json -Compress
+ [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+ [Console]::Out.Write($value)
+} catch { [Console]::Error.Write('DPAPI_LOGIN_UNAVAILABLE');exit 1 }
+'''
+    environment={key:value for key,value in os.environ.items() if key.upper() in {'PATH','PATHEXT','SYSTEMROOT','WINDIR','COMSPEC','TEMP','TMP'}}
+    environment.update(SystemRoot=buffer.value,WINDIR=buffer.value)
+    try:
+        result=subprocess.run([str(executable),'-NoProfile','-NonInteractive','-EncodedCommand',
+            base64.b64encode(program.encode('utf-16-le')).decode()],
+            input=json.dumps({'path':str(path),'username':username}).encode(),capture_output=True,timeout=20,
+            env=environment,creationflags=subprocess.CREATE_NO_WINDOW)
+        need(result.returncode==0 and not result.stderr.strip(),'DPAPI_LOGIN_UNAVAILABLE')
+        value=object_bytes(result.stdout,maximum=8192)
+    except Exception:
+        raise JourneyError('DPAPI_LOGIN_UNAVAILABLE') from None
+    need(read(path,maximum=32768)==encrypted,'DPAPI_REFERENCE_CHANGED_DURING_READ')
+    need(set(value)=={'username','password'} and value['username']==username and type(value['password'])is str
+         and 0<len(value['password'])<=256 and not any(ord(c)<32 or 0xD800<=ord(c)<=0xDFFF for c in value['password']),
+         'NORMAL_LOGIN_CREDENTIALS_REQUIRED')
+    return value

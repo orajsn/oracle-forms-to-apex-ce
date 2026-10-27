@@ -378,6 +378,32 @@ def orchestration_fixture(monkeypatch):
     monkeypatch.setattr(A,'read',lambda path,**kwargs:filesystem[Path(path)])
     calls=[];outputs={'fox':good_fox(),'converter':good_target(),'opaf':good_mcp()}
     def transport(argv,**kwargs):
+        if '/usr/bin/curl' in argv:
+            # Real protocol/parser/result validation, simulated curl HTTP edge.
+            options={};headers=[]
+            for line in kwargs['input'].decode().splitlines():
+                key,value=line.split(' = ',1);value=json.loads(value)
+                if key=='header':headers.append(value)
+                else:options[key]=value
+            if not any(row[0]=='opaf' for row in calls):calls.append(('opaf',argv,kwargs,{'bearer_token':SECRET}))
+            authenticated='Authorization: Bearer '+SECRET in headers
+            status=200;extra={};body=b''
+            if not authenticated:status=401;body=b'{}'
+            elif options['request']=='DELETE':status=204 if outputs['opaf']['session_termination_confirmed'] else 405
+            else:
+                packet=json.loads(options['data']);method=packet['method']
+                if method=='initialize':
+                    extra['Mcp-Session-Id']='synthetic-session'
+                    value={'protocolVersion':'2025-03-26','serverInfo':{'name':'JSN Forms-to-APEX Converter'},'capabilities':{'tools':{}}}
+                elif method=='notifications/initialized':status=202;value=None
+                else:
+                    names=list(M.EXPECTED_TOOLS)
+                    if outputs['opaf']['tool_count']!=5:names.append('unexpected-sixth-tool')
+                    value={'tools':[{'name':name} for name in names]}
+                if value is not None:body=json.dumps({'jsonrpc':'2.0','id':packet['id'],'result':value}).encode()
+            head='HTTP/1.1 '+str(status)+' Synthetic\r\nContent-Type: application/json\r\n'
+            head+=''.join(key+': '+value+'\r\n' for key,value in extra.items())+'\r\n'
+            return SimpleNamespace(returncode=0,stderr=b'',stdout=head.encode()+body)
         header,payload=kwargs['input'].split(b'\n',1);header=json.loads(header);payload=json.loads(payload)
         code=base64.b64decode(header['code']).decode()
         role={M.FOX_PROGRAM:'fox',M.TARGET_PROGRAM:'converter',M.MCP_PROGRAM:'opaf'}[code]

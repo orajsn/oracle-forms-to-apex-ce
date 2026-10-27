@@ -78,6 +78,14 @@ the repository. Do not pass its contents as arguments, environment variables or
 chat messages. The SSH reference must identify the existing dedicated POC key,
 not the OCI signing key.
 
+On Windows, prefer the existing user-scoped DPAPI password reference to avoid
+creating a plaintext credential file. Use `--credentials-dpapi <private-file>`
+and `--username <normal-FOX-user>` instead of `--credentials`. The reader checks
+the owner-only ACL, decrypts in a hidden bounded child, passes the value only
+through protected pipes, and never prints or saves the password. It does not
+rotate credentials or repair existing permissions. JSON and DPAPI modes are
+mutually exclusive.
+
 ```powershell
 & .\fox\.venv\Scripts\python.exe -I -B .\qa\product-project-journey\cli.py run `
   --plan .\work\journey-plan-01\plan.json --plan-sha256 $FoxJourneyPlanSha `
