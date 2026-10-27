@@ -5,6 +5,8 @@ import copy
 import importlib.util
 import io
 import json
+import subprocess
+import sys
 from pathlib import Path
 import tarfile
 
@@ -27,7 +29,8 @@ r = module("build_project_release")
 
 def inputs():
     return {
-        "files": {"fox/fox/__init__.py": b"", "fox/fox/project_conversion.py": b"PROFILE_ID='native-project-v1'\n",
+        "files": {**{'fox/fox/'+name:b'# synthetic pure contract\n' for name in p.QA_CONTRACT_FILES},
+                  "fox/fox/__init__.py": b"", "fox/fox/project_conversion.py": b"PROFILE_ID='native-project-v1'\n",
                   "qa/operator/hosted_service.py": b"# synthetic service\n",
                   "deployment/project-opaf-profile-v2.json": (HERE / "project-opaf-profile-v2.json").read_bytes()},
         "ui": {"index.html": b"<html>synthetic</html>", "assets/main-a.js": b"// synthetic"},
@@ -216,3 +219,59 @@ def test_existing_build_intent_never_replayed(monkeypatch):
     monkeypatch.setattr(r, "command", lambda *args, **kwargs: pytest.fail("must not call Podman"))
     with pytest.raises(r.StageError, match="EXISTING_BUILD_MUST_NOT_BE_REPLAYED"):
         r.build("a" * 64, "fox", apply=True)
+
+
+def test_converter_context_contains_exact_six_file_pure_qa_closure(tmp_path):
+    output,result=prepared(tmp_path)
+    files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
+    assert p.QA_CONTRACT_FILES==r.QA_CONTRACT_FILES
+    for name in p.QA_CONTRACT_FILES:
+        assert files['build/converter/qa-contract/'+name]==files['bundle/fox/fox/'+name]
+    recipe=p.containerfiles()['converter']
+    assert b'COPY --chown=10001:10001 qa-contract /opt/forms2apex/converter/fox' in recipe
+    assert b'from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile' in recipe
+
+
+@pytest.mark.parametrize('name',p.QA_CONTRACT_FILES)
+def test_missing_contract_source_rejects_before_output_creation(tmp_path,name):
+    value=inputs();del value['files']['fox/fox/'+name]
+    with pytest.raises(p.BuildError,match='COMPLETE_QA_CONTRACT_SOURCE_REQUIRED'):
+        p.materialize(**value,output_root=tmp_path/'rejected')
+    assert not (tmp_path/'rejected').exists()
+
+
+def test_rehashed_context_cannot_replace_the_bound_qa_planner(tmp_path):
+    output,result=prepared(tmp_path)
+    files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
+    files['build/converter/qa-contract/project_qa_plan.py']+=b'# changed\n'
+    with pytest.raises(r.StageError,match='BUILD_CONTEXT_DIFFERS_FROM_SOURCE_BUNDLE'):
+        r.validate_files(reseal(files))
+
+
+def test_actual_contract_imports_without_frontend_package_or_development_path(tmp_path):
+    folder=tmp_path/'fox';folder.mkdir()
+    for name in p.QA_CONTRACT_FILES:(folder/name).write_bytes((HERE.parent/'fox/fox'/name).read_bytes())
+    code="""import pathlib,sys
+sys.path.insert(0,sys.argv[1])
+from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile,ProjectQaPlanError
+import fox.project_qa_plan as q
+assert pathlib.Path(q.__file__).resolve()==pathlib.Path(sys.argv[1])/'fox/project_qa_plan.py'
+assert 'fox.app' not in sys.modules and 'fastapi' not in sys.modules
+try:derive_project_qa_plan({},'a'*64,{},'b'*64)
+except ProjectQaPlanError:pass
+else:raise AssertionError('Invalid metadata must reject')
+print('PURE_QA_CLOSURE_IMPORTED_NO_FRONTEND')
+"""
+    result=subprocess.run([sys.executable,'-I','-B','-c',code,str(tmp_path)],cwd=tmp_path,capture_output=True,timeout=20)
+    assert result.returncode==0,result.stderr.decode()
+    assert result.stdout.strip()==b'PURE_QA_CLOSURE_IMPORTED_NO_FRONTEND'
+
+
+def test_retained_original_archive_still_validates_without_new_projection():
+    # This checks historical compatibility, not readiness of its missing QA
+    # dependency. The public checkout intentionally excludes private bundles.
+    root=HERE.parent/'work/b27a'
+    if not (root/'paired-source.tar').is_file():pytest.skip('Retained private historical build fixture')
+    original=json.loads((root/'result.json').read_bytes())
+    files,_=r.load_archive((root/'paired-source.tar').read_bytes(),original['archive_sha256'])
+    assert not any(name.startswith('build/converter/qa-contract/') for name in files)

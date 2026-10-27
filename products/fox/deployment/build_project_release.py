@@ -36,6 +36,8 @@ PARENT = Path("/home/opc/.local/share/fox-project-builds")
 MAX_ARCHIVE = 180_000_000
 MAX_FILE = 8_000_000
 PUBLIC_PROFILE = "bundle/deployment/project-opaf-profile-v2.json"
+QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conversion.py',
+                     'native_qa_plan.py','project_qa_plan.py')
 
 
 class StageError(RuntimeError):
@@ -156,6 +158,12 @@ def validate_files(files):
         recipe = "deployment/Containerfile.project-" + role
         need(recipe in bundle, "BOUND_IMAGE_RECIPE_REQUIRED")
         contexts["build/" + role + "/Containerfile"] = bundle[recipe]
+    # Retained historical archives have no QA-contract COPY instruction and
+    # keep their exact older context. New recipes require the full fixed pure
+    # closure, projected byte-for-byte from the caller-pinned source bundle.
+    if b'COPY --chown=10001:10001 qa-contract /opt/forms2apex/converter/fox\n' in bundle['deployment/Containerfile.project-converter']:
+        need(all('fox/fox/'+name in bundle for name in QA_CONTRACT_FILES),'COMPLETE_QA_CONTRACT_SOURCE_REQUIRED')
+        contexts.update({'build/converter/qa-contract/'+name:bundle['fox/fox/'+name] for name in QA_CONTRACT_FILES})
     need({name: raw for name, raw in files.items() if name.startswith("build/")} == contexts,
          "BUILD_CONTEXT_DIFFERS_FROM_SOURCE_BUNDLE")
     return files, manifest

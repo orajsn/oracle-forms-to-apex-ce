@@ -42,6 +42,8 @@ QA_FILES = (
 )
 MAX_FILE = 8_000_000
 MAX_TOTAL = 80_000_000
+QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conversion.py',
+                     'native_qa_plan.py','project_qa_plan.py')
 
 
 class BuildError(RuntimeError):
@@ -204,8 +206,9 @@ RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.
 USER root
 RUN python3.11 -I -B -c "import pathlib,shutil; p=pathlib.Path('/opt/forms2apex/converter/forms2apex'); assert p.is_dir() and not p.is_symlink() and p.resolve()==p; shutil.rmtree(p)"
 COPY --chown=10001:10001 converter /opt/forms2apex/converter
+COPY --chown=10001:10001 qa-contract /opt/forms2apex/converter/fox
 USER 10001
-RUN python3.11 -B -c "import importlib.metadata as m; import forms2apex.project_workflow,fox_source_contract.project_conversion,defusedxml.ElementTree; assert {{n:m.version(n) for n in ('oci','fastmcp','defusedxml')}}=={{'oci':'2.188.0','fastmcp':'3.4.4','defusedxml':'0.7.1'}}"
+RUN python3.11 -B -c "import importlib.metadata as m; import forms2apex.project_workflow,fox_source_contract.project_conversion,defusedxml.ElementTree; from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile; assert {{n:m.version(n) for n in ('oci','fastmcp','defusedxml')}}=={{'oci':'2.188.0','fastmcp':'3.4.4','defusedxml':'0.7.1'}}"
 """
     return {"fox": fox.encode(), "converter": converter.encode()}
 
@@ -213,6 +216,7 @@ RUN python3.11 -B -c "import importlib.metadata as m; import forms2apex.project_
 def materialize(*, files, ui, converter, output_root, build_evidence):
     output_root = Path(output_root)
     need(not output_root.exists() and not output_root.is_symlink(), "OUTPUT_ALREADY_EXISTS")
+    need(all('fox/fox/'+name in files for name in QA_CONTRACT_FILES), 'COMPLETE_QA_CONTRACT_SOURCE_REQUIRED')
     bundle = dict(files)
     bundle.update({"converter/" + name: raw for name, raw in converter.items()})
     bundle.update({"fox/dist/" + name: raw for name, raw in ui.items()})
@@ -230,6 +234,7 @@ def materialize(*, files, ui, converter, output_root, build_evidence):
                           for name, raw in files.items() if name.startswith("fox/fox/")})
     archive_files.update({"build/fox/dist/" + name: raw for name, raw in ui.items()})
     archive_files.update({"build/converter/converter/" + name: raw for name, raw in converter.items()})
+    archive_files.update({'build/converter/qa-contract/'+name:files['fox/fox/'+name] for name in QA_CONTRACT_FILES})
     archive_files["source-inventory.json"] = inventory_raw
     archive_files["build-evidence.json"] = canonical(build_evidence)
     manifest = {"schema_version": 1, "scope": "fox-paired-build-archive-v1",

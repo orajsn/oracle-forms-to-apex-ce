@@ -37,8 +37,13 @@ The existing-lab bootstrap completed on 27 October 2026: the exact private
 working roots were created with mode 0700, the verifier recorded a genuine
 matched first idle claim, fresh connectivity checks passed, and public HTTPS
 was released. No application container, import or unit repair was replayed.
-The shipped multi-form UI proof is a separate in-progress check, not implied
-by activation. Fresh customer installation remains unfinished.
+The first shipped multi-form UI proof generated one application from both forms
+but failed its clean-verification precheck: the deployed converter lacked the
+shared pure QA module. The verifier stopped with the known claim retained, and
+the browser observation later timed out. Public UI access is available, but
+end-to-end technical readiness is not established. The corrected image context
+is prepared; controlled image replacement and same-job recovery remain required.
+Fresh customer installation remains unfinished.
 
 The installer now prepares only absent native/project working roots and checks
 existing directories without changing their contents or permissions. The
