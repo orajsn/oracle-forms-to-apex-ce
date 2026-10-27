@@ -775,6 +775,7 @@ with store._db(False) as db:
              and service_state(A,unit.name)['LoadState'] == 'not-found','VERIFIER_UNIT_ALREADY_PRESENT')
         journal = self.admission.provider.path('journal')/self.R[:16]
         need(not journal.exists() and not journal.is_symlink(),'VERIFIER_ALREADY_HAS_STATE_RECONCILE_FIRST')
+        self.prepare_working_roots()
         raw = ordered_service_unit(self.service,self.admission,Path(self.p['installation']['path']))
         self.record('public-release-intent.json',{'release_sha256':self.R,
             'installation_sha256':self.p['installation']['sha256'],'unit_sha256':sha(raw),
@@ -804,6 +805,96 @@ with store._db(False) as db:
             'business_acceptance_recorded':False,'end_to_end_conversion_proven':False,'automatic_replay_permitted':False}
         self.record('public-release-complete.json',result)
         return result
+
+    def prepare_working_roots(self):
+        """Installation setup only: create absent configured roots, never chmod data."""
+        A = self.A
+        root = Path(self.provider['state_root'])
+        A.private_dir(root)
+        paths = {}
+        for kind,leaf in (('native','clean-install'),('project','project-clean-install')):
+            path = self.admission.provider.path(kind)
+            need(path==root/leaf and path.parent.resolve()==root,'OPERATOR_WORKING_ROOT_CHANGED')
+            if path.exists() or path.is_symlink():
+                A.private_dir(path)
+            paths[kind] = path
+        # Complete all path checks before the first create. Only absent exact
+        # configured directories are created; existing contents/ACLs stay intact.
+        for path in paths.values():
+            if not path.exists():
+                path.mkdir(mode=0o700)
+                A.sync(root)
+            A.private_dir(path)
+        return {kind:str(path) for kind,path in paths.items()}
+
+    def observe_readiness(self):
+        path = Path(__file__).with_name('project_release_readiness-'+READINESS_SHA+'.py')
+        raw = self.A.read(path,private=True)
+        need(sha(raw)==READINESS_SHA,'READINESS_HELPER_CHANGED')
+        spec = importlib.util.spec_from_file_location('_continued_release_readiness',path)
+        module = importlib.util.module_from_spec(spec);sys.modules[spec.name]=module
+        exec(compile(raw,str(path),'exec'),module.__dict__)
+        result = module.run(self.A,self.plan,self.release,self.created['candidates'])
+        need(result.get('status')=='READ_ONLY_CONNECTIVITY_CONFIRMED' and result.get('release_sha256')==self.R,
+             'PAIRED_READINESS_NOT_CONFIRMED')
+        return result
+
+    def resume_failed_verifier_storage(self):
+        """One explicit continuation after exit 2 with no journal/claim.
+
+        Unit repair, activation, enable, backup/restore and imports are not
+        repeated. Unknown/prior verifier execution always requires separate
+        reconciliation, never this prerequisite-only continuation.
+        """
+        A = self.A
+        with A.held_stage(self.stage):
+            self.local_guards();self.current_pair();self.require_tls(False);self._backup()
+            need(not any((self.stage/name).exists() for name in (
+                'verifier-working-roots-intent.json','operator-startup.json','public-release-complete.json')),
+                'VERIFIER_STORAGE_CONTINUATION_ALREADY_ATTEMPTED_NO_REPLAY')
+            unit = Path('/home/opc/.config/systemd/user/fox-product-verifier.service')
+            raw = ordered_service_unit(self.service,self.admission,Path(self.p['installation']['path']))
+            need(A.read(unit,private=True)==raw,'REPAIRED_VERIFIER_UNIT_CHANGED')
+            repair = A.parse(A.read(self.stage/'verifier-setting-repair-intent.json',private=True))
+            need(repair.get('release_sha256')==self.R and repair.get('new_unit_sha256')==sha(raw),
+                 'EXACT_SETTING_REPAIR_REQUIRED')
+            for action in ('reload','start'):
+                prefix = 'cutover-verifier-setting-repair-'+action+'-create-'
+                outcome = A.parse(A.read(self.stage/(prefix+'exit.json'),private=True))
+                request = A.parse(A.read(self.stage/(prefix+'intent.json'),private=True))
+                argv = ['/usr/bin/systemctl','--user']+(['daemon-reload'] if action=='reload' else ['start',unit.name])
+                need(outcome.get('exit_code')==0 and outcome.get('observed_original_process') is True
+                     and request.get('plan_sha256')==self.p['plan_sha256']
+                     and request.get('argv_sha256')==sha(canonical(argv)),'EXACT_PRIOR_VERIFIER_START_REQUIRED')
+            state = service_state(A,unit.name)
+            need(state['LoadState']=='loaded' and state['ActiveState']=='failed'
+                 and state['SubState']=='failed' and state['MainPID']=='0','TERMINAL_FAILED_VERIFIER_REQUIRED')
+            failure = A.command(['/usr/bin/systemctl','--user','show',unit.name,
+                '-p','Result','-p','ExecMainCode','-p','ExecMainStatus']).decode().splitlines()
+            need(set(failure)=={'Result=exit-code','ExecMainCode=1','ExecMainStatus=2'},
+                 'EXACT_VERIFIER_GUARD_EXIT_REQUIRED')
+            journal = self.admission.provider.path('journal')
+            need(not journal.exists() and not journal.is_symlink(),'VERIFIER_HISTORY_REQUIRES_RECONCILIATION')
+            paths = [self.admission.provider.path(kind) for kind in ('native','project')]
+            need(all(not path.exists() and not path.is_symlink() for path in paths),
+                 'EXACT_MISSING_WORKING_ROOTS_REQUIRED')
+            need(self.admission.check()['status']=='CHECKED_NOT_STARTED','NEW_HISTORY_ADMISSION_NOT_READY')
+            read_idle(A,self.created['candidates']['fox']['id'])
+            verify_service_unit(A,unit)
+            self.record('verifier-working-roots-intent.json',{'release_sha256':self.R,
+                'unit_sha256':sha(raw),'installation_sha256':self.p['installation']['sha256'],
+                'roots':[str(path) for path in paths],'prior_journal_absent':True,'automatic_replay_permitted':False})
+            self.local_guards()
+            roots = self.prepare_working_roots()
+            self.record('verifier-working-roots-complete.json',{'roots':roots,'mode':'0700',
+                'existing_contents_changed':False,'automatic_replay_permitted':False})
+            observed = self.observe_readiness()
+            self.record('paired-readiness-after-working-roots.json',observed)
+            self.local_guards();self.current_pair();self.require_tls(False)
+            need(A.read(unit,private=True)==raw and not journal.exists(),'VERIFIER_STATE_CHANGED_BEFORE_START')
+            self.effect('verifier-working-roots-start',['/usr/bin/systemctl','--user','start',unit.name])
+            witness = self.first_idle()
+            return self.finish_public(raw,witness)
 
     def resume_failed_verifier_setting(self):
         """Repair only the proven parse rejection, never an executed verifier."""
@@ -1045,7 +1136,7 @@ def execute_forward_under_lock(context, *, operation, plan_raw, plan_sha256, ins
     stop, rename, converter restart or G rollback action. Host-side genuine
     archive/restore checks and the actual stage lock govern every continuation.
     """
-    need(apply is True and operation in ('finish-activation','install-admin-reference','release','repair-verifier-setting')
+    need(apply is True and operation in ('finish-activation','install-admin-reference','release','repair-verifier-setting','prepare-verifier-storage')
          and SHA.fullmatch(expected_source_sha256 or '') and SHA.fullmatch(parent_result_sha256 or ''),
          'EXPLICIT_FORWARD_CONTINUATION_REQUIRED')
     need((admin_value is None) if operation!='install-admin-reference' else
@@ -1074,7 +1165,7 @@ def execute_forward_under_lock(context, *, operation, plan_raw, plan_sha256, ins
     need(install.is_absolute() and str(install)==installation_reference['path'] and '..' not in install.parts,
          'FORWARD_INSTALLATION_PATH_INVALID')
     helper_path=str(install.parent/('cutover_project_release-'+expected_source_sha256+'.py'))
-    packet={'schema_version':1,'scope':SCOPE,'phase':'release' if operation in ('release','repair-verifier-setting') else 'activate',
+    packet={'schema_version':1,'scope':SCOPE,'phase':'release' if operation in ('release','repair-verifier-setting','prepare-verifier-storage') else 'activate',
         'plan':json.loads(plan_raw),'plan_sha256':plan_sha256,'installation':installation_reference,
         'snapshot_configuration':base64.b64encode(snapshot_configuration_raw).decode(),
         'snapshot_configuration_sha256':snapshot_configuration_sha256,'backup_operation':backup_operation,
@@ -1094,6 +1185,7 @@ try:
  elif op=='install-admin-reference':result=h.install_forward_admin_reference(value['admin_value'])
  elif op=='release':result=h.execute()
  elif op=='repair-verifier-setting':result=h.resume_failed_verifier_setting()
+ elif op=='prepare-verifier-storage':result=h.resume_failed_verifier_storage()
  else:raise RuntimeError('FORWARD_OPERATION_INVALID')
 except BaseException as error:
  code=str(error)
@@ -1107,7 +1199,8 @@ print(json.dumps(result,sort_keys=True))
     context.require_active();PreActivationRetirementContext._leases(context)
     result=json.loads(raw)
     expected={'finish-activation':'PROJECT_RUNNING_TLS_HELD','install-admin-reference':'PROTECTED_ADMIN_REFERENCE_INSTALLED',
-              'release':'PAIRED_SERVICE_ACTIVATED','repair-verifier-setting':'PAIRED_SERVICE_ACTIVATED'}[operation]
+              'release':'PAIRED_SERVICE_ACTIVATED','repair-verifier-setting':'PAIRED_SERVICE_ACTIVATED',
+              'prepare-verifier-storage':'PAIRED_SERVICE_ACTIVATED'}[operation]
     if result.get('status')=='ATTENTION':
         code=result.get('code','')
         raise CutoverError(code if type(code)is str and re.fullmatch('[A-Z0-9_]{1,160}',code) else 'FORWARD_OUTCOME_UNCONFIRMED_NO_REPLAY')

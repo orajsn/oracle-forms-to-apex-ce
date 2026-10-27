@@ -33,10 +33,19 @@ read-only admission does not create it. Validate ownership, mode, canonical
 paths and absence of links. Do not modify another installation's state or
 reinterpret a failed startup as an idle claim.
 
-The real lab has passed paired application/read-only connectivity checks, but
-its verifier startup is still held at this directory prerequisite. Public
-release and the installed multi-form conversion proof are not completed by
-these source changes. Fresh customer installation remains unfinished.
+The existing-lab bootstrap completed on 27 October 2026: the exact private
+working roots were created with mode 0700, the verifier recorded a genuine
+matched first idle claim, fresh connectivity checks passed, and public HTTPS
+was released. No application container, import or unit repair was replayed.
+The shipped multi-form UI proof is a separate in-progress check, not implied
+by activation. Fresh customer installation remains unfinished.
+
+The installer now prepares only absent native/project working roots and checks
+existing directories without changing their contents or permissions. The
+specific failed/no-journal continuation requires the prior guard exit and
+source-bound unit, refuses any existing journal or previous continuation,
+performs fresh readiness, and starts the verifier once. It cannot be used as
+a general retry after a conversion or database operation.
 
 ## Specific forward continuations
 

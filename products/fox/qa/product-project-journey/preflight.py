@@ -11,6 +11,29 @@ import subprocess
 from journey_contracts import canonical, need, object_bytes, validate_plan, validate_preflight
 from private_io import private
 
+SSH_NOTICE = (b'** WARNING: connection is not using a post-quantum key exchange algorithm.\n'
+    b'** This session may be vulnerable to "store now, decrypt later" attacks.\n'
+    b'** The server may need to be upgraded. See https://openssh.com/pq.html\n')
+
+
+def ssh_diagnostics_allowed(stderr):
+    # Retain strict host-key checking and all SSH settings. Accept only this
+    # measured client notice, never arbitrary stderr or a failed command.
+    return type(stderr) is bytes and stderr.replace(b'\r\n',b'\n') in (b'',SSH_NOTICE)
+
+
+SCOPE_RECEIPT = r'''
+def scope_receipt(identity,target):
+ need(type(identity) is dict and set(identity)=={'instance_id','database_id','compartment_id','region',
+  'database_db_name','instance_state','database_state','observed_at_utc'},'OCI_SCOPE_RECEIPT_INVALID')
+ need(all(identity[key]==target[key] for key in ('instance_id','database_id','compartment_id','region'))
+  and identity['instance_state']=='RUNNING' and identity['database_state']=='AVAILABLE'
+  and identity['database_db_name']=='JSNF2APEX','OCI_SCOPE_IDENTITY_CHANGED')
+ return {'instance':{'id':identity['instance_id'],'compartment_id':identity['compartment_id'],'region':identity['region']},
+  'database':{'id':identity['database_id'],'compartment_id':identity['compartment_id'],
+   'lifecycle_state':identity['database_state'],'db_name':identity['database_db_name']}}
+'''
+
 
 HOST_PREFIX = r'''
 import hashlib,json,os,pathlib,re,stat,subprocess,sys,urllib.request
@@ -63,7 +86,7 @@ need(env.get('FOX_VERIFIER_RELEASE_SHA256')==dep['release_sha256'] and env.get('
 need(not any(m['Destination']=='/app' or m['Destination'].startswith('/app/') for m in fox['Mounts']),'APPLICATION_SOURCE_MOUNT_FORBIDDEN')
 '''
 
-HOST = HOST_PREFIX + r'''
+HOST = HOST_PREFIX + SCOPE_RECEIPT + r'''
 unit='fox-product-verifier.service'
 service=dict(line.split('=',1) for line in command(['/usr/bin/systemctl','--user','show',unit,'--property=ActiveState,SubState,MainPID']).decode().splitlines())
 need(service['ActiveState']=='active' and service['SubState']=='running' and service['MainPID'].isdigit(),'OPERATOR_SERVICE_NOT_RUNNING')
@@ -84,6 +107,7 @@ need(admission.release==dep['release_sha256'] and admission.provider.raw==canoni
  'INSTALLED_CONFIGURATION_CHANGED')
 checked=admission.check();need(checked['status']=='CHECKED_NOT_STARTED','EXISTING_WORK_REQUIRES_ATTENTION')
 identity=admission.provider.oci_scope(require_database_available=True)
+scope=scope_receipt(identity,provider['target_profile']['oci'])
 read_code="""import json,sqlite3,sys\nfrom pathlib import Path\nsys.path.insert(0,'/app')\nfrom fox.verification_recovery import VerificationRecovery\np=Path('/data/fox.sqlite3');r=VerificationRecovery(p,enabled=True)\nwith sqlite3.connect(p.as_uri()+'?mode=ro',uri=True) as c:\n c.row_factory=sqlite3.Row;c.execute('PRAGMA query_only=ON');c.execute('BEGIN')\n count=c.execute(\"SELECT COUNT(*) FROM runs WHERE state IN ('QUEUED','PROCESSING')\").fetchone()[0]\n allowed=r.admission_allowed(c)\nprint(json.dumps({'active_conversion_count':count,'admission_allowed':allowed}))\n"""
 snapshot=json.loads(command(['/usr/bin/podman','exec',containers['fox']['id'],'python','-I','-B','-c',read_code],timeout=60))
 need(snapshot=={'active_conversion_count':0,'admission_allowed':True},'EXISTING_WORK_REQUIRES_ATTENTION')
@@ -94,8 +118,7 @@ need({v['Name'].lstrip('/'):{'id':v['Id'],'image':'sha256:'+v['Image'].split(':'
 result={'schema_version':1,'scope':'fox-live-project-preflight-v1','observed_at_utc':datetime.now(timezone.utc).isoformat(),
  'source_bundle_sha256':dep['source_bundle_sha256'],'release_sha256':dep['release_sha256'],'provider_sha256':dep['provider_sha256'],
  'admission_sha256':dep['admission_sha256'],'images':release['images'],'containers':containers,
- 'instance':{'id':identity['instance_id'],'compartment_id':identity['instance_compartment_id'],'region':identity['region']},
- 'database':{'id':identity['database_id'],'compartment_id':identity['database_compartment_id'],'lifecycle_state':identity['database_lifecycle_state'],'db_name':identity['database_db_name']},
+ 'instance':scope['instance'],'database':scope['database'],
  'active_conversion_count':0,'application_profile':'native-project-v1',
  'operator_service':{'unit':unit,'pid':pid,'start_ticks':before['start_ticks'],'state':'running'}}
 result['receipt_sha256']=hashlib.sha256(canonical(result)).hexdigest()
@@ -178,7 +201,7 @@ def observe(plan, key_file, *, runner=subprocess.run):
     result = runner(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-i', str(key),
         'opc@129.213.189.48', '/usr/bin/python3.11 -I -B -c ' + shlex.quote(LAUNCHER)],
         input=canonical(packet), capture_output=True, timeout=360)
-    need(result.returncode == 0 and not result.stderr.strip() and len(result.stdout) < 65536,
+    need(result.returncode == 0 and ssh_diagnostics_allowed(result.stderr) and len(result.stdout) < 65536,
          'LIVE_PREFLIGHT_UNCONFIRMED_NO_UI_ACTION')
     return validate_preflight(object_bytes(result.stdout, maximum=65536), plan)
 
@@ -193,7 +216,7 @@ def inspect_journey(plan, key_file, *, runner=subprocess.run):
     result = runner(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-i', str(key),
         'opc@129.213.189.48', '/usr/bin/python3.11 -I -B -c ' + shlex.quote(LAUNCHER)],
         input=canonical(packet), capture_output=True, timeout=360)
-    need(result.returncode == 0 and not result.stderr.strip() and len(result.stdout) < 65536,
+    need(result.returncode == 0 and ssh_diagnostics_allowed(result.stderr) and len(result.stdout) < 65536,
          'READ_ONLY_JOURNEY_STATE_UNCONFIRMED')
     value = object_bytes(result.stdout, maximum=65536)
     need(set(value) == {'schema_version', 'scope', 'read_only', 'release_sha256', 'observed_at_utc', 'saved_project', 'automatic_replay_permitted'}
