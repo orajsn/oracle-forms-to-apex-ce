@@ -707,7 +707,9 @@ def execute_under_lock(context, capture_authority, *, plan_raw, plan_sha256, ins
     config = capture_authority.require_active()
     need(config['mode'] == 'pre-hosted-g' and sha(Path(module.__file__).read_bytes()) == config['source_sha256']['hosted_snapshot.py'],
          'SNAPSHOT_AUTHORITY_SOURCE_CHANGED')
-    context.require_active()
+    # The exact CaptureAuthority above owns this exact context and its
+    # require_active() already validates the held C/F/G leases. Repeating
+    # the expensive retained retry read here can consume the 30s window.
     if phase == 'stop':
         # baseline_authority performs the genuine fresh history read before
         # constructing this exact, source-measured capability. Do not repeat
@@ -732,7 +734,7 @@ def execute_under_lock(context, capture_authority, *, plan_raw, plan_sha256, ins
     python = config['python']['path']
     raw = context.components.clean.run_process([*context.components.clean.SSH,
         shlex.quote(python)+' -I -B -c '+shlex.quote(loader)],data=canonical(payload),timeout=900)
-    context.require_active();capture_authority.require_active()
+    capture_authority.require_active()  # Also rechecks its actual owning context.
     result = json.loads(raw)
     need(result.get('status') == {'stop':'G_STOPPED_TLS_HELD','activate':'PROJECT_RUNNING_TLS_HELD',
          'recover':'G_AVAILABILITY_RECOVERED_OPERATOR_REMAINS_RETIRED','release':'PAIRED_SERVICE_ACTIVATED'}[phase]

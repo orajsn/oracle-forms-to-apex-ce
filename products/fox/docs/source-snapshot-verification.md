@@ -36,3 +36,15 @@ The complete developer/integration suite is not claimed to pass in an empty
 checkout: some tests depend on Oracle tools, approved lab settings or protected
 historical evidence. Fresh connected installation and shipped multi-form
 conversion/import/browser/recovery acceptance remain incomplete release gates.
+
+## Cutover lease-latency correction
+
+The controller now relies on the real `CaptureAuthority.require_active()` to
+validate its exact owning context once at each boundary, instead of immediately
+repeating that same expensive history read. Type/source/owner checks and the
+30-second stop window remain unchanged. Synthetic virtual-time regression
+proves a 16-second delegated read reaches dispatch in time, a late stop is still
+rejected and a failed lease cannot dispatch. Windows controller regression:
+108 passed/48 platform skips; the three focused cases also passed on Linux.
+External transport/service effects are synthetic in these tests. This code
+correction does not itself establish a successful live cutover.
