@@ -28,7 +28,7 @@ SCOPE = 'fox-leased-paired-cutover-v1'
 SHA = re.compile(r'[a-f0-9]{64}\Z')
 READINESS_SHA = 'ad451a9c0f29f801717585393c4fed39ada5bd9edcada032ef64dbb1bb71f28c'
 LIVE_ROLLBACK_SCAN = r'''
-import hashlib,json,os,pathlib,stat,sys
+import hashlib,json,os,pathlib,re,sqlite3,stat,sys
 def need(ok):
  if not ok:raise RuntimeError('LIVE_SOURCE_NOT_SAFE_FOR_G_RECOVERY')
 def unique(rows):
@@ -40,6 +40,51 @@ def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':'),allow_n
 root=pathlib.Path('/home/opc/fox/data/jobs')
 need(root.is_dir() and root.resolve()==root)
 for part in (root,*root.parents):need(not part.is_symlink())
+def legacy_v0_binding(value,job_id):
+ # The original G app defaults this pre-profile schema to its legacy view.
+ # Prove full saved-source/DB identity; never relabel, approve or execute it.
+ need(set(value)=={'project','source_hash','files','inventory'})
+ project=value['project'];source_hash=value['source_hash'];files=value['files'];inventory=value['inventory']
+ need(type(job_id) is str and re.fullmatch('fox-[a-f0-9]{20}',job_id)
+  and type(project) is str and re.fullmatch('[a-f0-9]{32}',project)
+  and type(source_hash) is str and re.fullmatch('[a-f0-9]{64}',source_hash)
+  and type(files) is list and 0<len(files)<=50 and type(inventory) is dict
+  and set(inventory)=={'dependencies','files','issues','missing_count','scope_note','source_hash'}
+  and inventory['source_hash']==source_hash and type(inventory['files']) is list
+  and type(inventory['dependencies']) is list and type(inventory['issues']) is list
+  and type(inventory['missing_count']) is int and inventory['missing_count']>=0
+  and type(inventory['scope_note']) is str)
+ names=set();ids=set();total=0
+ for f in files:
+  need(type(f) is dict and set(f)=={'id','project','name','sha256','bytes','text','created'})
+  need(type(f['id']) is str and re.fullmatch('[a-f0-9]{32}',f['id']) and f['id'] not in ids
+   and f['project']==project and type(f['name']) is str and 0<len(f['name'])<=250
+   and f['name'] not in names and pathlib.PurePosixPath(f['name']).name==f['name']
+   and f['name'] not in ('.','..') and '\\' not in f['name']
+   and type(f['text']) is str and type(f['bytes']) is int and f['bytes']>0
+   and type(f['created']) in (int,float) and f['created']>0
+   and type(f['sha256']) is str and re.fullmatch('[a-f0-9]{64}',f['sha256']))
+  raw=f['text'].encode('utf-8')
+  if hashlib.sha256(raw).hexdigest()!=f['sha256']:raw=b'\xef\xbb\xbf'+raw
+  need(len(raw)==f['bytes'] and hashlib.sha256(raw).hexdigest()==f['sha256'])
+  total+=len(raw);need(total<=300000);names.add(f['name']);ids.add(f['id'])
+ manifest='\n'.join(f['name']+':'+f['sha256'] for f in sorted(files,key=lambda f:f['name']))
+ need(hashlib.sha256(manifest.encode()).hexdigest()==source_hash)
+ path=pathlib.Path('/home/opc/fox/data/fox.sqlite3')
+ need(path.resolve()==path and not path.is_symlink() and path.is_file())
+ db=sqlite3.connect('file:'+path.as_posix()+'?mode=ro',uri=True)
+ try:
+  db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
+  rows=db.execute('SELECT project,source_hash,state FROM runs WHERE id=?',(job_id,)).fetchall()
+  need(len(rows)==1);run=dict(rows[0])
+  need(run['project']==project and run['source_hash']==source_hash
+   and run['state'] in ('REVIEW_REQUIRED','ACCEPTED','ATTENTION'))
+  for f in files:
+   rows=db.execute('SELECT id,project,name,sha256,bytes,text,created FROM sources WHERE id=? AND project=?',(f['id'],project)).fetchall()
+   need(len(rows)==1 and dict(rows[0])==f)
+  return hashlib.sha256(canonical({'run':run,'source_manifest_sha256':source_hash,
+   'source_ids':sorted(ids),'classification':'retained-legacy-v0-no-processing-authority'})).hexdigest()
+ finally:db.close()
 def scan():
  result={};items=sorted(root.iterdir());need(len(items)<=10000)
  for job in items:
@@ -52,10 +97,14 @@ def scan():
   fields=('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')
   need(len(raw)==info.st_size and all(getattr(info,k)==getattr(opened,k)==getattr(after,k)==getattr(path.stat(),k) for k in fields))
   value=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:need(False))
-  need(type(value) is dict and value.get('conversion_profile') in ('native-table-form-v1','legacy-html-prototype-v1') and 'native_project' not in value)
+  need(type(value) is dict and 'native_project' not in value)
+  if 'conversion_profile' in value:
+   need(value['conversion_profile'] in ('native-table-form-v1','legacy-html-prototype-v1'))
+   binding=None
+  else:binding=legacy_v0_binding(value,job.name)
   for marker in ('native-project-pipeline','project-technical-verification'):
    need(not (job/marker).exists() and not (job/marker).is_symlink())
-  result[job.name]=hashlib.sha256(raw).hexdigest()
+  result[job.name]={'source_sha256':hashlib.sha256(raw).hexdigest(),'legacy_v0_binding_sha256':binding}
  return result
 before=scan();need(scan()==before)
 print(json.dumps({'project_history_present':False,'jobs_checked':len(before),

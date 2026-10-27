@@ -7,6 +7,12 @@ wallets and protected secret references on persistent private storage. None is
 part of the public source repository. Never use a source checkout as a backup
 of a running system or commit run evidence to make a test pass.
 
+Pre-profile legacy history is retained read-only. A missing profile is not a
+default for new work: only the complete old source schema with matching hashes,
+byte counts, terminal run and retained SQLite source rows is recognized by the
+upgrade compatibility check. No snapshot is relabelled, granted processing
+approval or rerun. Empty/ambiguous records or project markers still stop it.
+
 ## Diagnose before retry
 
 | Observation | Safe next action |

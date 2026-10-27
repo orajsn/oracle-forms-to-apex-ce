@@ -48,3 +48,23 @@ rejected and a failed lease cannot dispatch. Windows controller regression:
 108 passed/48 platform skips; the three focused cases also passed on Linux.
 External transport/service effects are synthetic in these tests. This code
 correction does not itself establish a successful live cutover.
+
+## Retained pre-profile history
+
+An older complete legacy snapshot may lack `conversion_profile`. The original
+application's legacy default is now checked without rewriting that snapshot:
+exact old schema, source hashes/byte counts, manifest, terminal run identity and
+every retained source row must match the read-only SQLite record. Unknown or
+incomplete records, active runs, project fields/markers and mismatched sources
+still reject. This grants no processing, import or business-acceptance authority.
+
+The development checkout's selected controller matrix passed Linux **162/16
+skips** and Windows **108/70 skips**, over 178 cases. The public checkout passed
+Linux **158/20 skips** and Windows **104/74 skips**: four retained-lab-manifest
+cases additionally skip because private history is intentionally absent. The
+22 real POSIX legacy-v0 file/SQLite cases passed in both Linux checkouts.
+Platform-dependent/rootless coverage remains qualified; these unit results are
+not live activation or generated-application acceptance.
+The fixed source scan also passed an actual read-only lab check without changing
+the original snapshots or database. Existing G containers and app evidence remain
+separate from the new product's pending end-to-end acceptance.
