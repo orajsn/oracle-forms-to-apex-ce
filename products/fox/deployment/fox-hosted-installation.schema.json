@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FOX hosted product verifier installation v1",
+  "description": "Offline document shape only. Runtime ownership, exact bytes, source inventory, retirement proof, actual lock and fresh admission checks remain mandatory. max_jobs must also be no greater than max_polls.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scope",
+    "provider",
+    "release",
+    "admission",
+    "retirement",
+    "layout",
+    "bounds",
+    "batch_pause_seconds"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scope": {"const": "fox-hosted-product-verifier-installation-v1"},
+    "provider": {"$ref": "#/$defs/fileReference"},
+    "release": {"$ref": "#/$defs/fileReference"},
+    "admission": {"$ref": "#/$defs/fileReference"},
+    "retirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "attestation_sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePosixPath"},
+        "attestation_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_root", "inventory"],
+      "properties": {
+        "release_root": {"$ref": "#/$defs/absolutePosixPath"},
+        "inventory": {"$ref": "#/$defs/fileReference"}
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_jobs", "max_polls", "max_seconds", "poll_seconds"],
+      "properties": {
+        "max_jobs": {"type": "integer", "minimum": 1, "maximum": 5},
+        "max_polls": {"type": "integer", "minimum": 1, "maximum": 120},
+        "max_seconds": {"type": "integer", "minimum": 1, "maximum": 7200},
+        "poll_seconds": {"type": "integer", "minimum": 1, "maximum": 60}
+      }
+    },
+    "batch_pause_seconds": {"type": "integer", "minimum": 1, "maximum": 60}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "absolutePosixPath": {
+      "type": "string",
+      "pattern": "^/(?!/)(?!\\.{1,2}(?:/|$))(?!.*?/\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])[^/]+(?:/[^/]+)*$"
+    },
+    "fileReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePosixPath"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

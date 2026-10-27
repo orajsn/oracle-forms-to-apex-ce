@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "scope": "fox-project-opaf-v2-candidate-contract",
+  "status": "candidate_only_not_deployed_or_authorized",
+  "source_policy": "Original XML and DDL bytes, filenames, hashes and complete source manifest remain unchanged. A verified mapping binds source identity to separate synthetic storage.",
+  "native_project_profile": "native-project-v1",
+  "native_project_schema_versions": [
+    1,
+    2
+  ],
+  "storage_mapping_scope": "fox-project-storage-v1",
+  "module_execution_scope": "fox-project-module-execution-v2",
+  "artifacts": {
+    "profile": "project-opaf-profile-v2.candidate.json",
+    "target_profile": "project-opaf-target-profile-v2.candidate.json",
+    "mapper": "project-opaf-mapper-v2.json",
+    "reviewer": "project-opaf-reviewer-v2.json"
+  },
+  "request_fields": [
+    "job_id",
+    "source_hash",
+    "inventory",
+    "native_form",
+    "storage_mapping",
+    "ddl_sources",
+    "module_execution_binding"
+  ],
+  "candidate_contract": "Unchanged sqlcl-26.1.2-fox-native-v1 per-form candidate with exactly seven fields; mapped provenance stays bound through the request, inventory, projection and sealed review.",
+  "source_projection_scope": "fox-project-module-source-projection-v2",
+  "model": "xai.grok-4.3",
+  "mcp_tools_unchanged": [
+    "inspect_forms_job",
+    "generate_apex_draft",
+    "validate_apex_draft",
+    "import_validated_draft",
+    "get_job_status"
+  ],
+  "activation_requires": [
+    "Separate explicit deployment authorization; these files do not authorize a remote call, database change or model invocation.",
+    "Register and publish two distinct tool-free candidate workflows through the approved OPAF process and record actual returned workflow IDs; null IDs intentionally fail closed.",
+    "Verify actual configured xai.grok-4.3 connections, graph hashes, certificate, tested version tuple and existing JSN resources; do not infer acceptance from the old target's tested_versions.",
+    "Create a new reviewed immutable target profile and append its exact digest to the audited registry without editing or removing historical snapshots; select the new exact paired target only under approved activation.",
+    "Ensure converter capability advertises rendering schema 2, fox-project-storage-v1 and fox-project-module-execution-v2 only when this exact paired mapped profile is supported and selected.",
+    "Run offline contract/tamper tests and separately authorized real acceptance checks; local artifact tests are not deployment evidence."
+  ],
+  "current_blockers": [
+    "No workflows registered or published by this change.",
+    "No workflow IDs or new active target registration exist.",
+    "Existing active JSN target pins the legacy role IDs and graph hashes and must reject a mapped project before any POST."
+  ]
+}

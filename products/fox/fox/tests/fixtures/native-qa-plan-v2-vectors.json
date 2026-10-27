@@ -1,0 +1,378 @@
+{
+  "schema_version": 1,
+  "scope": "fox-native-qa-plan-v2-parity-vectors",
+  "description": "Exact UTF-8 JSON strings. Raw hashes bind unchanged spec bytes. accepted preserves the historical producer-policy expectation; derivable is the structural QA-planning expectation, not authorization to generate or import. Profile hashes preserve exact labels.",
+  "vectors": [
+    {
+      "name": "duplicate_trimmed_labels",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\" Shared \",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"SECOND_COL\",\"label\":\"Shared\",\"data_type\":\"DATE\",\"nullable\":true}]}",
+      "native_spec_sha256": "f7087343f6fdbd365625b51ccf495b7dbf2413978e7eafc55c2b1e2e7f146d57",
+      "derivable": true,
+      "plan_sha256": "201cc6d00045fc3d63f2473830611755f6c71514560fe3866ff9da755d0e0d29",
+      "profile_sha256": "1e3d8ade5b35f603e8b0b26c5ed0bd25b8035157cf46c15a85b2429e1742641b"
+    },
+    {
+      "name": "bmp_label_79",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "034fa673d0d1493cd9f3c09e6c131f51f731b50eeccefa844f9d79ab2e2d6052",
+      "derivable": true,
+      "plan_sha256": "04beeb619ee2d42611c077cd926cbe15dadbad5fca8e7228a3d4d10e423a6fda",
+      "profile_sha256": "8dda8cde05795b25083bc897ee1dde8b74e2f362294aa391c8ecf10b62d6d687"
+    },
+    {
+      "name": "nonbmp_label_79",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "f8bb1ea6342f21f7524409c2faa2a6d2c88a5f0df3324ead0f0eaf79c3b6051f",
+      "derivable": true,
+      "plan_sha256": "8bea5d983bed418773c7d6c4a1ce928560557ee797275b5844068ddae9147461",
+      "profile_sha256": "f9ecf3063f95be390537b43a3fd02f8ad3bcc9c971e28e6d0b2fde47da27e656"
+    },
+    {
+      "name": "bmp_label_80",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "726382a1801faab385e31799a2792d4678918fc9a55d5d90ed729a6e3f478797",
+      "derivable": true,
+      "plan_sha256": "5f226ccf10a2f454ffd65bcd40ef70b53416484d5b369ed33e9be763638c7917",
+      "profile_sha256": "125d7911ebd8c1604321b5cf0d03ead8e63fbc65249693cbbc8ea5fe3cf21dec"
+    },
+    {
+      "name": "nonbmp_label_80",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "b66f1b005f7c2c83f603b4e2a46bf3975bba8731b67ccae10b10e0dc9d8f13ac",
+      "derivable": true,
+      "plan_sha256": "bdcf1339109be6c85fa99ba2fb276864f13849b4aed35fe352ed0013e779f96d",
+      "profile_sha256": "ba3dd8d4133bd7f9fe3905249583a4fc22cdf08e584c8c83c531372792f6f23a"
+    },
+    {
+      "name": "bmp_label_81",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界界\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "24a717ea76a55ad991f0e4fd13ff511680cb6ba73bf95b6a6c952036a7d6faf9",
+      "derivable": false
+    },
+    {
+      "name": "nonbmp_label_81",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "f50ecabfef7165bf4f2d60940c2fb745db5bd71a8402197058b0147f7afd3ede",
+      "derivable": false
+    },
+    {
+      "name": "mixed_label_80_codepoints_81_utf16_units",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA😀\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "7667d6d40151782a9c4947ffffbcc575dab317fb36f31c10e22da34784a34b35",
+      "derivable": true,
+      "plan_sha256": "89631c8886554528a5bbc6d88c72bf55caf136eb1ce37e84b5d7505798fbc867",
+      "profile_sha256": "a5d6913039223d5b4500a5f9a9ea07cfb728457828aaeacd5cd4a913c35e7548"
+    },
+    {
+      "name": "mixed_label_81_codepoints_82_utf16_units",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA😀\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "52c4023f75e8fa0a66a036c2e4faf295d1f6c887a09e82e994a0edef9c386d19",
+      "derivable": false
+    },
+    {
+      "name": "combining_label_80_codepoints",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"éééééééééééééééééééééééééééééééééééééééé\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "0a66103f1c8f3545aeb8bdd46300080565b2bd85d6798b37b61a595131802ba5",
+      "derivable": true,
+      "plan_sha256": "59e28b2c5535be5e68d0c8dd3194db1d3c0ee4c929b4a496c95ff9ad6f395781",
+      "profile_sha256": "3cc47ea3e7f948c98240aa85f0b7d43baaf4199de474c3e6325d06169c1a08ae"
+    },
+    {
+      "name": "combining_label_82_codepoints",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"ééééééééééééééééééééééééééééééééééééééééé\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "92609664a9a763cfb3af0a2d8bb50c4f6da587fcb07fc91550bbc3e17fde60c9",
+      "derivable": false
+    },
+    {
+      "name": "20_columns_key_in_middle",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"C1\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C2\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C3\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"C4\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C5\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C6\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C7\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C8\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C9\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"C10\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C11\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C12\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C13\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C14\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C15\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"C16\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C17\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C18\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C19\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "41231cf4b06ee4589d05852f344585d14e9b90151b544984263581b354ccd33a",
+      "derivable": true,
+      "plan_sha256": "381510b8ed6d575e7c293309678179a322028d7fc276964d51ec40c7e9ceb74c",
+      "profile_sha256": "87c46530a91e02b44691a1b19308350b919f4db9315c8729ed870262b2d05fba"
+    },
+    {
+      "name": "21_columns_key_in_middle",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"C1\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C2\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C3\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"C4\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C5\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C6\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C7\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C8\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C9\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"C10\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C11\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C12\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C13\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C14\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false},{\"name\":\"C15\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":true},{\"name\":\"C16\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":false,\"length\":4000},{\"name\":\"C17\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":true},{\"name\":\"C18\",\"label\":\"Same\",\"data_type\":\"DATE\",\"nullable\":false},{\"name\":\"C19\",\"label\":\"Same\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1},{\"name\":\"C20\",\"label\":\"Same\",\"data_type\":\"NUMBER\",\"nullable\":false}]}",
+      "native_spec_sha256": "0396b03001b995be247a51021aa49b27aa6698835cb05c82471b334ed8b5c2c2",
+      "derivable": false
+    },
+    {
+      "name": "omitted_optional_compact",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "fb8b072bbd1ef61cd1d4a7d8ae462b0e1a8de7d155cec2ac894ee7b0a350394a",
+      "derivable": true,
+      "plan_sha256": "a46f37f804817165da83a1cbb7cf58a78df232bb51e193f583c4d086846df32a",
+      "profile_sha256": "3631481a9375b0bd63d5d3c1264bc960e232fe84d952bffb5cddba7929e07aee"
+    },
+    {
+      "name": "omitted_optional_pretty_same_metadata",
+      "accepted": true,
+      "spec_json": "{\n  \"profile_id\": \"native-table-form-v1\",\n  \"data_mode\": \"synthetic_test_only\",\n  \"table_name\": \"FOX_NATIVE_PARITY\",\n  \"columns\": [\n    {\n      \"name\": \"ROW_KEY\",\n      \"label\": \"Record key\",\n      \"data_type\": \"NUMBER\",\n      \"nullable\": false,\n      \"primary_key\": true,\n      \"identity\": true\n    },\n    {\n      \"name\": \"VALUE_COL\",\n      \"label\": \"Value\",\n      \"data_type\": \"VARCHAR2\",\n      \"nullable\": true,\n      \"length\": 1\n    }\n  ]\n}",
+      "native_spec_sha256": "e646494d7795a69290e1d074240222e4ab6b1cb1b4590892460e4cadadd0daf7",
+      "derivable": true,
+      "plan_sha256": "258f5695a957184d55a297d4e9ad5c3add8613e21b23dea2198cf7b7b1195475",
+      "profile_sha256": "3631481a9375b0bd63d5d3c1264bc960e232fe84d952bffb5cddba7929e07aee"
+    },
+    {
+      "name": "explicit_optional_false_flags_and_operations",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1,\"primary_key\":false,\"identity\":false}],\"supported_operations\":[\"query\",\"insert\",\"update\"]}",
+      "native_spec_sha256": "26c0b2228637ccb327247a0f5b0c07a27793c92c8efd964edac983e0751704ae",
+      "derivable": true,
+      "plan_sha256": "c817e717506534622eeddd28f6446f127d45be3f040a2509f8fc6bc1b1999325",
+      "profile_sha256": "3631481a9375b0bd63d5d3c1264bc960e232fe84d952bffb5cddba7929e07aee"
+    },
+    {
+      "name": "sql_select",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"SELECT customer FROM records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "69454dd353aa8eab2b1019de742229442911ee12ab9e62b3dd0adab4d5ba15f5",
+      "derivable": true,
+      "plan_sha256": "d094784e3088e6af296bcd3de457dd0e470e96a93effbf67ec47bdf5239cfaef",
+      "profile_sha256": "363d5cf403e72dfe13440d703e23b2c2b08474355b453ad07ca2c78eb5894235"
+    },
+    {
+      "name": "sql_insert",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"INSERT INTO records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "3f76117ece702a671bbcafff6c972342381ca9832d39c68bd137589010b0792e",
+      "derivable": true,
+      "plan_sha256": "867b38f385c513d84f8b4f2c9dd07af257021caba96f7161c66fe6d21133e242",
+      "profile_sha256": "a8959a799dc7b688ce7ad6a65941e1664b9a4885af63821ca0387d17814ebfac"
+    },
+    {
+      "name": "sql_execute",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"execute immediate\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "e3969549d4e86af7fcabee70be57d3f4074758071fa29860f50dd31be4ef4341",
+      "derivable": true,
+      "plan_sha256": "0ab6b5a6827ac35982412d652b77a7c1d733a973fefad2596371f481120f58ef",
+      "profile_sha256": "674e5b5e0227b20cb6fa273e26690e3768a3639c1d7ec6eda4752e5bdce65167"
+    },
+    {
+      "name": "nul_control",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"A\\u0000B\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "1730d958311a75b9c52906fb82e96bc7689b1b982e639073fcc24fac53831a49",
+      "derivable": true,
+      "plan_sha256": "f1258b15db9029ef115c3d89dbb468a3c1a1523f23957de87d9ebe38d9547baa",
+      "profile_sha256": "e7d8ad32cb880926bcb3a2406d5fd36f3f1a760ffb69305d17c12ad9ca931784"
+    },
+    {
+      "name": "zero_width_control",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"A​B\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "9b8f54698b20ea566d771bab93e0911bef57c2b195840c28d4a782065cf31ea1",
+      "derivable": true,
+      "plan_sha256": "d095d4351cddada93f6a38bf16bbb1d91b9ef5884dc9f2bd9ee456a8c2a05688",
+      "profile_sha256": "3a054ad036d9443dc3e21ff423e652a6108f93235715bce0b3e8949544da79d2"
+    },
+    {
+      "name": "paragraph_separator",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"A B\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "afda121c4ebe02e8308196abb397a61032ac642f30b3911ad9923c5626e6c9d1",
+      "derivable": true,
+      "plan_sha256": "03623ad9ff9819e036c98016d90ecec13d8b26d8d5b5da72d07032a07fc55d10",
+      "profile_sha256": "c47c58ddbd795ed4f4932c85a9773d8aadcd32f54b95232f45ac0cc3bef70d5b"
+    },
+    {
+      "name": "line_separator",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"A B\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "260226024eb46e9ba415b43dd4807c2dba5796e435052a287576b0a443d1783e",
+      "derivable": true,
+      "plan_sha256": "6c17ca8e4a87b26167df430945cafe4df4c59e3d9656b6cada9a0a6b290ad145",
+      "profile_sha256": "cab2f841f2b6a508d51814793ee68a8cc0fca2c93f17743b7459535ad83f2739"
+    },
+    {
+      "name": "next_line_control",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"AB\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "fc77db26b955ebaf9faea9b1e8b2789a5a04f2620ff1601c5364e1a1ea90579a",
+      "derivable": true,
+      "plan_sha256": "ba8971c33a0bf3a2183221454935d2ea1f1c1bcfd3f953c0cf5eff90c6e45f25",
+      "profile_sha256": "0499cb3f157ec84ef8394eb072884eabccde8c8d6b2ae04153d2f488552af661"
+    },
+    {
+      "name": "private_use_control",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"AB\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "d2e07847477a89d79074341990369d853018b6fddb442e4bc1239d53e6d22a1a",
+      "derivable": true,
+      "plan_sha256": "f334998adfdb3cd29cd5d395701a156711a5560deac5180f4a08905e7855c502",
+      "profile_sha256": "9dfe580812437b6fc92618e7bdd84dbdd0ee71d998c2fe852299e2b15292e992"
+    },
+    {
+      "name": "boolean_true_length",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":true}]}",
+      "native_spec_sha256": "ee3bac6dc8156e51e8ddf8f091b1c86a47b5729d782cca4413f13eed741b6ae2",
+      "derivable": false
+    },
+    {
+      "name": "boolean_false_length",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":false}]}",
+      "native_spec_sha256": "587d78361d4b317ecd8d4ab394481c4de850fcedb3456c55e746f580977245b0",
+      "derivable": false
+    },
+    {
+      "name": "null_length",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":null}]}",
+      "native_spec_sha256": "7daa53968fa77b0069c42ee17546c68f8bba506901840a2fd356c0a9c4880373",
+      "derivable": false
+    },
+    {
+      "name": "zero_length",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":0}]}",
+      "native_spec_sha256": "22f7aeffe3dad546f530f33de7166411cb9561b58d3518b8597cb1ae19118b0c",
+      "derivable": false
+    },
+    {
+      "name": "over_bound_length",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":4001}]}",
+      "native_spec_sha256": "25b65e0cd4d630b23abf6a97c975946b8174e089cb103bdf1b52af0ca77426ab",
+      "derivable": false
+    },
+    {
+      "name": "null_primary_flag",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1,\"primary_key\":null}]}",
+      "native_spec_sha256": "9577d5abb64c9c6ea6597b80f8c8e417638431dffc0a82a9a8f05fb8d268d0f7",
+      "derivable": false
+    },
+    {
+      "name": "null_identity_flag",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1,\"identity\":null}]}",
+      "native_spec_sha256": "3531d5970d7b909b3f9841ecc951ff4461fae2bdcdcf88ed71741b4c22d1c1a1",
+      "derivable": false
+    },
+    {
+      "name": "unicode_word_prefix_latin_sql",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"éSELECT customer FROM records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "561c0f8c1c6867dda2df796035e4f411062d1a174b9c7b85e6c50f6d519a5241",
+      "derivable": true,
+      "plan_sha256": "308d4ab0f8144623d00adb6a1e691c3e426b7e6536ef3c22090128982bfc71be",
+      "profile_sha256": "2250515641adb2bd4301bd0aed7746db9938f79d4c13cb4e0c0ea9c7b94f5760"
+    },
+    {
+      "name": "unicode_word_suffix_latin_sql",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"SELECT customer FROMé\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "9afb24536c727f81b225192d2bad20f2656ff9d4958ec7b261b09b96b06c70d9",
+      "derivable": true,
+      "plan_sha256": "0ea392113b821f09f2c1e702b53f238edbf16220ccd0cb1611c3747c3d5b1241",
+      "profile_sha256": "fdcda8aaa332cccbc6d9d8f9ae4342b770e0e8577cb476a2ca79023fc0579438"
+    },
+    {
+      "name": "unicode_word_prefix_cjk_sql",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"選SELECT customer FROM records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "2e1ed5d15c1855e603d767bfc9478121cdf2925e33ef9c1e4e51478831e06760",
+      "derivable": true,
+      "plan_sha256": "145899927eb2ffb1c68f090e5a01461d2cdca4970c84c4daa608d4a7cbf95bfc",
+      "profile_sha256": "bafff8f3f5c9e78fdd8e2a5351273349dc2359881cfd14e9d3a70023f518f11b"
+    },
+    {
+      "name": "unicode_word_suffix_insert_sql",
+      "accepted": true,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"INSERT INTOé\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "f88a78f5544e0bb8c244e2054347dc5b8b01c16db187953e1a606fe982727ed0",
+      "derivable": true,
+      "plan_sha256": "1966e1ef02ab7d46b3d6ae73ecb459171ba9b59be470124866fe103b70d6ca86",
+      "profile_sha256": "4e22d4b193ba2f03a6337e05b67779135dad92ea00a31a26709b4775f5a766e9"
+    },
+    {
+      "name": "unicode_dotted_i_insert_sql",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"İNSERT INTO records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "e73d330f4edaceeb3cae79c93b3090c82408c6af7f77e2967929800cb7f0b179",
+      "derivable": true,
+      "plan_sha256": "f49c2966eb508d948c6d43d5b42e12e6305e23ee7c9e7b0968dbaa88a856150e",
+      "profile_sha256": "7a5b56ee665cb769a058ddbd45649bb2d72fbdef41c4baaf8ca877e9d0e92785"
+    },
+    {
+      "name": "unicode_dotless_i_insert_sql",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"ıNSERT INTO records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "c506668cf4ba5323442a3ad703dca853b5e885d9138bcfefab3ad82460602952",
+      "derivable": true,
+      "plan_sha256": "a18121a00f78b9b9046b32c3633fd88e448f84ae3097330243cf93594fd7f7f6",
+      "profile_sha256": "5b7b265fc0aefdbcf3952357c71177360278159f5476ec52d50cff145c3ca77c"
+    },
+    {
+      "name": "unicode_long_s_select_sql",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"ſELECT customer FROM records\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "9294b11f46d290b5c4ed384cac5c3fd8631e1ad3eaa25c55d672b2a28d65978e",
+      "derivable": true,
+      "plan_sha256": "6be10ec73cf0eefb9b4a3e6c6fc934c2d7f726725eeb5547f8cec7f7b0f09769",
+      "profile_sha256": "5ab6168d8067626cac2a3137f531f7f58017efb456b3838dfd3f7cf9dc91b12a"
+    },
+    {
+      "name": "non_integer_json_length_1_0",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1.0}]}",
+      "native_spec_sha256": "bd49babecc58f3f76312ce66b5379f26aceb289b5f01527ba5940f46903aac92",
+      "derivable": false
+    },
+    {
+      "name": "non_integer_json_length_1e0",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1e0}]}",
+      "native_spec_sha256": "42adb23a9af7242e9564fc777ae87453ffbd91bbf403446b4479ad0f1aa1e71f",
+      "derivable": false
+    },
+    {
+      "name": "non_integer_json_length_1E_0",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1E+0}]}",
+      "native_spec_sha256": "b383b5abf885a88c6e06a35b095badf2a6f929a1ced5bb2e5096e4d992f36d9f",
+      "derivable": false
+    },
+    {
+      "name": "non_integer_json_length_1_000",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1.000}]}",
+      "native_spec_sha256": "81eb37c135945347b3ddaf57bfa860b1df03eae7301e36dae91fd34a99f1df0f",
+      "derivable": false
+    },
+    {
+      "name": "non_integer_json_length_4e3",
+      "accepted": false,
+      "spec_json": "{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":4e3}]}",
+      "native_spec_sha256": "051bd8ff35ec0ecc8b6bf3af10eba36add29356a55e7324f2500e6e55f0a1e42",
+      "derivable": false
+    },
+    {
+      "name": "omitted_optional_with_utf8_bom",
+      "accepted": true,
+      "spec_json": "﻿{\"profile_id\":\"native-table-form-v1\",\"data_mode\":\"synthetic_test_only\",\"table_name\":\"FOX_NATIVE_PARITY\",\"columns\":[{\"name\":\"ROW_KEY\",\"label\":\"Record key\",\"data_type\":\"NUMBER\",\"nullable\":false,\"primary_key\":true,\"identity\":true},{\"name\":\"VALUE_COL\",\"label\":\"Value\",\"data_type\":\"VARCHAR2\",\"nullable\":true,\"length\":1}]}",
+      "native_spec_sha256": "0bb703f733371bf21675a4e918acba798db184a33d3ecba8efb7f3262b030e9e",
+      "derivable": true,
+      "plan_sha256": "906c8b5a7b09544977d61046aa12bc7c2aab2d25410b1446aabaae05a02cb09e",
+      "profile_sha256": "3631481a9375b0bd63d5d3c1264bc960e232fe84d952bffb5cddba7929e07aee"
+    }
+  ]
+}

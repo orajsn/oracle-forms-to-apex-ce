@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "profile_id": "customer-template-not-authorized",
+  "active": false,
+  "scope": {
+    "conversion_profile": "native-table-form-v1",
+    "data_mode": "synthetic_test_only",
+    "supported_operations": ["query", "insert", "update"],
+    "customer_deployment_authorized": false,
+    "existing_resources_only": true
+  },
+  "oci": {
+    "compartment_id": null,
+    "database_id": null,
+    "instance_id": null,
+    "region": null
+  },
+  "database": {"db_name": null, "session_user": null, "parsing_schema": null},
+  "apex": {"workspace": null, "workspace_id": null, "ords_origin": null, "ords_base_path": "/ords"},
+  "sqlcl": {"saved_connection": null},
+  "opaf": {
+    "base_url": null,
+    "certificate_sha256": null,
+    "model_authentication": "oci_instance_principal",
+    "version_number": null,
+    "build_id": null,
+    "roles": {
+      "mapper": {"workflow_id": null, "model": null, "graph_sha256": null},
+      "reviewer": {"workflow_id": null, "model": null, "graph_sha256": null}
+    }
+  },
+  "tested_versions": {"apex": null, "sqlcl": null, "apexlang_mmd": null, "opaf": null}
+}

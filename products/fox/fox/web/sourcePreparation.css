@@ -1,0 +1,8 @@
+.source-mode{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0 14px}
+.source-upload-submit{margin:18px 0 0}
+.selected-sources{margin:20px 0;max-height:240px;overflow:auto;font-size:13px}
+.selected-sources li{overflow-wrap:anywhere;margin:6px 0}
+.command-example{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;padding:14px;background:#f0f3ec;border:1px solid #dce3d6;border-radius:8px;font-size:12px;line-height:1.7}
+.acceptance-check{display:flex;align-items:flex-start;gap:11px;margin:15px 0;font-size:13px;line-height:1.6}
+.acceptance-check input{flex:0 0 16px;width:16px;height:16px;accent-color:#314d32;margin:3px 0 0}
+.finding .manifest code{overflow-wrap:anywhere}

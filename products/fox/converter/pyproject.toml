@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jsn-forms2apex-converter"
+version = "0.1.0"
+description = "Fail-closed MCP tools for the JSN Forms-to-APEX POC"
+requires-python = ">=3.10"
+dependencies = ["fastmcp==3.4.4", "oci==2.188.0", "defusedxml==0.7.1"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["forms2apex*", "fox_source_contract*"]
+
+[tool.setuptools.package-data]
+forms2apex = ["templates/**/*", "templates/*/.apex/*.json"]
+fox_source_contract = ["source-manifest.json"]
+

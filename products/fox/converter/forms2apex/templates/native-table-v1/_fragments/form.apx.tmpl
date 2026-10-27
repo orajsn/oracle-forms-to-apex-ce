@@ -1,0 +1,157 @@
+page 2 (
+    name: Native Record
+    alias: RECORD
+    title: Native Record
+    appearance {
+        pageTemplate: @/standard
+        templateOptions: #DEFAULT#
+    }
+    security {
+        pageAccessProtection: argumentsMustHaveChecksum
+    }
+    region record (
+        name: Record
+        type: form
+        source {
+            location: localDatabase
+            type: tableView
+            tableName: $TABLE
+        }
+        layout {
+            sequence: 10
+            slot: body
+        }
+        appearance {
+            template: @/standard
+            templateOptions: #DEFAULT#
+        }
+        attributes (
+            edit {
+                enabled: true
+                allowedOperations: [
+                    add
+                    update
+                ]
+                lostUpdateType: rowValues
+            }
+        )
+    )
+$FORM_ITEMS
+    button create (
+        buttonName: CREATE
+        label: Create
+        layout {
+            sequence: 20
+            region: @record
+            slot: create
+        }
+        appearance {
+            buttonTemplate: @/text
+            hot: true
+        }
+        behavior {
+            action: submitPage
+            warnOnUnsavedChanges: doNotCheck
+            executeValidations: true
+            databaseAction: insert
+        }
+        serverSideCondition {
+            type: itemIsNull
+            item: $KEY_ITEM
+        }
+    )
+    button save (
+        buttonName: SAVE
+        label: Save Changes
+        layout {
+            sequence: 30
+            region: @record
+            slot: create
+        }
+        appearance {
+            buttonTemplate: @/text
+            hot: true
+        }
+        behavior {
+            action: submitPage
+            warnOnUnsavedChanges: doNotCheck
+            executeValidations: true
+            databaseAction: update
+        }
+        serverSideCondition {
+            type: itemIsNotNull
+            item: $KEY_ITEM
+        }
+    )
+    button cancel (
+        buttonName: CANCEL
+        label: Cancel
+        layout {
+            sequence: 10
+            region: @record
+            slot: previous
+        }
+        appearance {
+            buttonTemplate: @/text
+        }
+        behavior {
+            action: redirectThisApp
+            warnOnUnsavedChanges: doNotCheck
+            target: {
+                page: 1
+                clearCache: 2
+            }
+        }
+    )
+    process initialize-record (
+        name: Initialize Record
+        type: formInitialization
+        formRegion: @record
+        execution {
+            sequence: 10
+            point: beforeHeader
+        }
+    )
+    process save-record (
+        name: Save Record
+        type: formAutoRowProcessing
+        formRegion: @record
+        target {
+            targetType: regionSource
+            preventLostUpdates: true
+            returnPksAfterInsert: true
+        }
+        lockRow {
+            lockRow: true
+        }
+        execution {
+            sequence: 10
+            point: processing
+        }
+        serverSideCondition {
+            type: requestIsContainedInValue
+            value: CREATE,SAVE
+        }
+        successMessage {
+            successMessage: Record saved.
+        }
+    )
+    branch return-to-records (
+        name: Return to Records
+        execution {
+            sequence: 10
+            point: afterProcessing
+        }
+        behavior {
+            type: pageOrUrl
+            target: {
+                page: 1
+                clearCache: 2
+            }
+        }
+        serverSideCondition {
+            type: requestIsContainedInValue
+            value: CREATE,SAVE
+        }
+    )
+)

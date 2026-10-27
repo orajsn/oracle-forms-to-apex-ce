@@ -1,0 +1,60 @@
+{
+  "source_observation_sha256": "18229ac4ea94a3e2f506e714d16bd1b8d5c6e4cabc69f7ce9304841a900ca8d0",
+  "scope": "normalized-public-podman-shape-no-credential-values",
+  "containers": {
+    "forms2apex-mcp": {
+      "cmd": null,
+      "entrypoint": "python3.11 -m forms2apex.server",
+      "environment_names": ["F2A_APEX_BASE_URL", "F2A_APEX_PARSING_SCHEMA", "F2A_APEX_WORKSPACE", "F2A_GENERATOR_MODEL", "F2A_JOBS_ROOT", "F2A_MCP_BEARER_TOKEN", "F2A_MCP_HOST", "F2A_MCP_PORT", "F2A_OPAF_MAPPER_WORKFLOW_ID", "F2A_OPAF_REVIEWER_WORKFLOW_ID", "F2A_REVIEWER_MODEL", "F2A_SQLCL_CONNECTION_NAME", "F2A_SQLCL_PATH", "F2A_TARGET_PROFILE_PATH", "HOME", "HOSTNAME", "PATH", "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE", "PYTHONPATH", "TNS_ADMIN", "container"],
+      "host": {
+        "AutoRemove": false, "CapAdd": [], "CapDrop": [], "CgroupMode": "host",
+        "CpuPeriod": 0, "CpuQuota": 0, "Memory": 0, "NanoCpus": 0,
+        "NetworkMode": "bridge", "PidsLimit": 0,
+        "PortBindings": {"8090/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8091"}]},
+        "Privileged": false, "PublishAllPorts": false, "ReadonlyRootfs": false,
+        "RestartPolicy": {"MaximumRetryCount": 0, "Name": ""},
+        "SecurityOpt": ["label=level:s0:c318,c841"], "ShmSize": 65536000,
+        "Tmpfs": {}, "UsernsMode": "private"
+      },
+      "id": "3d4294a16022444260ce242e18e7b749f967aba46e0023c7b9fc8b37ba20659a",
+      "image": "c7fdb53bc04450e297cbbbc89fb834be714e106d5a164b1c80dc77d544db5a1b",
+      "mounts": [
+        {"Destination": "/opt/sqlcl", "RW": false, "Source": "/home/opc/sqlcl", "Type": "bind"},
+        {"Destination": "/run/fox-target/profile.json", "RW": false, "Source": "/home/opc/fox/releases/native-beta-20261017h/deployment/target-profile.jsn.json", "Type": "bind"},
+        {"Destination": "/opt/forms2apex/outputs/jobs", "RW": true, "Source": "/home/opc/forms2apex/outputs/jobs", "Type": "bind"},
+        {"Destination": "/home/converter/.dbtools", "RW": true, "Source": "/home/opc/forms2apex/sqlcl-user", "Type": "bind"},
+        {"Destination": "/opt/forms2apex/wallet", "RW": false, "Source": "/home/opc/opaf-secure/JSNF2APEX_wallet_single", "Type": "bind"}
+      ],
+      "networks": {"applied-ai-agent_factory_oracle_network": {"IPAddress": "10.89.0.29"}, "forms2apex": {"IPAddress": "10.89.1.3"}},
+      "public_environment": {"HOME": "/home/converter", "PYTHONPATH": "/opt/forms2apex/converter:/usr/local/lib64/python3.11/site-packages:/usr/local/lib/python3.11/site-packages", "TNS_ADMIN": "/opt/forms2apex/wallet"},
+      "running": true, "user": "10001", "workdir": "/opt/forms2apex/converter"
+    },
+    "fox": {
+      "cmd": ["python", "-m", "uvicorn", "fox.app:app", "--host", "127.0.0.1", "--port", "8100", "--no-access-log", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"],
+      "entrypoint": "",
+      "environment_names": ["FOX_ADMIN_USERNAME", "FOX_CONVERSION_PROFILE", "FOX_CONVERTER_URL", "FOX_DATA_DIR", "FOX_NATIVE_PROFILE_FILE", "FOX_OPAF_BASE_URL", "FOX_OPAF_CREDENTIAL_FILE", "FOX_OPAF_RUN_URL", "FOX_PASSWORD_HASH", "FOX_PUBLIC_ORIGIN", "FOX_RUN_ADAPTER", "FOX_VERIFICATION_ENABLED", "FOX_VERIFIER_RELEASE_SHA256", "GPG_KEY", "HOME", "HOSTNAME", "LANG", "PATH", "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED", "PYTHON_SHA256", "PYTHON_VERSION", "container"],
+      "host": {
+        "AutoRemove": false, "CapAdd": [],
+        "CapDrop": ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_NET_BIND_SERVICE", "CAP_NET_RAW", "CAP_SETFCAP", "CAP_SETGID", "CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_CHROOT"],
+        "CgroupMode": "host", "CpuPeriod": 0, "CpuQuota": 0, "Memory": 0,
+        "NanoCpus": 0, "NetworkMode": "host", "PidsLimit": 0, "PortBindings": {},
+        "Privileged": false, "PublishAllPorts": false, "ReadonlyRootfs": true,
+        "RestartPolicy": {"MaximumRetryCount": 0, "Name": ""},
+        "SecurityOpt": ["no-new-privileges", "label=level:s0:c75,c812"],
+        "ShmSize": 65536000,
+        "Tmpfs": {"/tmp": "rw,noexec,nosuid,size=64m,rprivate,nodev,tmpcopyup"},
+        "UsernsMode": ""
+      },
+      "id": "00d59808b89b0380b6a1cdd2f5d8c1656f81df83c8b9c1f25e15adf795ab556a",
+      "image": "9ce6e594cffedfbe85d3431af8ad929bb83222a2e1fd4b8521cad8edd9e52490",
+      "mounts": [
+        {"Destination": "/run/fox-native/profile.json", "RW": false, "Source": "/home/opc/fox/releases/native-beta-20261017h/deployment/native-beta-profile.json", "Type": "bind"},
+        {"Destination": "/data", "RW": true, "Source": "/home/opc/fox/data", "Type": "bind"},
+        {"Destination": "/run/fox-opaf", "RW": false, "Source": "/home/opc/fox/secure/opaf-client", "Type": "bind"}
+      ],
+      "networks": {"host": {"IPAddress": ""}},
+      "public_environment": {"FOX_CONVERSION_PROFILE": "native-table-form-v1", "FOX_CONVERTER_URL": "http://127.0.0.1:8091", "FOX_DATA_DIR": "/data", "FOX_NATIVE_PROFILE_FILE": "/run/fox-native/profile.json", "FOX_OPAF_CREDENTIAL_FILE": "/run/fox-opaf/client.json", "FOX_RUN_ADAPTER": "embedded-opaf", "FOX_VERIFICATION_ENABLED": "1", "FOX_VERIFIER_RELEASE_SHA256": "acc3bf901d6f221cc5b887afe88a5cd53b9b4a8153e820b1f078b10d679004ba", "HOME": "/app"},
+      "running": true, "user": "1000:1000", "workdir": "/app"
+    }
+  }
+}

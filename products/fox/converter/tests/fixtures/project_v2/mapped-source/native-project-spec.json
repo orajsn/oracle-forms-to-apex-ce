@@ -1,0 +1,110 @@
+{
+  "data_mode": "synthetic_test_only",
+  "forms": [
+    {
+      "ddl_sources": [
+        {
+          "name": "beta.sql",
+          "sha256": "4499836da0994f2314e569b3ff43c3a076d43d7f6a5c81c5ab9fc11af8ddc838"
+        }
+      ],
+      "form_name": "BETA",
+      "module_id": "form-23f1b2fc3c2f93af048c",
+      "native_form": {
+        "columns": [
+          {
+            "data_type": "NUMBER",
+            "identity": true,
+            "label": "ID",
+            "name": "ID",
+            "nullable": false,
+            "primary_key": true
+          },
+          {
+            "data_type": "VARCHAR2",
+            "identity": false,
+            "label": "Title",
+            "length": 40,
+            "name": "TITLE",
+            "nullable": false,
+            "primary_key": false
+          }
+        ],
+        "data_mode": "synthetic_test_only",
+        "profile_id": "native-table-form-v1",
+        "supported_operations": [
+          "query",
+          "insert",
+          "update"
+        ],
+        "table_name": "FOX_NATIVE_05252395738FDE02855"
+      },
+      "source_name": "beta.xml",
+      "source_sha256": "4b62238f1eada83b21de4726445db389ac103993e16092ae2492b76021cfb557",
+      "storage_mapping": {
+        "identity_sha256": "05252395738fde02855ac295d6e11d520e262b933bb6960ae23eb16bc05e3fab",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "3f2a658d58e1667fa032ced5de9aacbec00d047225f4ef4da06b160de3fea7ea",
+        "source_table_name": "STATUS_LOG",
+        "target_table_name": "FOX_NATIVE_05252395738FDE02855"
+      }
+    },
+    {
+      "ddl_sources": [
+        {
+          "name": "alpha.sql",
+          "sha256": "5a259b6d39e189180a16bcdcc5b59ea1f7ce18bb22cfd876a9b0572c3ca1e6bd"
+        }
+      ],
+      "form_name": "ALPHA",
+      "module_id": "form-b79af13a9036ab24da9e",
+      "native_form": {
+        "columns": [
+          {
+            "data_type": "NUMBER",
+            "identity": true,
+            "label": "ID",
+            "name": "ID",
+            "nullable": false,
+            "primary_key": true
+          },
+          {
+            "data_type": "VARCHAR2",
+            "identity": false,
+            "label": "Title",
+            "length": 40,
+            "name": "TITLE",
+            "nullable": false,
+            "primary_key": false
+          }
+        ],
+        "data_mode": "synthetic_test_only",
+        "profile_id": "native-table-form-v1",
+        "supported_operations": [
+          "query",
+          "insert",
+          "update"
+        ],
+        "table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+      },
+      "source_name": "alpha.xml",
+      "source_sha256": "446a73cf6c83c0b3584fadf37ab3c67978796f87f21f27f3a991d142c00aa5f0",
+      "storage_mapping": {
+        "identity_sha256": "f4b37b07bf5b1876505a59fe8372c6e9165f12e582d50a88d1b13c28458bedf2",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "ab9fc677426561b23da11480a11d443cf80a501826a8f238e82d6ff361a2d730",
+        "source_table_name": "WORK_ITEMS",
+        "target_table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+      }
+    }
+  ],
+  "profile_id": "native-project-v1",
+  "project_id": "project-one",
+  "project_name": "Example project",
+  "schema_version": 2,
+  "source_manifest_sha256": "00cd6353d749d21236aa5e62f1440018a24819c50d1570939ef3b7bef9714218"
+}

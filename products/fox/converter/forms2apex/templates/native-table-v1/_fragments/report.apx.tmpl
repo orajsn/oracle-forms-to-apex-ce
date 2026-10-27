@@ -1,0 +1,75 @@
+page 1 (
+    name: Native Records
+    alias: HOME
+    title: Native Records
+    appearance {
+        pageTemplate: @/standard
+        templateOptions: #DEFAULT#
+    }
+    security {
+        authentication: required
+        pageAccessProtection: argumentsMustHaveChecksum
+    }
+    region records (
+        name: Native Records
+        type: interactiveReport
+        source {
+            location: localDatabase
+            type: tableView
+            tableName: $TABLE
+        }
+        layout {
+            sequence: 10
+            slot: body
+        }
+        appearance {
+            template: @/interactive-report
+            templateOptions: #DEFAULT#
+        }
+        searchBar {
+            includeSearchBar: true
+            searchField: true
+        }
+        link {
+            linkColumn: customTarget
+            target: {
+                page: 2
+                clearCache: 2
+                items: {
+                    $KEY_ITEM: "#$KEY#"
+                }
+            }
+            linkIcon: Edit
+        }
+$REPORT_COLUMNS
+        savedReport primary (
+            visibility: primaryDefault
+            view {
+                default: report
+                rowsPerPage: 15
+            }
+$DISPLAY_COLUMNS
+        )
+    )
+    button create (
+        buttonName: CREATE
+        label: Create Record
+        layout {
+            sequence: 10
+            region: @records
+            slot: rightOfInteractiveReportSearchBar
+        }
+        appearance {
+            buttonTemplate: @/text
+            hot: true
+        }
+        behavior {
+            action: redirectThisApp
+            warnOnUnsavedChanges: doNotCheck
+            target: {
+                page: 2
+                clearCache: 2
+            }
+        }
+    )
+)

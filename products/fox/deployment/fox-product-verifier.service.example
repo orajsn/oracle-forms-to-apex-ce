@@ -1,0 +1,21 @@
+# TEMPLATE ONLY. Replace B, the installation path and I_SHA256 together after
+# the independent C/R/D/X/layout checks. This file does not install a service.
+# Use the existing opc user manager; do not add User= to a user service.
+[Unit]
+Description=FOX bounded hosted product verifier
+
+[Service]
+Type=simple
+WorkingDirectory=/home/opc/fox-operator/releases/REPLACE_WITH_B
+ExecStart=/path/to/pinned/venv/bin/python3.11 -I -B /home/opc/fox-operator/releases/REPLACE_WITH_B/qa/operator/hosted_service.py run --installation /home/opc/fox-operator/installations/REPLACE_WITH_INSTALLATION/installation.json --installation-sha256 REPLACE_WITH_I_SHA256 --apply
+UMask=0077
+Restart=no
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=1800
+SendSIGKILL=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

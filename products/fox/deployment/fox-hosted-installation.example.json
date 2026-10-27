@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "scope": "fox-hosted-product-verifier-installation-v1",
+  "provider": {
+    "path": "/home/opc/fox-operator/installations/REPLACE_WITH_INSTALLATION/provider.json",
+    "sha256": "REPLACE_WITH_C_SHA256"
+  },
+  "release": {
+    "path": "/home/opc/fox-operator/installations/REPLACE_WITH_INSTALLATION/release.json",
+    "sha256": "REPLACE_WITH_R_SHA256"
+  },
+  "admission": {
+    "path": "/home/opc/fox-operator/installations/REPLACE_WITH_INSTALLATION/admission.json",
+    "sha256": "REPLACE_WITH_D_SHA256"
+  },
+  "retirement": {
+    "path": "/home/opc/fox-operator/state/handoffs/REPLACE_WITH_ARCHIVE",
+    "attestation_sha256": "REPLACE_WITH_X_SHA256"
+  },
+  "layout": {
+    "release_root": "/home/opc/fox-operator/releases/REPLACE_WITH_B",
+    "inventory": {
+      "path": "/home/opc/fox-operator/installations/REPLACE_WITH_INSTALLATION/source-inventory.json",
+      "sha256": "REPLACE_WITH_SOURCE_INVENTORY_SHA256"
+    }
+  },
+  "bounds": {
+    "max_jobs": 1,
+    "max_polls": 1,
+    "max_seconds": 1800,
+    "poll_seconds": 5
+  },
+  "batch_pause_seconds": 5
+}

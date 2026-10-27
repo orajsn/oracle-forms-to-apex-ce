@@ -1,0 +1,83 @@
+{
+  "name": "JSN Forms-to-APEX Converter",
+  "version": 1,
+  "data_policy": {
+    "allowed": ["redacted Forms XML", "redacted PL/SQL", "synthetic data", "inferred stub DDL"],
+    "prohibited": ["raw Forms binaries outside local intake", "credentials", "production records", "customer identifiers", "legacy production database connections"]
+  },
+  "mcp": {
+    "transport": "streamable-http",
+    "url": "http://10.89.1.3:8090/mcp",
+    "authentication": "bearer",
+    "network_scope": "internal-podman-network",
+    "opaf_registration_requires": [
+      "ALLOW_INSECURE_HTTP_URLS=true",
+      "BLOCK_PRIVATE_OUTBOUND_URLS=false",
+      "explicit security approval"
+    ],
+    "registered": true,
+    "source_id": 1,
+    "source_name": "JSN Forms-to-APEX Converter",
+    "post_registration_policy": {
+      "ALLOW_INSECURE_HTTP_URLS": false,
+      "BLOCK_PRIVATE_OUTBOUND_URLS": true,
+      "agent_builder_tool_count": 5
+    }
+  },
+  "opaf_draft": {
+    "name": "JSN Forms-to-APEX Converter POC",
+    "id": "573360A075206A99E0637D59000A704E",
+    "published": false,
+    "node_count": 22,
+    "connected_edge_count": 21,
+    "generator_connection": "JSN Forms Converter 4.3",
+    "reviewer_connection": "JSN Forms Reviewer",
+    "validation_connected": true,
+    "import_connected": true,
+    "status_connected": true
+  },
+  "stages": [
+    {
+      "id": "analyze",
+      "actor": "forms-analyzer",
+      "tool": "inspect_forms_job",
+      "on_failure": "stop"
+    },
+    {
+      "id": "generate",
+      "actor": "apex-mapping-generator",
+      "model": "xai.grok-4.3",
+      "output_contract": {
+        "data_classification": "synthetic_or_stub_only",
+        "generator.model": "xai.grok-4.3",
+        "reviewer.model": "xai.grok-4.3",
+        "reviewer.verdict": "approve",
+        "apexlang_files": "object mapping safe relative paths to UTF-8 text",
+        "remediation_items": "array; never omit an unsupported construct"
+      },
+      "on_unsupported": "record_remediation_item"
+    },
+    {
+      "id": "review",
+      "actor": "independent-reviewer",
+      "model": "xai.grok-4.3",
+      "required_verdict": "approve",
+      "on_reject": "return_to_generate"
+    },
+    {
+      "id": "validate",
+      "actor": "deterministic-sqlcl-gate",
+      "tool": "validate_apex_draft",
+      "required_output": "passed=true",
+      "on_failure": "return_to_generate"
+    },
+    {
+      "id": "import",
+      "actor": "validated-draft-importer",
+      "tool": "import_validated_draft",
+      "precondition": "job.state == VALID and validation.passed == true",
+      "application_alias": "F2A_<job_id>",
+      "overwrite": false
+    }
+  ]
+}

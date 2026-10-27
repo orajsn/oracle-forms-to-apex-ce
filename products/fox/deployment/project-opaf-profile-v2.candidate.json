@@ -1,0 +1,22 @@
+{
+  "schema_version": 2,
+  "profile_id": "native-project-v1",
+  "native_project_schema_versions": [
+    1,
+    2
+  ],
+  "storage_mapping_scope": "fox-project-storage-v1",
+  "module_execution_scope": "fox-project-module-execution-v2",
+  "opaf_base_url": "https://localhost:8080/agentFactory",
+  "certificate_sha256": "68be4eeb6c362a46c0f1cb8bc4eda4585772a8f8a778dbace28cb60992830f93",
+  "mapper": {
+    "workflow_id": null,
+    "model": "xai.grok-4.3",
+    "graph_sha256": "897c6ff34f011fd53084623532d843a21d284308f9490ac0c1fee3a11ec3e22e"
+  },
+  "reviewer": {
+    "workflow_id": null,
+    "model": "xai.grok-4.3",
+    "graph_sha256": "882434ecc24994eee8945cbad7a9e14986d5e4b53b35ea0c46f473a45709bdb9"
+  }
+}

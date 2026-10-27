@@ -1,0 +1,4 @@
+* text=auto eol=lf
+converter/forms2apex/templates/** -text
+**/tests/fixtures/** -text
+qa/product-project-journey/fixtures/** -text

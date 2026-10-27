@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "profile_id": "jsn-native-beta-v1",
+  "active": true,
+  "scope": {
+    "conversion_profile": "native-table-form-v1",
+    "data_mode": "synthetic_test_only",
+    "supported_operations": ["query", "insert", "update"],
+    "customer_deployment_authorized": false,
+    "existing_resources_only": true
+  },
+  "oci": {
+    "compartment_id": "ocid1.compartment.oc1..aaaaaaaa2q5aelkapmt5mhumvxadcynq5chez2faeucy5plefhy3ylmahtba",
+    "database_id": "ocid1.autonomousdatabase.oc1.iad.anuwcljrc7x6gxiapkxouj7emfbelvnvompwjcpoxx5vg727cegjsqkbp4rq",
+    "instance_id": "ocid1.instance.oc1.iad.anuwcljtc7x6gxic5w37qsyp3rst64betkt4uk2pdcrtmy3okspcpbv77qea",
+    "region": "us-ashburn-1"
+  },
+  "database": {
+    "db_name": "ASZ8EQWFM8UNCA2_JSNF2APEX",
+    "session_user": "FORMS2APEX_POC",
+    "parsing_schema": "FORMS2APEX_POC"
+  },
+  "apex": {
+    "workspace": "FORMS2APEX_POC",
+    "workspace_id": "9009446931169094",
+    "ords_origin": "https://asz8eqwfm8unca2-jsnf2apex.adb.us-ashburn-1.oraclecloudapps.com",
+    "ords_base_path": "/ords"
+  },
+  "sqlcl": {"saved_connection": "F2A_APEX"},
+  "opaf": {
+    "base_url": "https://localhost:8080/agentFactory",
+    "certificate_sha256": "68be4eeb6c362a46c0f1cb8bc4eda4585772a8f8a778dbace28cb60992830f93",
+    "model_authentication": "oci_instance_principal",
+    "version_number": 264000,
+    "build_id": 1780444486153,
+    "roles": {
+      "mapper": {
+        "workflow_id": "5DF531D447B84A08E063F35A000ADBB1",
+        "model": "xai.grok-4.3",
+        "graph_sha256": "50c146086c2506b7198cc65aeb6dd3c4fee244847c4643f853de4c07c41bc0e8"
+      },
+      "reviewer": {
+        "workflow_id": "5DF534D10C2D4E6AE063F35A000A3487",
+        "model": "xai.grok-4.3",
+        "graph_sha256": "6f75f0d521c5771b759e7b18a67857a937317f9640d087ef4ce4d11de681c89f"
+      }
+    }
+  },
+  "tested_versions": {
+    "apex": "26.1.5",
+    "sqlcl": "26.1.2.0",
+    "apexlang_mmd": "26.1.0+3102",
+    "opaf": "26.4.0.0.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "workspace": {
+    "name": "FORMS2APEX_POC"
+  },
+  "app": {
+    "databaseSession": {
+      "parsingSchema": "FORMS2APEX_POC"
+    }
+  }
+}
+
+

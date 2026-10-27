@@ -1,0 +1,32 @@
+{
+  "files": [
+    {
+      "bytes": 17732,
+      "path": "intake.py",
+      "sha256": "79b31c157d9946342fb8ee1850a258b4aa216f7095bacbb4f16b4f3bd6ecee66",
+      "source_path": "fox/fox/intake.py"
+    },
+    {
+      "bytes": 22327,
+      "path": "native_source.py",
+      "sha256": "be236d17557ea27c6d74177b71f18f0667ddabaa4321032254d9d6db435220b7",
+      "source_path": "fox/fox/native_source.py"
+    },
+    {
+      "bytes": 46454,
+      "path": "project_conversion.py",
+      "sha256": "f699250058866d6af7315cd19a1e5313cc2a3fb319eb6f547210d2ed75ff3ff1",
+      "source_path": "fox/fox/project_conversion.py"
+    }
+  ],
+  "initializer": {
+    "bytes": 72,
+    "path": "__init__.py",
+    "sha256": "96fcc78c5e7dbd760e11bcec52a43e0abd7b871b41f2f97d8f6d49b5b3408e1f"
+  },
+  "package": "fox_source_contract",
+  "schema_version": 1,
+  "scope": "fox-source-contract-mirror-v1",
+  "synchronizer": "tools/sync_fox_source_contract.py",
+  "transformation": "none-byte-for-byte"
+}

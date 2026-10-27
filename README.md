@@ -101,3 +101,12 @@ Copyright (c) 2026 Oracle and/or its affiliates.
 
 Licensed under the Universal Permissive License (UPL), Version 1.0. See
 `LICENSE.txt`.
+
+## FOX product development
+
+[FOX (Form to APEX)](products/fox/README.md) is the separate, business-user web
+product under development in this repository. It groups multiple Forms modules
+into one project and targets one native APEX application/export per conversion.
+The CE skill and its installer above remain unchanged. FOX has its own setup,
+runtime, support boundaries and verification status; installing the CE skill
+does not install FOX.

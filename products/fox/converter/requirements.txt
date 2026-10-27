@@ -1,0 +1,4 @@
+fastmcp==3.4.4
+oci==2.188.0
+defusedxml==0.7.1
+

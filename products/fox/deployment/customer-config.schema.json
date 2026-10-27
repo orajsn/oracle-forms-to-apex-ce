@@ -1,0 +1,836 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fox:customer-installation-draft:v1",
+  "title": "Inactive FOX customer installation preparation (not a runtime profile)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_type",
+    "schema_version",
+    "active",
+    "deployment_authorized",
+    "customer",
+    "scope",
+    "oci",
+    "database",
+    "apex",
+    "versions",
+    "forms",
+    "sqlcl",
+    "opaf",
+    "operations"
+  ],
+  "properties": {
+    "document_type": {
+      "type": "string",
+      "const": "fox-customer-installation-draft-v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "active": {
+      "type": "boolean",
+      "const": false
+    },
+    "deployment_authorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "customer_owner",
+        "technical_owner",
+        "dba_owner",
+        "approver_owner"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "customer_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "technical_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "dba_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "approver_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversion_profile",
+        "data_mode",
+        "customer_deployment_authorized",
+        "existing_resources_only"
+      ],
+      "properties": {
+        "conversion_profile": {
+          "type": "string",
+          "const": "native-table-form-v1"
+        },
+        "data_mode": {
+          "type": "string",
+          "const": "synthetic_test_only"
+        },
+        "customer_deployment_authorized": {
+          "type": "boolean",
+          "const": false
+        },
+        "existing_resources_only": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "oci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenancy_id",
+        "compartment_id",
+        "database_id",
+        "instance_id",
+        "region"
+      ],
+      "properties": {
+        "tenancy_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "tenancy_ocid"
+        },
+        "compartment_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "compartment_ocid"
+        },
+        "database_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "database_ocid"
+        },
+        "instance_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "instance_ocid"
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "region"
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployment_type",
+        "db_name",
+        "session_user",
+        "parsing_schema"
+      ],
+      "properties": {
+        "deployment_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "autonomous_database",
+            "oci_base_database",
+            "exadata_cloud_service",
+            "exadata_cloud_at_customer",
+            "existing_oracle_database",
+            null
+          ]
+        },
+        "db_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "session_user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "parsing_schema": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        }
+      }
+    },
+    "apex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "workspace_id",
+        "ords_origin",
+        "ords_base_path",
+        "certificate_sha256"
+      ],
+      "properties": {
+        "workspace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "decimal"
+        },
+        "ords_origin": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "origin"
+        },
+        "ords_base_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "url_path"
+        },
+        "certificate_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "sha256"
+        }
+      }
+    },
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apex",
+        "database",
+        "sqlcl",
+        "apexlang_mmd",
+        "opaf",
+        "forms",
+        "java",
+        "ords"
+      ],
+      "properties": {
+        "apex": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "database": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "sqlcl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "apexlang_mmd": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "opaf": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "forms": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "java": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        },
+        "ords": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "version"
+        }
+      }
+    },
+    "forms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extraction_route",
+        "platform",
+        "oracle_home_reference",
+        "entitlement_review_reference",
+        "platform_review_reference",
+        "extraction_evidence_reference"
+      ],
+      "properties": {
+        "extraction_route": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "local_oracle_forms",
+            "preconverted_oracle_forms",
+            "approved_oracle_worker",
+            null
+          ]
+        },
+        "platform": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "windows",
+            "linux",
+            "macos",
+            null
+          ]
+        },
+        "oracle_home_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "entitlement_review_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "platform_review_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "extraction_evidence_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        }
+      }
+    },
+    "sqlcl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "saved_connection",
+        "wallet_reference",
+        "credential_reference"
+      ],
+      "properties": {
+        "saved_connection": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "wallet_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "secret_ref"
+        },
+        "credential_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "secret_ref"
+        }
+      }
+    },
+    "opaf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_url",
+        "certificate_sha256",
+        "model_authentication",
+        "model_credential_reference",
+        "authentication_secret_reference",
+        "version_number",
+        "build_id",
+        "processing_approval_reference",
+        "roles"
+      ],
+      "properties": {
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "url"
+        },
+        "certificate_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "sha256"
+        },
+        "model_authentication": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "oci_instance_principal",
+            "oci_resource_principal",
+            "opaque_secret_reference",
+            null
+          ]
+        },
+        "model_credential_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "secret_ref"
+        },
+        "authentication_secret_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "secret_ref"
+        },
+        "version_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "build_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "processing_approval_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mapper",
+            "reviewer"
+          ],
+          "properties": {
+            "mapper": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "workflow_id",
+                "model",
+                "graph_sha256"
+              ],
+              "properties": {
+                "workflow_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "identifier"
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "identifier"
+                },
+                "graph_sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "sha256"
+                }
+              }
+            },
+            "reviewer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "workflow_id",
+                "model",
+                "graph_sha256"
+              ],
+              "properties": {
+                "workflow_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "identifier"
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "identifier"
+                },
+                "graph_sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "x-check": "sha256"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "persistent_locations",
+        "release_hashes",
+        "backup_reference",
+        "backup_evidence_reference",
+        "rollback_owner",
+        "rollback_reference",
+        "maintenance_approval_reference"
+      ],
+      "properties": {
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "persistent_locations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fox_data",
+            "converter_jobs",
+            "evidence",
+            "logs",
+            "backups"
+          ],
+          "properties": {
+            "fox_data": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "local_path"
+            },
+            "converter_jobs": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "local_path"
+            },
+            "evidence": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "local_path"
+            },
+            "logs": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "local_path"
+            },
+            "backups": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "local_path"
+            }
+          }
+        },
+        "release_hashes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fox_sha256",
+            "converter_sha256",
+            "opaf_graph_bundle_sha256"
+          ],
+          "properties": {
+            "fox_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "sha256"
+            },
+            "converter_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "sha256"
+            },
+            "opaf_graph_bundle_sha256": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 512,
+              "x-check": "sha256"
+            }
+          }
+        },
+        "backup_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "backup_evidence_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "rollback_owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "label"
+        },
+        "rollback_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        },
+        "maintenance_approval_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 512,
+          "x-check": "identifier"
+        }
+      }
+    }
+  }
+}

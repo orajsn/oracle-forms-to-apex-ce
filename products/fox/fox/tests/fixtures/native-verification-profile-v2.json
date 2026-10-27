@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "scope": "fox-native-verification-profile-v2",
+  "policy_id": "jsn-clean-native-v2",
+  "binding": {
+    "job_id": "fox-aaaaaaaaaaaaaaaaaaaa",
+    "source_manifest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "package_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "allocation_receipt_sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "target": {
+    "compartment_id": "ocid1.compartment.oc1..aaaaaaaa2q5aelkapmt5mhumvxadcynq5chez2faeucy5plefhy3ylmahtba",
+    "database_id": "ocid1.autonomousdatabase.oc1.iad.anuwcljrc7x6gxiapkxouj7emfbelvnvompwjcpoxx5vg727cegjsqkbp4rq",
+    "region": "us-ashburn-1",
+    "db_name": "ASZ8EQWFM8UNCA2_JSNF2APEX",
+    "workspace": "FOX_QA_261017_89ABCDEF",
+    "parsing_schema": "FOX_QA_261017_89ABCDEF",
+    "workspace_id": "22042420337195501",
+    "application_id": 34567,
+    "application_alias": "F2A_QA_261017_89ABCDEF"
+  },
+  "expected_versions": {
+    "apex": "26.1.5",
+    "sqlcl": "26.1.2.0",
+    "database": "23.26.4.1.0",
+    "mmd": "26.1.0+3102"
+  },
+  "max_evidence_age_seconds": 86400
+}

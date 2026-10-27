@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fox:host-installation:v1",
+  "title": "FOX local host installation declaration",
+  "description": "Secret-free, inactive host declaration. Structural validity is not readiness, authorization, a verified release, or Oracle platform certification. The setup CLI separately enforces its file allowlist, exact hashes and observed capabilities. Only the Windows localhost launcher is implemented; other platforms are declarations, not supported launcher claims. The hosted route is reference-only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "document_type",
+    "schema_version",
+    "route",
+    "activation",
+    "release",
+    "host",
+    "storage",
+    "secret_references",
+    "optional_tools"
+  ],
+  "properties": {
+    "document_type": {
+      "type": "string",
+      "const": "fox-installation-v1"
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "route": {
+      "type": "string",
+      "enum": [
+        "localhost-assessment",
+        "existing-jsn-hosted-reference"
+      ],
+      "description": "A localhost assessment setup or an inert reference to the existing guarded JSN deployment. Neither route activates conversion or permits customer deployment."
+    },
+    "activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversion_enabled",
+        "customer_deployment_authorized"
+      ],
+      "properties": {
+        "conversion_enabled": {
+          "type": "boolean",
+          "const": false
+        },
+        "customer_deployment_authorized": {
+          "type": "boolean",
+          "const": false
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "release_id",
+        "files",
+        "python_lock",
+        "ui_entry",
+        "entrypoint"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "UNFROZEN",
+            "FROZEN"
+          ],
+          "description": "UNFROZEN is an editable declaration, not an installable release. FROZEN requires non-null hashes; the setup CLI must still verify complete, allowed members and exact bytes."
+        },
+        "release_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "description": "Non-secret opaque release label, not a path, command or approval."
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "description": "Explicit source, dependency lock, launcher, prebuilt UI and documentation members only. The CLI rejects duplicate paths, unexpected members, unsafe filesystem objects and incomplete UI assets. Credentials, uploaded source data and Oracle binaries are never bundle members.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240,
+                "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*$",
+                "description": "Canonical forward-slash relative path syntax. The CLI separately rejects duplicate paths and enforces exact allowed members and filesystem safety."
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$",
+                "description": "Null is permitted only in an UNFROZEN draft. A hash establishes byte identity, not trust or permission."
+              }
+            }
+          }
+        },
+        "python_lock": {
+          "type": "string",
+          "const": "fox/requirements-lock.txt"
+        },
+        "ui_entry": {
+          "type": "string",
+          "const": "fox/dist/index.html"
+        },
+        "entrypoint": {
+          "type": "string",
+          "const": "fox/scripts/start-local.ps1"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "platform",
+        "python_implementation",
+        "python_major",
+        "python_minor",
+        "bind_address",
+        "port"
+      ],
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "windows",
+            "linux",
+            "macos"
+          ],
+          "description": "Declared host platform. Only Windows localhost startup is implemented by this manifest's launcher; the checker must not infer readiness on other platforms."
+        },
+        "python_implementation": {
+          "type": "string",
+          "const": "CPython"
+        },
+        "python_major": {
+          "type": "integer",
+          "const": 3
+        },
+        "python_minor": {
+          "type": "integer",
+          "const": 12,
+          "description": "The current FOX host baseline, not an Oracle vendor supportability statement."
+        },
+        "bind_address": {
+          "type": "string",
+          "const": "127.0.0.1"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_relative_path",
+        "preserve_on_prepare",
+        "backup_reference",
+        "rollback_reference"
+      ],
+      "properties": {
+        "session_relative_path": {
+          "type": "string",
+          "const": "fox/work/local-assessment"
+        },
+        "preserve_on_prepare": {
+          "type": "boolean",
+          "const": true
+        },
+        "backup_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "description": "Null or a non-secret opaque owner label. Not a path or verified backup; never dereferenced."
+        },
+        "rollback_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "description": "Null or a non-secret opaque owner label. Not a path or verified rollback; never dereferenced."
+        }
+      }
+    },
+    "secret_references": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "local_login",
+        "hosted_runtime"
+      ],
+      "properties": {
+        "local_login": {
+          "type": "string",
+          "const": "prompt://local-session-password",
+          "description": "An inert prompt instruction. Never put the password in this document."
+        },
+        "hosted_runtime": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 138,
+          "pattern": "^secret://[A-Za-z][A-Za-z0-9_-]{0,63}/[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "description": "Opaque reference only. The host setup layer never resolves it, contacts the hosted runtime, or grants authority."
+        }
+      }
+    },
+    "optional_tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "oracle_home_reference",
+        "java_reference"
+      ],
+      "properties": {
+        "oracle_home_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "java_reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        }
+      },
+      "description": "Opaque local owner labels only, never executable paths or commands. Declarations do not establish installation, entitlement, capability or successful Forms extraction."
+    }
+  }
+}

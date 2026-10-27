@@ -1,0 +1,4 @@
+interface:
+  display_name: "FOX Installation"
+  short_description: "Check, set up and resume a FOX release"
+  default_prompt: "Use $fox-install to check this FOX checkout and set up the supported installation route."

@@ -1,0 +1,8 @@
+<Module xmlns="http://xmlns.oracle.com/Forms">
+  <FormModule Name="FOX_NATIVE_BETA_SYNTHETIC">
+    <Block Name="BETA" QueryDataSourceName="FOX_NATIVE_BETA" QueryDataSourceType="Table">
+      <Item Name="ID"/><Item Name="TITLE" Prompt="Work title"/>
+      <Item Name="STATUS"/><Item Name="AMOUNT"/><Item Name="DUE_DATE"/>
+    </Block>
+  </FormModule>
+</Module>

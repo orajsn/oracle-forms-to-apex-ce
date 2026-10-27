@@ -1,0 +1,155 @@
+{
+  "application_count": 1,
+  "form_count": 2,
+  "forms": [
+    {
+      "ddl_sources": [
+        {
+          "name": "beta.sql",
+          "sha256": "4499836da0994f2314e569b3ff43c3a076d43d7f6a5c81c5ab9fc11af8ddc838"
+        }
+      ],
+      "form_alias": "EDIT_1",
+      "form_file": "pages/p00002-edit_1.apx",
+      "form_name": "BETA",
+      "form_page_id": 2,
+      "items": [
+        {
+          "column": "ID",
+          "item": "P2_ID"
+        },
+        {
+          "column": "TITLE",
+          "item": "P2_TITLE"
+        }
+      ],
+      "module_id": "form-23f1b2fc3c2f93af048c",
+      "native_spec_sha256": "0e762b26aba88df5db41c10608a53ae35de402f2d9520e003564d8c0981a6a13",
+      "report_alias": "FORM_1",
+      "report_file": "pages/p00001-form_1.apx",
+      "report_page_id": 1,
+      "schema_contract_sha256": "80f02c55537c95b8c62ea045378470e17e8f00761a809b7f0b7d7a25c38294fd",
+      "source_name": "beta.xml",
+      "source_sha256": "4b62238f1eada83b21de4726445db389ac103993e16092ae2492b76021cfb557",
+      "storage_mapping": {
+        "identity_sha256": "05252395738fde02855ac295d6e11d520e262b933bb6960ae23eb16bc05e3fab",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "3f2a658d58e1667fa032ced5de9aacbec00d047225f4ef4da06b160de3fea7ea",
+        "source_table_name": "STATUS_LOG",
+        "target_table_name": "FOX_NATIVE_05252395738FDE02855"
+      },
+      "table_name": "FOX_NATIVE_05252395738FDE02855"
+    },
+    {
+      "ddl_sources": [
+        {
+          "name": "alpha.sql",
+          "sha256": "5a259b6d39e189180a16bcdcc5b59ea1f7ce18bb22cfd876a9b0572c3ca1e6bd"
+        }
+      ],
+      "form_alias": "EDIT_2",
+      "form_file": "pages/p00004-edit_2.apx",
+      "form_name": "ALPHA",
+      "form_page_id": 4,
+      "items": [
+        {
+          "column": "ID",
+          "item": "P4_ID"
+        },
+        {
+          "column": "TITLE",
+          "item": "P4_TITLE"
+        }
+      ],
+      "module_id": "form-b79af13a9036ab24da9e",
+      "native_spec_sha256": "f62039e256737484067ed41f3ff7488b224bf02b9d2c61ce9b17232f26bb8bc7",
+      "report_alias": "FORM_2",
+      "report_file": "pages/p00003-form_2.apx",
+      "report_page_id": 3,
+      "schema_contract_sha256": "53ece0295b5f3baa299639dc3287e9c39ba04df8f66e25247f3f206613536483",
+      "source_name": "alpha.xml",
+      "source_sha256": "446a73cf6c83c0b3584fadf37ab3c67978796f87f21f27f3a991d142c00aa5f0",
+      "storage_mapping": {
+        "identity_sha256": "f4b37b07bf5b1876505a59fe8372c6e9165f12e582d50a88d1b13c28458bedf2",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "ab9fc677426561b23da11480a11d443cf80a501826a8f238e82d6ff361a2d730",
+        "source_table_name": "WORK_ITEMS",
+        "target_table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+      },
+      "table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+    }
+  ],
+  "human_acceptance_recorded": false,
+  "imported": false,
+  "project_id": "project-one",
+  "project_name": "Example project",
+  "rendering_spec_sha256": "64973e88499bc61f142f83bd5edd685b1bd299d465c205a70e2360d1f60777eb",
+  "reviewer_approval_verified": false,
+  "runtime_verified": false,
+  "schema_version": 2,
+  "scope": "fox-native-project-render-trace-v2",
+  "source_completeness_verified": false,
+  "source_manifest_sha256": "00cd6353d749d21236aa5e62f1440018a24819c50d1570939ef3b7bef9714218",
+  "sqlcl_validated": false,
+  "tables": [
+    {
+      "ddl_sources": [
+        {
+          "name": "beta.sql",
+          "sha256": "4499836da0994f2314e569b3ff43c3a076d43d7f6a5c81c5ab9fc11af8ddc838"
+        }
+      ],
+      "module_ids": [
+        "form-23f1b2fc3c2f93af048c"
+      ],
+      "schema_contract_sha256": "80f02c55537c95b8c62ea045378470e17e8f00761a809b7f0b7d7a25c38294fd",
+      "schema_sql_sha256": "054f1e483fe452d395da11b0ddb3afb3921719c2cacb5cc3ecec991005a6aa15",
+      "storage_mapping": {
+        "identity_sha256": "05252395738fde02855ac295d6e11d520e262b933bb6960ae23eb16bc05e3fab",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "3f2a658d58e1667fa032ced5de9aacbec00d047225f4ef4da06b160de3fea7ea",
+        "source_table_name": "STATUS_LOG",
+        "target_table_name": "FOX_NATIVE_05252395738FDE02855"
+      },
+      "table_name": "FOX_NATIVE_05252395738FDE02855"
+    },
+    {
+      "ddl_sources": [
+        {
+          "name": "alpha.sql",
+          "sha256": "5a259b6d39e189180a16bcdcc5b59ea1f7ce18bb22cfd876a9b0572c3ca1e6bd"
+        }
+      ],
+      "module_ids": [
+        "form-b79af13a9036ab24da9e"
+      ],
+      "schema_contract_sha256": "53ece0295b5f3baa299639dc3287e9c39ba04df8f66e25247f3f206613536483",
+      "schema_sql_sha256": "2c7e42d0b5e5698627308cd3d8315407356e7f97fd8e58cc5dfcd856c27bcedb",
+      "storage_mapping": {
+        "identity_sha256": "f4b37b07bf5b1876505a59fe8372c6e9165f12e582d50a88d1b13c28458bedf2",
+        "project_id": "project-one",
+        "schema_version": 1,
+        "scope": "fox-project-storage-v1",
+        "source_schema_sha256": "ab9fc677426561b23da11480a11d443cf80a501826a8f238e82d6ff361a2d730",
+        "source_table_name": "WORK_ITEMS",
+        "target_table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+      },
+      "table_name": "FOX_NATIVE_F4B37B07BF5B1876505"
+    }
+  ],
+  "template": {
+    "data_mode": "synthetic_test_only",
+    "home_policy": "first_report_not_a_business_start_claim",
+    "max_forms": 50,
+    "navigation_policy": "stable_module_id_order_not_inferred_business_flow",
+    "profile_id": "native-project-v1",
+    "sha256": "86845a3138937b311785657d6fc3c688daa6041de2113ff16e77dd2050eb535f",
+    "template_id": "sqlcl-26.1.2-fox-project-v1"
+  }
+}
