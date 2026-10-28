@@ -1,5 +1,20 @@
 # Source verification
 
+The fresh queue component and legacy queue regression can be tested with the
+selected isolated interpreter:
+
+```text
+<test-python> -I -B -m pytest -p no:cacheprovider qa/operator/tests/test_fresh_queue.py qa/operator/tests/test_product_queue_transport.py
+```
+
+Its real S0/F/SQLite cases require nonroot Linux and skip on Windows. Normal
+component cases use synthetic admission records and explicit future-authority
+placeholders, not genuine host admission. The generated helper uses the actual
+queue/fence code; this is not a full container wrapper or connected install test.
+Read [fresh queue scope](fresh-queue-transport.md). Test scratch is independent
+of a private development `work` folder or venv. Dependencies must already be
+installed in the selected isolated test environment; these tests install nothing.
+
 Run commands from `products/fox`. These tests are offline/local checks; they
 do not contact a live APEX target, certify Oracle compatibility or accept a
 business process. Use an isolated environment with the pinned application

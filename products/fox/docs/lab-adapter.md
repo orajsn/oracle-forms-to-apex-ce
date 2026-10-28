@@ -1,5 +1,11 @@
 # Existing-lab adapter, not customer configuration
 
+`qa/run-jsn-qa.sh` and `qa/lib/assert-jsn-vm.sh` are reviewed legacy lab
+sources required by the existing QA source closure, not a fresh/customer
+launcher. They publish no credentials. The VM guard keeps explicit identity
+checks even when Python optimization is enabled. Neither script is executed
+by the fresh queue packet/program builder.
+
 The connected operator/deployment modules preserve an explicit JSN resource
 allowlist. The checked-in `target-profile.jsn*.json` and project OPAF profiles
 contain non-secret target IDs, origins, published workflow IDs and integrity

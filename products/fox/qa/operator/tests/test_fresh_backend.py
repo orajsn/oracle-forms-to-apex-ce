@@ -79,6 +79,16 @@ def copy_source_closure(source, destination):
     candidates = (source / 'dependencies/defusedxml', source / 'fox/.venv/Lib/site-packages/defusedxml')
     dependency = next((path for path in candidates if path.is_dir()), None)
     if dependency is None:
+        # Public source must not need a private development venv or a copied
+        # vendor tree. Use only the already-approved isolated test dependency;
+        # this never downloads or installs anything.
+        from importlib.metadata import distribution, PackageNotFoundError
+        try:
+            installed = distribution('defusedxml')
+            selected = Path(installed.locate_file('defusedxml')).resolve(strict=True)
+            if installed.version == '0.7.1' and selected.is_dir():dependency = selected
+        except (PackageNotFoundError, OSError):pass
+    if dependency is None:
         raise RuntimeError('EXACT_LOCAL_DEFUSEDXML_SOURCES_REQUIRED')
     target = destination / 'dependencies/defusedxml'
     target.mkdir(mode=0o700, parents=True)

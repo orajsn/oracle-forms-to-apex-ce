@@ -44,6 +44,12 @@ and a clean installed multi-form output remain distribution gates.
   retained-history migration and unfinished fresh-runtime building blocks.
 - `qa/product-project-journey`: isolated synthetic UI/API/delivery tests.
 
+The [fresh queue container adapter](fresh-queue-transport.md) now reuses the
+existing queue behind actual local startup-fence checks. It does not enable
+the R4 host executor or supervisor. Fresh host admission and the remaining
+clean-install/QA/promotion bindings are still required; no running fresh
+verifier or customer-installation proof is claimed.
+
 Five internal MCP interfaces remain: `inspect_forms_job`, `generate_apex_draft`,
 `validate_apex_draft`, `import_validated_draft`, `get_job_status`. They are not
 public browser endpoints. A configured model URL does not establish readiness.

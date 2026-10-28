@@ -230,7 +230,7 @@ class DispatchTests(unittest.TestCase):
 
 class RealQueueTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix='bridge-', dir=ROOT / 'work'); self.addCleanup(self.temp.cleanup)
+        self.temp = tempfile.TemporaryDirectory(prefix='bridge-'); self.addCleanup(self.temp.cleanup)
         self.addCleanup(gc.collect)
         self.root = Path(self.temp.name).resolve()
         # A Windows sandbox can deny strict resolution of the user home. The

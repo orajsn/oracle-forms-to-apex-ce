@@ -219,14 +219,14 @@ def _binding(value, release):
     return dict(value)
 
 
-def _validate_request(value):
+def _validate_request(value, *, release_validator=validate_release):
     _require(type(value) is dict and set(value) == {'operation', 'apply', 'manifest', 'release_sha256',
                                                   'binding', 'claim', 'code', 'proof_sha256'},
              'QUEUE_REQUEST_FIELDS_INVALID')
     op = value['operation']
     _require(type(op) is str and op in OPERATIONS and type(value['apply']) is bool
              and value['apply'] is (op != 'status'), 'EXPLICIT_QUEUE_ACTION_REQUIRED')
-    manifest = validate_release(value['manifest'])
+    manifest = release_validator(value['manifest'])
     # Canonical encoding exactly matches contracts.canonical_bytes, without
     # importing workstation modules in the protected FOX interpreter.
     import hashlib
@@ -340,11 +340,12 @@ def _checked_retained_proof(root, bound, verification_module):
                 'active_policy_applied': False, 'proof_sha256': stored['proof_sha256']}
 
 
-def container_execute(value, queue_module, verification_module, runtime_module, *, root=None):
+def container_execute(value, queue_module, verification_module, runtime_module, *, root=None,
+                      request_validator=_validate_request):
     """Fixed dispatch in production; injectable modules/root only for offline tests."""
     # This is FOX container data, not the installed operator's private state.
     root = Path('/data') if root is None else root
-    request = _validate_request(value)
+    request = request_validator(value)
     release, op = request['release_sha256'], request['operation']
     queue = queue_module.VerificationQueue(root / 'fox.sqlite3', enabled=True, verifier_release_sha256=release)
     bound = queue_module.VerificationBinding.from_payload(request['binding']) if request['binding'] else None
@@ -370,7 +371,7 @@ def container_execute(value, queue_module, verification_module, runtime_module, 
         _require(row is not None and row['state'] in {'attention', 'running', 'completed'},
                  'QUEUE_RECONCILIATION_STATE_INVALID')
         _require(row['state'] == 'attention' or claim is not None, 'RETAINED_PRIVATE_CLAIM_REQUIRED')
-        checked = (_checked_retained_proof(root, bound, verification_module) if request['manifest']['schema_version'] in (2, 3)
+        checked = (_checked_retained_proof(root, bound, verification_module) if request['manifest']['schema_version'] in (2, 3, 4)
                    else verification_module.verify_existing_native_run(root=root, run_id=bound.job_id))
         _require(type(checked) is dict and checked.get('id') == bound.job_id
                  and checked.get('state') in {'VERIFIED', 'ACCEPTED'}
