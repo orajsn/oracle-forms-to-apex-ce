@@ -40,7 +40,8 @@ MODULES = ('verification_queue.py', 'verification_runtime.py', 'native_verificat
            'backend_storage.py', 'fresh_startup.py', 'worker.py', 'worker_observability.py')
 CODE = ('product_verifier.py', 'product_queue_transport.py', 'runtime_provider.py',
         'hosted_service.py', 'failed_verification.py', 'fresh_storage.py',
-        'fresh_contracts.py', 'fresh_connected.py', 'fresh_remote.py', 'fresh_backend.py', 'fresh_image.py', 'fresh_queue.py')
+        'fresh_contracts.py', 'fresh_connected.py', 'fresh_remote.py', 'fresh_backend.py', 'fresh_image.py',
+        'fresh_queue.py', 'fresh_clean_transport.py')
 PROJECT_MODULES = ('intake.py', 'native_source.py', 'opaf.py', 'native_pipeline.py',
     'native_verification_policy.py', 'native_verification.py', 'native_qa_plan.py',
     'project_conversion.py', 'project_qa_plan.py', 'project_progress.py',

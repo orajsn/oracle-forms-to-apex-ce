@@ -156,7 +156,8 @@ def fetch_source(job_id, package_sha256, scope):
     require(type(job_id) is str and c._JOB.fullmatch(job_id) is not None
             and type(package_sha256) is str and c._HASH.fullmatch(package_sha256) is not None,
             'SOURCE_JOB_AND_HASH_REQUIRED')
-    result = ssh_json(SOURCE_HOST, {'cli_scope': scope, 'job_id': job_id, 'package_sha256': package_sha256,
+    host = native_cli.fresh_host_program('source') or SOURCE_HOST
+    result = ssh_json(host, {'cli_scope': scope, 'job_id': job_id, 'package_sha256': package_sha256,
         'reader_b64': base64.b64encode(SOURCE_CODE.encode()).decode(), 'fox_image': image_pins()['fox']})
     require(type(result) is dict and set(result) == {'source_attestation', 'package_b64'},
             'PRIVATE_JOB_RESPONSE_INVALID')
@@ -307,10 +308,11 @@ def dispatch(command, plan_path, *, expected_sha=None, phase=None, apply=False):
         'package_b64': base64.b64encode(package_raw).decode(), 'operator_code_sha256': code_hash,
         'code': {name: base64.b64encode(raw).decode() for name, raw in code.items()},
         'executor_b64': base64.b64encode(EXECUTOR_CODE.encode()).decode(), 'image': image_pins()['converter']}
+    host = native_cli.fresh_host_program('project') or EXECUTOR_HOST
     try:
         if command != 'status':
             packet['admin_password'] = admin_secret()
-        result = ssh_json(EXECUTOR_HOST, packet)
+        result = ssh_json(host, packet)
         if type(result) is dict and result.get('status') == 'STOPPED':
             return c.failure_response(result.get('code'), phase, result.get('diagnostics'))
         return result

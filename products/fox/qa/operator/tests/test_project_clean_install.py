@@ -178,6 +178,18 @@ class DispatchTests(unittest.TestCase):
                     cli.dispatch('apply', 'plan.json', **options)
                 ssh.assert_not_called(); secret.assert_not_called(); scope.assert_not_called()
 
+    def test_fresh_program_is_selected_before_secret_and_never_falls_back_on_failure(self):
+        with patch.object(native_cli,'fresh_host_program',return_value='SYNTHETIC_FRESH_HOST_PROGRAM') as selected, \
+             patch.object(cli,'admin_secret',return_value=ADMIN),patch.object(cli,'ssh_json',return_value={'state':'SYNTHETIC_TRANSPORT_ONLY'}) as ssh:
+            cli.dispatch('apply','plan.json',expected_sha=c.digest(self.plan_raw),phase='allocate',apply=True)
+        selected.assert_called_once_with('project')
+        self.assertEqual(ssh.call_args.args[0],'SYNTHETIC_FRESH_HOST_PROGRAM')
+        with patch.object(native_cli,'fresh_host_program',side_effect=RuntimeError('SOURCE_BINDING_CHANGED')), \
+             patch.object(cli,'admin_secret') as secret,patch.object(cli,'ssh_json') as ssh:
+            with self.assertRaisesRegex(RuntimeError,'SOURCE_BINDING_CHANGED'):
+                cli.dispatch('apply','plan.json',expected_sha=c.digest(self.plan_raw),phase='allocate',apply=True)
+        secret.assert_not_called();ssh.assert_not_called()
+
     def test_check_status_reject_apply_flag_and_phase(self):
         for command in ('check', 'status'):
             for options in ({'apply': True}, {'phase': 'import'}):
@@ -253,7 +265,7 @@ class PrivatePathTests(unittest.TestCase):
         """Synthetic files only; preserve inherited PSModulePath and real guard."""
         plan, _, raw = fixture()
         plan_raw = c.canonical_bytes(plan)
-        with tempfile.TemporaryDirectory(prefix='project-plan-acl-', dir=ROOT / 'work') as directory:
+        with tempfile.TemporaryDirectory(prefix='project-plan-acl-') as directory:
             private = Path(directory).resolve()
             destination = private / c.digest(plan_raw)
             # Only route this test to its own disposable directory. Directory

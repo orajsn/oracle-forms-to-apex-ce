@@ -159,6 +159,13 @@ def fox_environment(config, release_ref, backend_ref):
         'FOX_NATIVE_PROFILE_FILE': '/run/fox-native/profile.json'}
 
 
+def converter_environment(config, release_ref, backend_ref):
+    from .fresh_clean_transport import converter_environment as expected
+    projection = {'provider_configuration_sha256': digest(canonical(config)),
+        'release_sha256': release_ref['sha256'], 'backend_initialization_sha256': backend_ref['sha256']}
+    return expected(config, projection, config['app_projection']['sha256'])
+
+
 def role_measurements(provider, config, plan, release_ref, backend_ref, rows, indexed, *, staged):
     from fox import producer_inventory_contract as producers
     names = {row['name']: row for row in rows}
@@ -198,6 +205,10 @@ def role_measurements(provider, config, plan, release_ref, backend_ref, rows, in
                  and re.fullmatch('[a-f0-9]{32}:[a-f0-9]{128}', environment['FOX_PASSWORD_HASH'])
                  and type(environment.get('FOX_ADMIN_USERNAME')) is str and 0 < len(environment['FOX_ADMIN_USERNAME']) <= 100,
                  'FRESH_LOGIN_CONFIGURATION_REQUIRED')
+        elif role == 'converter':
+            need(not any(key.startswith('LD_') for key in environment), 'FRESH_CONVERTER_LOADER_ENVIRONMENT_INVALID')
+            need(all(environment.get(key) == value for key, value in converter_environment(config, release_ref, backend_ref).items()),
+                 'FRESH_CONVERTER_ENVIRONMENT_REQUIRED')
         mounts = runtime.persistent_mounts(role, item['HostConfig'], item.get('Mounts'))
         expected_mounts = {mount['destination']: mount for mount in expected['mounts']}
         need(len(mounts) == len(expected_mounts), 'FRESH_ROLE_MOUNTS_CHANGED')

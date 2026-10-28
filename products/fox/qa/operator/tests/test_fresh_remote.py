@@ -25,7 +25,8 @@ def fake_containers(remote, config, release_ref, backend_ref):
     for index, (role, wanted) in enumerate(config['runtime']['roles'].items(), 1):
         created = now - timedelta(days=1) if role == 'opaf' else now
         running = role == 'opaf'
-        environment = remote.fox_environment(config, release_ref, backend_ref) if role == 'fox' else {}
+        environment = (remote.fox_environment(config, release_ref, backend_ref) if role == 'fox' else
+                       remote.converter_environment(config, release_ref, backend_ref) if role == 'converter' else {})
         if role == 'fox':
             environment.update(FOX_ADMIN_USERNAME='synthetic-user', FOX_PASSWORD_HASH='a'*32+':'+'b'*128)
         rows.append({'Id': str(index)*64, 'Name': wanted['name'], 'Image': wanted['image'],
@@ -207,6 +208,10 @@ def scenario(name, original):
             containers[0]['Id'] = '9'*64
         elif name == 'environment_drift':
             containers[0]['Config']['Env'] = [value for value in containers[0]['Config']['Env'] if not value.startswith('FOX_INSTALLATION_MODE=')]
+        elif name == 'converter_environment_drift':
+            containers[1]['Config']['Env'] = [value for value in containers[1]['Config']['Env'] if not value.startswith('F2A_FRESH_PROVIDER_SHA256=')]
+        elif name == 'converter_loader_environment':
+            containers[1]['Config']['Env'].append('LD_PRELOAD=SYNTHETIC_UNSAFE_VALUE')
         elif name == 'inventory_race':
             alter = lambda sample, rows: rows[0]['State'].update(Pid=999) if sample == 2 else None
         elif name == 'incomplete_inventory':
@@ -242,7 +247,8 @@ def scenario(name, original):
                 extra['Created'] = (moment-timedelta(minutes=10)).isoformat()
                 extra['State'].update(Status='stopped', StartedAt=(moment-timedelta(minutes=9)).isoformat(),
                                       FinishedAt=(moment-timedelta(minutes=8)).isoformat())
-        expected_failure = name in ('static_drift','id_drift','environment_drift','inventory_race','backend_race',
+        expected_failure = name in ('static_drift','id_drift','environment_drift','converter_environment_drift',
+                                    'converter_loader_environment','inventory_race','backend_race',
                                     'root_replaced','failed_initialization','unknown_run','incomplete_inventory','private_observation_extra',
                                     'image_digest_forged','image_role_forged','image_count_forged')
         writer = sqlite3.connect(fixture.database) if name == 'live_wal' else None
@@ -330,7 +336,8 @@ class PosixObserverTests(unittest.TestCase):
 
 
 for _case in ('staged','old_staged_role','previously_started_role','fenced_live','normal','busy','live_wal','unknown_run','static_drift','id_drift',
-              'environment_drift','inventory_race','backend_race','root_replaced','failed_initialization',
+              'environment_drift','converter_environment_drift','converter_loader_environment',
+              'inventory_race','backend_race','root_replaced','failed_initialization',
               'private_observation_extra','incomplete_inventory','secret_reference','secret_bind_alias',
               'extra_live','extra_created','extra_unknown','extra_stopped',
               'image_digest_forged','image_role_forged','image_count_forged'):

@@ -1,5 +1,13 @@
 # Source verification
 
+Clean transport regression is in `qa/operator/tests/test_fresh_clean_transport.py`,
+alongside `test_clean_install.py`, `test_project_clean_install.py` and
+`test_project_clean_operator.py`. The last uses the real project package/plan/SQL
+components with synthetic SQLcl responses. The host transport uses actual private
+source/storage with synthetic IMDS/Podman/child boundaries. These are not live
+Oracle imports or actual container execution. Read the
+[transport scope](fresh-clean-transport.md); a compiled program is not admission.
+
 The fresh queue component and legacy queue regression can be tested with the
 selected isolated interpreter:
 

@@ -213,6 +213,14 @@ def ssh_json(program, packet):
     return json.loads(raw)
 
 
+def fresh_host_program(kind):
+    # Explicit fresh selection never edits the legacy templates in place.
+    # The new compiler creates no authority; the selected provider still owns
+    # the execution fence and cannot fall back to the legacy SSH runner.
+    from . import fresh_clean_transport
+    return fresh_clean_transport.program(kind)
+
+
 def fetch_source(job_id, package_sha256, scope):
     require(re.fullmatch(r'fox-[a-f0-9]{20}', job_id or '') is not None
             and re.fullmatch(r'[a-f0-9]{64}', package_sha256 or '') is not None, 'SOURCE_JOB_AND_HASH_REQUIRED')
@@ -225,6 +233,7 @@ r=subprocess.run(['podman','exec','-i','fox','python','-B','-c',code],input=json
 guard(r.returncode==0 and len(r.stdout)<=16000000)
 sys.stdout.buffer.write(r.stdout)
 '''
+    host = fresh_host_program('source') or host
     result = ssh_json(host, {'cli_scope': scope, 'job_id': job_id, 'package_sha256': package_sha256,
                              'reader_b64': base64.b64encode(SOURCE_CODE.encode()).decode(), 'fox_image': image_pins()['fox']})
     raw = base64.b64decode(result['package_b64'], validate=True)
@@ -374,6 +383,7 @@ r=subprocess.run(['podman','exec','-i','forms2apex-mcp','python3.11','-B','-c',c
 guard(r.returncode==0 and len(r.stdout)<=2000000)
 sys.stdout.buffer.write(r.stdout)
 '''
+    host = fresh_host_program('native') or host
     try:
         if command != 'status':
             packet['admin_password'] = admin_secret()

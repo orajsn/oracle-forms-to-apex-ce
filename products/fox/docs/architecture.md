@@ -50,6 +50,12 @@ the R4 host executor or supervisor. Fresh host admission and the remaining
 clean-install/QA/promotion bindings are still required; no running fresh
 verifier or customer-installation proof is claimed.
 
+The [fresh clean transport](fresh-clean-transport.md) now carries selected
+installation names, mounts, users and public bindings into the existing native
+and multi-form clean engines. It adds no cross-service database mount and no
+second import engine. Host admission, the remaining QA/promotion transports
+and actual installed output remain unfinished.
+
 Five internal MCP interfaces remain: `inspect_forms_job`, `generate_apex_draft`,
 `validate_apex_draft`, `import_validated_draft`, `get_job_status`. They are not
 public browser endpoints. A configured model URL does not establish readiness.

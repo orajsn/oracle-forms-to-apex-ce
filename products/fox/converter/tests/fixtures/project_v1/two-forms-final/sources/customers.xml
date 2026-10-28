@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<FormModule Name="CUSTOMERS"><Block Name="CUSTOMERS" QueryDataSourceName="FOX_NATIVE_CUSTOMERS" QueryDataSourceType="Table"><Item Name="CUSTOMER_ID" ColumnName="CUSTOMER_ID" DatabaseItem="true" ItemType="Text Item" Prompt="Identity" /><Item Name="CUSTOMER_NAME" ColumnName="CUSTOMER_NAME" DatabaseItem="true" ItemType="Text Item" Prompt="Customer &quot;name&quot;" /></Block></FormModule>
