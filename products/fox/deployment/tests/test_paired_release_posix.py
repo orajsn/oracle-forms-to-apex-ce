@@ -32,7 +32,8 @@ class PosixStaging(unittest.TestCase):
         self.parent_patch = patch.object(r, "PARENT", self.root / "stages"); self.parent_patch.start()
         self.guard_patch = patch.object(r, "guarded_host", return_value={"synthetic": True}); self.guard_patch.start()
         self.output = self.root / "prepared"
-        self.result = p.materialize(files={"qa/operator/hosted_service.py": b"# synthetic\n",
+        self.result = p.materialize(files={**{'fox/fox/'+name:b'# synthetic pure contract\n' for name in p.QA_CONTRACT_FILES},
+            "qa/operator/hosted_service.py": b"# synthetic\n",
             "deployment/project-opaf-profile-v2.json": (HERE / "project-opaf-profile-v2.json").read_bytes(),
             "fox/fox/__init__.py": b"", "fox/fox/project_conversion.py": b"# synthetic\n"},
             ui={"index.html": b"<html>synthetic</html>"}, converter={
@@ -114,6 +115,44 @@ class PosixStaging(unittest.TestCase):
         self.assertFalse(any(item in argv for argv in commands for item in ("run", "start", "stop", "rm", "rename")))
         with self.assertRaisesRegex(r.StageError, "EXISTING_BUILD_MUST_NOT_BE_REPLAYED"):
             r.build(self.result["source_bundle_sha256"], "fox", apply=True)
+
+    def deployment(self):
+        raw=r.canonical({'schema_version':1,'scope':'fox-hosted-admission-v1',
+            'provider_configuration_sha256':'1'*64,'current_release_sha256':'2'*64,
+            'infrastructure':{name:{'id':str(n)*64,'image':'sha256:'+str(n+3)*64} for n,name in enumerate(r.BASE,1)}})
+        return raw,r.digest(raw)
+
+    def test_current_mode_records_true_process_exit_and_keeps_deployment_binding(self):
+        deployment=self.deployment()
+        receipt=r.stage((self.output/'paired-source.tar').read_bytes(),self.result['archive_sha256'],deployment=deployment)
+        target=Path(receipt['target']);new_image='sha256:'+'a'*64;commands=[]
+        def observed(argv,**kwargs):
+            commands.append(argv)
+            return r.canonical([{'Id':argv[-1],'Os':'linux','Architecture':'amd64',
+                'Labels':{'com.oracle.jsn.fox.source-bundle':self.result['source_bundle_sha256']}}])
+        class Process:
+            pid=12345
+            def __init__(self,argv,**kwargs):
+                commands.append(argv);Path(argv[argv.index('--iidfile')+1]).write_text(new_image+'\n')
+            def wait(self,timeout):return 0
+        capacity={'available_bytes':3*1024**3,'minimum_bytes':2*1024**3}
+        with patch.object(r,'build_capacity',return_value=capacity),patch.object(r,'command',side_effect=observed),patch.object(r.subprocess,'Popen',Process),patch.object(r,'build_process_identity',return_value={'pid':12345,'start_ticks':42,'boot_id':'synthetic'}):
+            result=r.build(self.result['source_bundle_sha256'],'converter',apply=True,deployment=deployment)
+        self.assertEqual(result['deployment_sha256'],deployment[1]);self.assertFalse(result['activation_performed'])
+        self.assertEqual(json.loads((target/'converter-build-exit.json').read_bytes())['exit_code'],0)
+        self.assertTrue(json.loads((target/'converter-build-exit.json').read_bytes())['observed_original_process'])
+        self.assertTrue(all(call.kwargs=={'deployment':deployment} for call in r.guarded_host.call_args_list))
+        self.assertFalse(any(item in argv for argv in commands for item in ('run','start','stop','rm','rename')))
+        with self.assertRaisesRegex(r.StageError,'EXISTING_BUILD_MUST_NOT_BE_REPLAYED'):
+            r.build(self.result['source_bundle_sha256'],'converter',apply=True,deployment=deployment)
+
+    def test_current_mode_capacity_failure_does_not_create_build_intent(self):
+        deployment=self.deployment()
+        receipt=r.stage((self.output/'paired-source.tar').read_bytes(),self.result['archive_sha256'],deployment=deployment)
+        with patch.object(r,'build_capacity',side_effect=r.StageError('BUILD_STORAGE_CAPACITY_LOW')):
+            with self.assertRaisesRegex(r.StageError,'CAPACITY_LOW'):
+                r.build(self.result['source_bundle_sha256'],'converter',apply=True,deployment=deployment)
+        self.assertFalse((Path(receipt['target'])/'converter-build-intent.json').exists())
 
 
 if __name__ == "__main__":

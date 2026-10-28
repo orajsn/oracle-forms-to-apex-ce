@@ -177,7 +177,32 @@ def command(argv, *, timeout=30):
     return outcome.stdout
 
 
-def guarded_host(destination):
+def deployment_document(reference):
+    """Explicit current-lab declaration, not startup or activation authority."""
+    need(type(reference) is tuple and len(reference)==2,'PINNED_DEPLOYMENT_BYTES_REQUIRED')
+    raw,expected=reference
+    need(type(raw)is bytes and 0<len(raw)<=65536 and type(expected)is str
+         and re.fullmatch('[a-f0-9]{64}',expected) and digest(raw)==expected,'DEPLOYMENT_DIGEST_CHANGED')
+    value=document(raw)
+    need(type(value)is dict and set(value)=={'schema_version','scope','provider_configuration_sha256',
+        'current_release_sha256','infrastructure'} and canonical(value)==raw
+        and type(value['schema_version'])is int and value['schema_version']==1
+        and value['scope']=='fox-hosted-admission-v1','DEPLOYMENT_DOCUMENT_INVALID')
+    need(all(type(value[key])is str and re.fullmatch('[a-f0-9]{64}',value[key]) for key in
+        ('provider_configuration_sha256','current_release_sha256')),'DEPLOYMENT_BINDING_INVALID')
+    pins=value['infrastructure']
+    need(type(pins)is dict and set(pins)==set(BASE),'EXACT_DEPLOYMENT_ROLES_REQUIRED')
+    ids=set()
+    for pin in pins.values():
+        need(type(pin)is dict and set(pin)=={'id','image'} and type(pin['id'])is str
+             and re.fullmatch('[a-f0-9]{64}',pin['id']) and type(pin['image'])is str
+             and re.fullmatch('sha256:[a-f0-9]{64}',pin['image']) and pin['id'] not in ids,
+             'EXACT_DEPLOYMENT_PINS_REQUIRED')
+        ids.add(pin['id'])
+    return value
+
+
+def guarded_host(destination, *, deployment=None):
     need(os.name == "posix" and os.geteuid() == 1000, "EXISTING_OPC_HOST_REQUIRED")
     request = urllib.request.Request("http://169.254.169.254/opc/v2/instance/", headers={"Authorization": "Bearer Oracle"})
     with urllib.request.urlopen(request, timeout=10) as response:
@@ -185,20 +210,64 @@ def guarded_host(destination):
     identity = {"instance_id": metadata.get("id"), "compartment_id": metadata.get("compartmentId"),
                 "region": metadata.get("canonicalRegionName", metadata.get("regionInfo", {}).get("regionIdentifier"))}
     need(identity == SCOPE, "EXACT_JSN_HOST_REQUIRED")
-    containers = document(command(["podman", "inspect", *BASE]))
+    declared=deployment_document(deployment) if deployment is not None else None
+    pins=declared['infrastructure'] if declared is not None else BASE
+    containers = document(command(["podman", "inspect", *pins]))
     result, mounts = {}, []
     for value in containers:
         name = value["Name"].lstrip("/")
-        need(name in BASE and name not in result and value["State"]["Running"] is True
-             and value["Id"] == BASE[name]["id"]
-             and "sha256:" + value["Image"].split(":")[-1] == BASE[name]["image"], "BASELINE_CONTAINER_CHANGED")
-        result[name] = {**BASE[name], "started_at": value["State"]["StartedAt"]}
+        need(name in pins and name not in result and value["State"]["Running"] is True
+             and value["Id"] == pins[name]["id"]
+             and "sha256:" + value["Image"].split(":")[-1] == pins[name]["image"], "BASELINE_CONTAINER_CHANGED")
+        result[name] = {**pins[name], "started_at": value["State"]["StartedAt"]}
+        if declared is not None:
+            need(type(value['State'].get('Pid'))is int and value['State']['Pid']>0,'RUNNING_DEPLOYMENT_PID_REQUIRED')
+            result[name].update(pid=value['State']['Pid'],configuration_sha256=digest(canonical({
+                key:value.get(key) for key in ('Config','HostConfig','Mounts','ProcessLabel','MountLabel')})))
+            if name=='fox':
+                pairs=value['Config'].get('Env',[])
+                need(type(pairs)is list and all(type(item)is str and '=' in item for item in pairs),'FOX_ENVIRONMENT_INVALID')
+                env=dict(item.split('=',1) for item in pairs)
+                need(len(env)==len(pairs) and env.get('FOX_VERIFIER_RELEASE_SHA256')==declared['current_release_sha256']
+                     and env.get('FOX_CONVERSION_PROFILE')=='native-project-v1','RUNNING_DEPLOYMENT_RELEASE_CHANGED')
         mounts.extend(Path(item["Source"]) for item in value.get("Mounts", []) if item.get("Source"))
-    need(result.keys() == BASE.keys(), "BASELINE_CONTAINER_INVENTORY_DIFFERS")
+    need(result.keys() == pins.keys(), "BASELINE_CONTAINER_INVENTORY_DIFFERS")
     for mount in mounts:
         need(destination != mount and mount not in destination.parents and destination not in mount.parents,
              "BUILD_PATH_OVERLAPS_LIVE_MOUNT")
-    return {"scope": identity, "containers": result}
+    observed={"scope": identity, "containers": result}
+    if declared is not None:
+        observed.update(deployment_sha256=deployment[1],release_sha256=declared['current_release_sha256'],
+            provider_configuration_sha256=declared['provider_configuration_sha256'])
+    return observed
+
+
+def _guarded_host(destination,deployment):
+    # Keep the original one-argument path intact for historical callers/tests.
+    return guarded_host(destination) if deployment is None else guarded_host(destination,deployment=deployment)
+
+
+def build_capacity():
+    graph=Path(command(['podman','info','--format','{{.Store.GraphRoot}}']).decode().strip())
+    need(graph.is_absolute() and graph.resolve()==graph and graph.is_dir(),'CANONICAL_BUILD_STORAGE_REQUIRED')
+    free=os.statvfs(graph)
+    need(free.f_bavail*free.f_frsize>=2*1024**3,'BUILD_STORAGE_CAPACITY_LOW')
+    return {'available_bytes':free.f_bavail*free.f_frsize,'minimum_bytes':2*1024**3}
+
+
+def build_process_identity(pid):
+    """Read a Popen-owned Linux identity, never infer liveness from a PID file."""
+    need(type(pid)is int and pid>0,'OWNED_BUILD_PID_REQUIRED')
+    root=Path('/proc')/str(pid)
+    try:
+        before=(root/'stat').read_text();fields=before[before.rfind(') ')+2:].split()
+        boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        after=(root/'stat').read_text();again=after[after.rfind(') ')+2:].split()
+    except FileNotFoundError:
+        return None  # Only wait() may establish the original command's exit.
+    need(len(fields)>=20 and len(again)>=20 and fields[19].isdigit() and fields[19]==again[19]
+         and re.fullmatch('[a-f0-9-]{36}',boot),'BUILD_PROCESS_IDENTITY_UNCONFIRMED')
+    return {'pid':pid,'start_ticks':int(fields[19]),'boot_id':boot}
 
 
 def checked_ancestors(path):
@@ -231,10 +300,10 @@ def new_file(path, raw):
     finally: os.close(descriptor)
 
 
-def stage(raw, sha):
+def stage(raw, sha, *, deployment=None):
     files, manifest = load_archive(raw, sha)
     target = PARENT / manifest["source_bundle_sha256"]
-    before = guarded_host(target)
+    before = _guarded_host(target,deployment)
     need(not target.exists() and not target.is_symlink(), "STAGE_ALREADY_EXISTS_USE_INSPECT")
     # Never chmod/reown existing parents. Only create this bounded private root.
     checked_ancestors(PARENT.parent)
@@ -262,7 +331,7 @@ def stage(raw, sha):
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-    after = guarded_host(target)
+    after = _guarded_host(target,deployment)
     need(before == after, "BASELINE_CHANGED_DURING_STAGE")
     receipt = {"schema_version": 1, "scope": "fox-paired-source-staged-v1", "archive_sha256": sha,
                "source_bundle_sha256": manifest["source_bundle_sha256"], "target": str(target),
@@ -273,10 +342,10 @@ def stage(raw, sha):
     return receipt
 
 
-def inspect(bundle_sha):
+def inspect(bundle_sha, *, deployment=None):
     need(re.fullmatch(r"[a-f0-9]{64}", bundle_sha or ""), "SOURCE_BUNDLE_SHA_REQUIRED")
     target = PARENT / bundle_sha
-    baseline = guarded_host(target)
+    baseline = _guarded_host(target,deployment)
     checked_path(target, directory=True)
     checked_path(target / "manifest.json")
     manifest_raw = (target / "manifest.json").read_bytes()
@@ -310,12 +379,13 @@ def inspect(bundle_sha):
                        for role in ("fox", "converter")}}
 
 
-def build(bundle_sha, role, *, apply):
+def build(bundle_sha, role, *, apply, deployment=None):
     need(apply is True and role in ("fox", "converter"), "EXPLICIT_IMAGE_BUILD_REQUIRED")
-    observed = inspect(bundle_sha)
+    observed = inspect(bundle_sha) if deployment is None else inspect(bundle_sha,deployment=deployment)
     target = PARENT / bundle_sha
     need(not observed["builds"][role]["intent"] and not observed["builds"][role]["complete"],
          "EXISTING_BUILD_MUST_NOT_BE_REPLAYED")
+    capacity=build_capacity() if deployment is not None else None
     base = BASE["fox" if role == "fox" else "forms2apex-mcp"]["image"]
     image = document(command(["podman", "image", "inspect", base]))[0]
     need("sha256:" + image["Id"].split(":")[-1] == base
@@ -327,17 +397,21 @@ def build(bundle_sha, role, *, apply):
     new_file(target / (role + "-build-intent.json"), canonical({"source_bundle_sha256": bundle_sha,
         "role": role, "base_image": base, "argv": argv, "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "automatic_replay_permitted": False}))
-    guarded_host(target)
+    _guarded_host(target,deployment)
     with (target / (role + "-build.stdout")).open("xb") as stdout, (target / (role + "-build.stderr")).open("xb") as stderr:
         process = subprocess.Popen(argv, stdout=stdout, stderr=stderr,
             env={"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/home/opc", "XDG_RUNTIME_DIR": "/run/user/1000", "LANG": "C.UTF-8"})
-        new_file(target / (role + "-build-process.json"), canonical({"pid": process.pid,
-            "recorded_at_utc": datetime.now(timezone.utc).isoformat(), "source_bundle_sha256": bundle_sha}))
+        identity={'pid':process.pid,'recorded_at_utc':datetime.now(timezone.utc).isoformat(),'source_bundle_sha256':bundle_sha}
+        if deployment is not None:identity['linux_identity']=build_process_identity(process.pid)
+        new_file(target / (role + "-build-process.json"), canonical(identity))
         try:
             code = process.wait(timeout=900)
         except subprocess.TimeoutExpired:
             raise StageError("BUILD_STILL_UNCONFIRMED_INSPECT_RECORDED_PROCESS_NO_REPLAY") from None
-    after = guarded_host(target)
+    if deployment is not None:
+        new_file(target/(role+'-build-exit.json'),canonical({'exit_code':code,'observed_original_process':True,
+            'recorded_at_utc':datetime.now(timezone.utc).isoformat()}))
+    after = _guarded_host(target,deployment)
     need(code == 0 and after == observed["baseline"], "BUILD_FAILED_OR_BASELINE_CHANGED_NO_REPLAY")
     built = iid.read_text().strip()
     if re.fullmatch(r"[a-f0-9]{64}", built):
@@ -350,6 +424,8 @@ def build(bundle_sha, role, *, apply):
     result = {"status": "BUILT_NOT_ACTIVATED", "role": role, "source_bundle_sha256": bundle_sha,
               "image": built, "exit_code": code, "baseline_unchanged": True,
               "recorded_at_utc": datetime.now(timezone.utc).isoformat()}
+    if deployment is not None:
+        result.update(deployment_sha256=deployment[1],capacity=capacity,activation_performed=False)
     new_file(target / (role + "-build-complete.json"), canonical(result))
     return result
 
@@ -363,20 +439,28 @@ def main():
     parser.add_argument("--bundle-sha256")
     parser.add_argument("--role", choices=("fox", "converter"))
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument('--deployment-file')
+    parser.add_argument('--deployment-sha256')
     args = parser.parse_args()
+    need(bool(args.deployment_file)==bool(args.deployment_sha256),'EXPLICIT_DEPLOYMENT_REFERENCE_REQUIRED')
+    deployment=None
+    if args.deployment_file:
+        path=Path(args.deployment_file);checked_path(path)
+        need(path.stat().st_size<=65536,'DEPLOYMENT_DOCUMENT_TOO_LARGE')
+        deployment=(path.read_bytes(),args.deployment_sha256);deployment_document(deployment)
     if args.action == "stage":
         need(args.apply and args.archive and args.archive_sha256 and not args.bundle_sha256 and not args.role,
              "EXPLICIT_STAGE_REQUIRED")
         path = Path(args.archive)
         checked_path(path)
         need(path.stat().st_size <= MAX_ARCHIVE, "ARCHIVE_TOO_LARGE")
-        result = stage(path.read_bytes(), args.archive_sha256)
+        result = stage(path.read_bytes(), args.archive_sha256,deployment=deployment)
     elif args.action == "inspect":
         need(not args.apply and not args.archive and not args.role, "READ_ONLY_INSPECT_REQUIRED")
-        result = inspect(args.bundle_sha256)
+        result = inspect(args.bundle_sha256,deployment=deployment)
     else:
         need(not args.archive and not args.archive_sha256, "BUILD_ARGUMENTS_INVALID")
-        result = build(args.bundle_sha256, args.role, apply=args.apply)
+        result = build(args.bundle_sha256, args.role, apply=args.apply,deployment=deployment)
     print(json.dumps(result, sort_keys=True))
 
 

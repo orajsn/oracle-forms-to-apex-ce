@@ -36,3 +36,26 @@ The failed trial is retained. Corrected image source is prepared, but replacemen
 image activation, same-job recovery and full runtime proof remain separate work.
 Do not hot-patch root-owned application code, rewrite an old image identity,
 restart the failed supervisor blindly, or replay the conversion/import.
+
+## Build after the original G bootstrap
+
+The optional `--deployment-file <installed-D.json> --deployment-sha256 <D-SHA>`
+pair explicitly selects the actual current deployment for `stage`, `inspect`
+and `build`. Both flags are required together. The owner-private canonical D
+must bind the exact three running container IDs/images and FOX's selected
+release/profile. The VM identity, JSN compartment and region stay fixed.
+Omitting the pair retains the original G-only path; no fallback is inferred.
+
+Stage/build receipts bind D and compare process/start/static-configuration
+identities before and after work. Build uses only cached base images with
+`--pull=never --network=none`, checks actual rootless storage capacity, and
+records the original process's exit and Linux identity. A lost response or
+existing intent requires inspection of that same attempt, not another build.
+No command in this route can activate or replace a service.
+
+The corrected image has now built and passed an isolated image-contract probe:
+75 files matched the frozen payload, and two synthetic forms produced one
+in-memory application, six page sources and complete QA-plan coverage. The
+probe had no host mounts, network or public ports. It did not execute SQLcl,
+Oracle imports, model calls or runtime browser QA. The candidate is **not
+activated**, and the original failed job is still not technically verified.
