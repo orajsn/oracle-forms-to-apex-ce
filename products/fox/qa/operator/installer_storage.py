@@ -60,9 +60,10 @@ def _checked(value, expected):
     return current
 
 
-def _create_installation_root(base):
-    """Create the private namespace without chmod of an existing home/folder."""
+def _validate_installation_parent(base):
+    """Read-only preflight, repeated immediately before namespace creation."""
     parent = base.parent
+    need(parent.is_dir(), 'INSTALLATION_PARENT_MISSING')
     need(parent.resolve() == parent, 'INSTALLATION_PARENT_LINKED')
     for item in (parent, *parent.parents):
         info = item.lstat()
@@ -78,9 +79,45 @@ def _create_installation_root(base):
         need(not any(os.path.lexists(item / name) for name in
              ('fox.sqlite3', '.native-schema-index.json', '.native-schema')),
              'EXISTING_STORE_ANCESTOR_FORBIDDEN')
+
+
+def _create_installation_root(base):
+    """Create the private namespace without chmod of an existing home/folder."""
+    _validate_installation_parent(base)
     base.mkdir(mode=0o700)  # create only; never adopt or change parent permissions
-    storage._sync(parent)
+    storage._sync(base.parent)
     storage._private_dir(base)
+
+
+def _existing(base, value):
+    storage._private_dir(base)
+    allowed = {MARKER, *DIRECTORIES.values()}
+    for index, path in enumerate(base.iterdir()):
+        need(index < len(allowed) and path.name in allowed,
+             'EXISTING_INSTALLATION_CONTENTS_REQUIRE_REVIEW')
+    need((base / MARKER).is_file(), 'EXISTING_INSTALLATION_NOT_ADOPTED')
+    need(storage._read(base / MARKER) == storage.canonical(value),
+         'RETAINED_INSTALLER_STORAGE_PLAN_CHANGED')
+
+
+def inspect(value, *, expected_plan_sha256):
+    """Actual read-only phase reconciliation; never resumes an incomplete write."""
+    value = _checked(value, expected_plan_sha256)
+    declared = value['storage_plan']; storage._runtime(declared)
+    base = Path(value['installation_root'])
+    if not os.path.lexists(base):
+        _validate_installation_parent(base)
+        return {'status': 'STORAGE_NOT_STARTED', 'read_only': True}
+    _existing(base, value)
+    observed = storage.inspect_storage(declared, expected_plan_sha256=storage.plan_sha256(declared))
+    need(observed['status'] in ('NOT_STARTED', 'LOCAL_STORAGE_BASELINE_OBSERVED_NOT_ADMITTED'),
+         'STORAGE_ATTENTION_NO_REPLAY')
+    result = {'status': ('STORAGE_PENDING_NOT_INSTALLED' if observed['status'] == 'NOT_STARTED'
+                         else 'STORAGE_OBSERVED_NOT_INSTALLED'), 'read_only': True}
+    if observed['status'] == 'LOCAL_STORAGE_BASELINE_OBSERVED_NOT_ADMITTED':
+        result.update(installation_id=observed['installation_id'],
+                      storage_completion_sha256=observed['completion_sha256'])
+    return result
 
 
 def initialize(value, *, expected_plan_sha256, apply=False):
@@ -92,14 +129,7 @@ def initialize(value, *, expected_plan_sha256, apply=False):
     base = Path(value['installation_root'])
     created = False
     if os.path.lexists(base):
-        storage._private_dir(base)
-        allowed = {MARKER, *DIRECTORIES.values()}
-        for index, path in enumerate(base.iterdir()):
-            need(index < len(allowed) and path.name in allowed,
-                 'EXISTING_INSTALLATION_CONTENTS_REQUIRE_REVIEW')
-        need((base / MARKER).is_file(), 'EXISTING_INSTALLATION_NOT_ADOPTED')
-        need(storage._read(base / MARKER) == storage.canonical(value),
-             'RETAINED_INSTALLER_STORAGE_PLAN_CHANGED')
+        _existing(base, value)
     else:
         _create_installation_root(base)
         storage._write(base / MARKER, storage.canonical(value))

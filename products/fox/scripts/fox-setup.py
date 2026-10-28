@@ -560,8 +560,8 @@ def inspect_installation(installation_root):
     return observed(status, action)
 
 
-def installer_storage_step(args):
-    """Use the real nonroot storage producer behind the same setup entrypoint."""
+def installer_step_module():
+    """Load only the supplied product's actual nonroot storage step."""
     require(os.name == 'posix' and os.geteuid() > 0, 'POSIX_SETUP_OWNER_REQUIRED')
     require(all(safe_path(ROOT / name).is_file() for name in
                 ('qa/operator/installer_storage.py', 'qa/operator/fresh_storage.py',
@@ -573,11 +573,18 @@ def installer_storage_step(args):
     from qa.operator import installer_storage as step
     require(Path(step.__file__).resolve() == ROOT / 'qa/operator/installer_storage.py',
             'EXPECTED_INSTALLER_STORAGE_MODULE_REQUIRED')
+    return step
+
+
+def installer_storage_step(args):
+    """Use the real nonroot storage producer behind the same setup entrypoint."""
+    step = installer_step_module()
     try:
         value = step.plan(args.installation_root, owner_uid=os.geteuid())
         if args.command == 'storage-plan':
             return {'status': 'STORAGE_PLAN_NOT_INSTALLED', 'plan': value,
                     'plan_sha256': step.digest(value), 'changes_performed': False,
+                    'storage': step.inspect(value, expected_plan_sha256=step.digest(value)),
                     'conversion_ready': False, 'services_started': False}
         return step.initialize(value, expected_plan_sha256=args.expected_plan_sha256, apply=args.apply)
     except (step.InstallerStorageError, step.storage.FreshStorageError) as error:
@@ -588,14 +595,31 @@ def installer_storage_step(args):
 
 def main(argv=None):
     parser = SafeParser(description=__doc__)
-    parser.add_argument('command', choices=('inspect', 'storage-plan', 'storage-initialize', 'check', 'prepare'))
+    parser.add_argument('command', choices=('setup', 'inspect', 'storage-plan', 'storage-initialize', 'check', 'prepare'))
     parser.add_argument('manifest', nargs='?')
     parser.add_argument('--source-root')
     parser.add_argument('--installation-root')
     parser.add_argument('--expected-plan-sha256')
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--output')
+    parser.add_argument('--port', type=int)
     args = parser.parse_args(argv)
+    if args.command == 'setup':
+        require(args.manifest is None and args.source_root is None
+                and args.installation_root is None and args.expected_plan_sha256 is None
+                and not args.apply and args.output is None, 'WIZARD_ARGUMENTS_INVALID')
+        require(args.port is None or args.port == 0 or 1024 <= args.port <= 65535,
+                'UNPRIVILEGED_SETUP_PORT_REQUIRED')
+        installer_step_module()
+        require(safe_path(ROOT / 'qa/operator/setup_wizard.py').is_file(), 'WIZARD_COMPONENTS_MISSING')
+        require(all(safe_path(ROOT / 'installer/web' / name).is_file()
+                    for name in ('index.html', 'wizard.js', 'wizard.css')), 'WIZARD_ASSETS_MISSING')
+        from qa.operator import setup_wizard
+        require(Path(setup_wizard.__file__).resolve() == ROOT / 'qa/operator/setup_wizard.py',
+                'EXPECTED_SETUP_WIZARD_MODULE_REQUIRED')
+        setup_wizard.serve(port=0 if args.port is None else args.port)
+        return 0
+    require(args.port is None, 'SETUP_PORT_ONLY_FOR_WIZARD')
     if args.command in ('storage-plan', 'storage-initialize'):
         require(args.installation_root is not None and args.manifest is None
                 and args.source_root is None and args.output is None, 'STORAGE_STEP_ARGUMENTS_INVALID')

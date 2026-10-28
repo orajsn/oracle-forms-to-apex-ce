@@ -72,6 +72,16 @@ Resume restores projects and source history, not preparation execution. Retain i
 
 ## Package or connected setup
 
+Current source can expose the implemented storage phase through a real browser
+wizard: `<python> scripts/fox-setup.py setup`. Read `docs/setup-wizard.md` only
+when this route is supplied and requested. It requires nonroot Linux and binds
+literal loopback only. Use the private short-lived setup code in the local
+browser; never request it in chat, publish it or record bootstrap output in a
+service log. Opening the page or preparing storage is not full installation:
+connections, service binding and end-to-end verification must still pass.
+Keep the exact selected folder across restart and use read-only recheck after
+an uncertain request. Do not resubmit an unknown write to advance the wizard.
+
 For requested bundle preparation, use the supplied preparer with a reviewed frozen declaration and a new destination. `PREPARED_NOT_INSTALLED` is the handoff state, not activation. Exclude credentials, wallets, private keys, customer files and Oracle media. Development candidates under `work/` are not released installers.
 
 For an existing authorized hosted service, inspect its deployment-bound runbook/configuration and current status before acting. Never copy a lab address, user, target identity, credential or dated rollout command into another installation.

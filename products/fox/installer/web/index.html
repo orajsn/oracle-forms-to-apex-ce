@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FOX setup</title><link rel="stylesheet" href="/wizard.css"><script src="/wizard.js" defer></script></head>
+<body><header><strong>FOX<span> / </span>Form to APEX</strong><span>Administrator setup</span></header>
+<main><p class="eyebrow">SET UP YOUR FOX WORKSPACE</p><h1>One place for your Forms projects</h1><p>Choose where FOX will keep its projects, conversion jobs and technical evidence. Existing files stay protected.</p>
+<ol class="steps"><li class="current">Storage</li><li>Connections</li><li>Services</li><li>Verification</li></ol>
+<section class="notice"><strong>Development setup</strong><p>This wizard currently prepares and checks local storage. Connection setup and the remaining phases are not yet available. Storage completion does not mean FOX is installed or conversion-ready.</p></section>
+<form id="plan-form"><label>Setup code<input id="setup-code" type="password" autocomplete="off" required><small>Use the private code printed by the setup launcher. It expires after 30 minutes and stays in this page's memory.</small></label>
+<label>Installation folder<input id="installation-root" placeholder="/home/operator/fox-instance" autocomplete="off" required><small>Choose a new folder inside a local directory you own.</small></label><button id="review" type="submit">Review setup</button></form>
+<section id="review-panel" hidden><h2>Review your setup</h2><dl><dt>Installation folder</dt><dd id="root-label"></dd><dt>Storage state</dt><dd id="storage-label"></dd></dl><p>FOX will manage its internal data and job folders here. It will not change parent-folder permissions or start cloud/database services.</p>
+<label class="confirm"><input type="checkbox" id="confirmed">I approve preparing storage in this folder, or inspecting the exact completed phase already there.</label><button id="initialize" type="button" disabled>Prepare storage</button></section>
+<section id="outcome" hidden aria-live="polite"><h2 id="outcome-title"></h2><p id="outcome-text"></p><p id="code-label"></p></section>
+<button id="recheck" class="secondary" type="button">Recheck saved state</button><p class="subtle">Recheck only reads state. If a request is interrupted, recheck before taking another action.</p>
+</main><footer>FOX development preview. Business acceptance remains a separate review of the generated application.</footer></body></html>

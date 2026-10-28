@@ -70,3 +70,22 @@ Use a private Linux filesystem for temporary state, outside the checkout. The
 POSIX apply tests explicitly skip on Windows or root; a skip is not a Linux
 pass. These tests still prove only local setup phases, not connected service
 installation, Oracle/model execution or customer distribution readiness.
+
+## Browser setup wizard
+
+`tests/test_fox_setup_wizard.py` covers real loopback HTTP, origin/host/auth/body
+bounds, session expiry, genuine nonroot storage, duplicate approval suppression,
+unknown-outcome recheck and actual CLI startup/shutdown. These are local setup
+tests, not a conversion-service installation proof.
+
+The optional developer browser journey requires existing Playwright/browser and
+an explicit isolated Python; it does not download either. Run
+`node tests/run_setup_wizard_browser.mjs` with `FOX_SETUP_TEST_PYTHON`, a new
+absolute `FOX_SETUP_TEST_OUTPUT` and, if needed, `FOX_TEST_NODE_MODULES` and
+`FOX_SETUP_BROWSER_CHANNEL`. For a Windows browser against local WSL Linux,
+also select `FOX_SETUP_WSL_DISTRO` and `FOX_SETUP_WSL_USER`; Git Bash callers
+must preserve the Linux Python environment value rather than applying MSYS path
+conversion to it. The helper owns a synthetic private instance and closes its
+listener via stdin; it never reuses an existing FOX service. Screenshots and
+results remain outside source publication, without tokens. Read the
+[wizard boundary](setup-wizard.md) before considering a customer installation.

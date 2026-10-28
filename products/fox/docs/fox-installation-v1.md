@@ -27,6 +27,12 @@ phase](installer-storage-step.md). It derives the private internal locations
 from one folder and reuses the existing S0 initializer. It is not the complete
 connected installer: even a completed storage phase remains `NOT_INSTALLED`.
 
+The same storage phase now has a real [browser setup wizard](setup-wizard.md):
+`<python> scripts/fox-setup.py setup` on nonroot Linux. Choose the instance
+folder, review its actual plan and confirm it in the browser. Internal roots
+and hashes stay behind the UI. The remaining connected phases are explicitly
+unfinished; this is not yet the full customer installer.
+
 Prerequisites: CPython 3.12, PowerShell and Node/npm compatible with the checked-in
 lockfile. Use a short, private checkout path. From `products/fox/fox`:
 
