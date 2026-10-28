@@ -56,3 +56,17 @@ inventory, changes during observation, linked roots where the test host permits
 them, and closed diagnostics. A successful inspection is not installation,
 release verification or permission to initialize/reuse the directory. The
 connected installer and wizard must consume the actual storage/runtime gates.
+
+The [storage phase](installer-storage-step.md) has additional genuine nonroot
+Linux tests, including actual CLI plan/initialize/repeat, preserved identity,
+pre-producer continuation, interrupted producer refusal and ordinary parent
+permissions without silent chmod:
+
+```text
+<test-python> -I -B -m pytest -p no:cacheprovider tests/test_fox_installer_storage.py tests/test_fox_installation_discovery.py
+```
+
+Use a private Linux filesystem for temporary state, outside the checkout. The
+POSIX apply tests explicitly skip on Windows or root; a skip is not a Linux
+pass. These tests still prove only local setup phases, not connected service
+installation, Oracle/model execution or customer distribution readiness.

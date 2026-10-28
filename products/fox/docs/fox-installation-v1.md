@@ -22,6 +22,11 @@ means observation succeeded, never installation or conversion readiness. Existin
 state still requires its actual route's ownership/runtime checks. Full connected
 installation and its wizard are not released by this discovery increment.
 
+The setup helper also exposes a developer-only [single-folder storage
+phase](installer-storage-step.md). It derives the private internal locations
+from one folder and reuses the existing S0 initializer. It is not the complete
+connected installer: even a completed storage phase remains `NOT_INSTALLED`.
+
 Prerequisites: CPython 3.12, PowerShell and Node/npm compatible with the checked-in
 lockfile. Use a short, private checkout path. From `products/fox/fox`:
 

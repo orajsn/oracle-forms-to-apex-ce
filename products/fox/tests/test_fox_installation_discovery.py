@@ -45,7 +45,7 @@ def test_empty_root_is_not_installed(tmp_path):
 
 @pytest.mark.parametrize('marker', ['fox.sqlite3', 'intent.json', 'roots.json',
     'complete.json', 'projection.json', 'backend-initialization.json',
-    'live-admission.json', 'installation.json'])
+    'live-admission.json', 'installation.json', 'setup-storage-plan.json'])
 def test_state_is_not_replayed_or_declared_ready(tmp_path, marker):
     (tmp_path / marker).write_bytes(b'{"ready":true,"password":"synthetic-private-value"}')
     with patch.object(S, 'regular_bytes', side_effect=AssertionError('must not read state')):
@@ -191,3 +191,13 @@ def test_invalid_cli_never_echoes_supplied_values(args, capsys):
     with pytest.raises(S.SetupError):
         S.main(['inspect', *args])
     assert 'private-token' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('args', [
+    ['inspect','--installation-root','unused','--apply'],
+    ['inspect','--installation-root','unused','--expected-plan-sha256','0'*64],
+    ['storage-plan','--installation-root','/tmp/synthetic/install','--apply'],
+    ['storage-initialize','--installation-root','/tmp/synthetic/install'],
+    ['storage-initialize','--installation-root','/tmp/synthetic/install','--apply','--expected-plan-sha256','bad']])
+def test_storage_action_cannot_leak_into_read_only_or_unapproved_mode(args):
+    with pytest.raises(S.SetupError):S.main(args)

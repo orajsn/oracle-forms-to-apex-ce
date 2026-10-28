@@ -522,7 +522,7 @@ def inspect_installation(installation_root):
         status, action = 'ASSESSMENT_SESSION_UNVERIFIED', 'USE_SELECTED_SESSION_RESUME_CHECKS'
     elif names & {'fox.sqlite3', 'intent.json', 'roots.json', 'complete.json',
                   'projection.json', 'backend-initialization.json',
-                  'live-admission.json', 'installation.json'}:
+                  'live-admission.json', 'installation.json', 'setup-storage-plan.json'}:
         status, action = 'EXISTING_STATE_UNVERIFIED', 'VERIFY_EXISTING_ATTEMPT_AND_RUNTIME'
     elif 'fox-installation.json' in names:
         manifest = validate_manifest(regular_bytes(root / 'fox-installation.json', MAX_JSON))
@@ -560,21 +560,61 @@ def inspect_installation(installation_root):
     return observed(status, action)
 
 
+def installer_storage_step(args):
+    """Use the real nonroot storage producer behind the same setup entrypoint."""
+    require(os.name == 'posix' and os.geteuid() > 0, 'POSIX_SETUP_OWNER_REQUIRED')
+    require(all(safe_path(ROOT / name).is_file() for name in
+                ('qa/operator/installer_storage.py', 'qa/operator/fresh_storage.py',
+                 'fox/fox/storage.py')), 'STORAGE_STEP_COMPONENTS_MISSING')
+    # Explicit product roots, never a caller-provided import path or app import.
+    for directory in (ROOT, ROOT / 'fox'):
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
+    from qa.operator import installer_storage as step
+    require(Path(step.__file__).resolve() == ROOT / 'qa/operator/installer_storage.py',
+            'EXPECTED_INSTALLER_STORAGE_MODULE_REQUIRED')
+    try:
+        value = step.plan(args.installation_root, owner_uid=os.geteuid())
+        if args.command == 'storage-plan':
+            return {'status': 'STORAGE_PLAN_NOT_INSTALLED', 'plan': value,
+                    'plan_sha256': step.digest(value), 'changes_performed': False,
+                    'conversion_ready': False, 'services_started': False}
+        return step.initialize(value, expected_plan_sha256=args.expected_plan_sha256, apply=args.apply)
+    except (step.InstallerStorageError, step.storage.FreshStorageError) as error:
+        code = str(error)
+        raise SetupError(code if re.fullmatch(r'[A-Z][A-Z0-9_]{1,95}', code)
+                         else 'INSTALLER_STORAGE_FAILED') from None
+
+
 def main(argv=None):
     parser = SafeParser(description=__doc__)
-    parser.add_argument('command', choices=('inspect', 'check', 'prepare'))
+    parser.add_argument('command', choices=('inspect', 'storage-plan', 'storage-initialize', 'check', 'prepare'))
     parser.add_argument('manifest', nargs='?')
     parser.add_argument('--source-root')
     parser.add_argument('--installation-root')
+    parser.add_argument('--expected-plan-sha256')
+    parser.add_argument('--apply', action='store_true')
     parser.add_argument('--output')
     args = parser.parse_args(argv)
+    if args.command in ('storage-plan', 'storage-initialize'):
+        require(args.installation_root is not None and args.manifest is None
+                and args.source_root is None and args.output is None, 'STORAGE_STEP_ARGUMENTS_INVALID')
+        if args.command == 'storage-plan':
+            require(not args.apply and args.expected_plan_sha256 is None, 'PLAN_MUST_BE_READ_ONLY')
+        else:
+            require(args.apply and type(args.expected_plan_sha256) is str
+                    and SHA.fullmatch(args.expected_plan_sha256), 'EXACT_APPROVED_STORAGE_PLAN_REQUIRED')
+        print(json.dumps(installer_storage_step(args), sort_keys=True))
+        return 0
     if args.command == 'inspect':
         require(args.installation_root is not None and args.manifest is None
-                and args.source_root is None and args.output is None, 'INSPECT_ARGUMENTS_INVALID')
+                and args.source_root is None and args.output is None
+                and args.expected_plan_sha256 is None and not args.apply, 'INSPECT_ARGUMENTS_INVALID')
         print(json.dumps(inspect_installation(args.installation_root), sort_keys=True))
         return 0  # Successful observation, not installation or readiness.
     require(args.manifest is not None and args.source_root is not None
-            and args.installation_root is None, 'SETUP_ARGUMENTS_INVALID')
+            and args.installation_root is None and args.expected_plan_sha256 is None
+            and not args.apply, 'SETUP_ARGUMENTS_INVALID')
     require((args.command == 'prepare') == (args.output is not None), 'OUTPUT_ONLY_FOR_CREATE_ONLY_PREPARE')
     raw = regular_bytes(args.manifest, MAX_JSON)
     result = prepare(raw, args.source_root, args.output) if args.command == 'prepare' else check(raw, args.source_root)
