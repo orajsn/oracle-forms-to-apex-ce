@@ -204,6 +204,17 @@ def _exact(value, expected, location: str) -> None:
         raise TargetProfileError(f'{location}: does not match the approved JSN target')
 
 
+def select_target_profile(profile_id: str) -> dict:
+    """Copy one exact registered selectable tuple; no connectivity or authority."""
+    if type(profile_id) is not str:
+        raise TargetProfileError('An exact registered target profile ID is required')
+    matches = [value for value in _DEPLOYABLE_TARGET_PROFILES.values()
+               if value['profile_id'] == profile_id]
+    if len(matches) != 1:
+        raise TargetProfileError('Target profile is not a unique approved selectable configuration')
+    return validate_target_profile(matches[0])
+
+
 def validate_target_profile(value: dict) -> dict:
     """Recognize an exact approved selectable tuple, not a deployment selection.
 

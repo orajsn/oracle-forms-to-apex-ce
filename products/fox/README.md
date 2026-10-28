@@ -34,8 +34,9 @@ them to bypass a failed gate or point a demo at production.
 
 Run `bash scripts/install-fox.sh` from this product folder as a nonroot
 operator. It checks/prepares a private pinned Python runtime with download
-consent, then opens the loopback setup wizard. This currently prepares storage
-only, not connected FOX services. Read the [managed setup runtime guide](docs/managed-setup-runtime.md)
+consent, then opens the loopback setup wizard. It prepares storage and protected
+access/OPAF inputs for the registered JSN test target, not connected services or
+customer onboarding. Read the [managed setup runtime guide](docs/managed-setup-runtime.md)
 before use. `--inspect` checks that runtime without downloads or file changes.
 
 ## Supported conversion profile

@@ -1,4 +1,4 @@
-# Guided FOX setup: implemented storage phase
+# Guided FOX setup: storage and protected settings
 
 The preferred Linux development entry point is now
 `bash scripts/install-fox.sh`. It prepares or verifies a private setup runtime
@@ -39,6 +39,11 @@ connection. It is not the public business-user interface.
   initializing it again. Unknown directories are not adopted.
 - The UI shows readable status and next actions, with diagnostic codes for the
   operator. Dynamic text uses `textContent`, never supplied HTML.
+- After verified storage, the [protected settings step](installer-connections-step.md)
+  saves FOX access and the actual paired OPAF client/profile formats for the
+  registered JSN test target. Password inputs clear after submission; recheck
+  returns bounded state, never credentials or secret hashes. Completed settings
+  are reused, not overwritten or treated as a password rotation.
 
 The listener binds only `127.0.0.1`. State requests require the private setup
 code; writes additionally require the exact local Origin and Host. Request
@@ -48,10 +53,12 @@ request parameters are written to access logs.
 
 ## What remains
 
-The interface visibly distinguishes storage from connections, services and
-verification. The latter phases, the managed runtime bootstrap/distribution,
-Oracle tooling/worker setup, complete fresh admission and full multi-form APEX
-journey remain unfinished. **Storage prepared is not FOX installed or
+The interface visibly distinguishes saved inputs from tested connections,
+services and verification. Actual connectivity, customer target onboarding,
+service/runtime binding, Oracle tooling/worker setup, complete fresh admission
+and full multi-form APEX journey remain unfinished. The managed setup runtime
+is implemented, not a full application-service installer or distribution clearance.
+**Storage prepared or settings saved is not FOX installed or
 conversion-ready.** This is development source, not a customer installer release.
 
 The operator skill calls this real entry point only within the approved route;

@@ -31,7 +31,7 @@ child.stdout.on('data',chunk=>{buffer+=chunk.toString();let i;while((i=buffer.in
 child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString()).slice(-4096);});
 child.once('error',()=>rejectReady(Error('Test server could not start')));
 child.once('exit',()=>{if(!boot)rejectReady(Error('Test server exited before ready'));});
-let browser,passed=false,failure=null,requests=[],pageErrors=[];
+let browser,passed=false,failure=null,requests=[],pageErrors=[],connectionSettingsSaved=false;
 async function bounded(promise,ms,fallback){let timer;try{return await Promise.race([promise,new Promise(resolve=>{timer=setTimeout(()=>resolve(fallback),ms);})]);}finally{clearTimeout(timer);}}
 try{
   await bounded(ready,20000,null);if(!boot)throw Error('Test server readiness timed out');
@@ -71,6 +71,8 @@ try{
   assert.match(await page.locator('#outcome-text').textContent(),/not yet conversion-ready/);
   await page.locator('#recheck').click();
   await page.getByText('Existing storage phase verified',{exact:true}).waitFor();
+  assert.equal(await page.locator('#step-connections').getAttribute('aria-current'),'step');
+  assert.equal(await page.locator('#plan-form').isVisible(),false);
   assert.equal(requests.filter(x=>x.path==='/api/initialize').length,1);
   assert.equal(await page.locator('#initialize').isEnabled(),false);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
@@ -78,6 +80,31 @@ try{
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(output,'mobile-storage.png'),fullPage:true});
+  if(process.env.FOX_SETUP_TEST_CONNECTIONS==='1'){
+    await page.locator('#connections-form').waitFor();
+    assert.equal(await page.locator('#save-connections').isEnabled(),false);
+    await page.locator('#fox-username').fill('synthetic-demo');
+    await page.locator('#fox-password').fill('synthetic-browser-password-only');
+    await page.locator('#opaf-username').fill('synthetic-opaf');
+    await page.locator('#opaf-password').fill('synthetic-opaf-password-only');
+    await page.locator('#connections-confirmed').check();
+    await page.locator('#save-connections').click();
+    await page.getByText('Protected settings are saved',{exact:true}).waitFor();
+    assert.match(await page.locator('#outcome-text').textContent(),/Connectivity has not been tested/);
+    assert.equal(await page.locator('#fox-password').inputValue(),'');
+    assert.equal(await page.locator('#opaf-password').inputValue(),'');
+    assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);
+    const checked=page.waitForResponse(response=>response.url()===boot.url+'/api/status'&&response.request().method()==='GET');
+    await page.locator('#recheck').click();await checked;
+    await page.waitForFunction(()=>!document.getElementById('recheck').disabled);
+    await page.getByText('Protected settings are saved',{exact:true}).waitFor();
+    assert.equal(requests.filter(x=>x.path==='/api/connections').length,1);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.screenshot({path:path.join(output,'mobile-settings-saved.png'),fullPage:true});
+    await page.setViewportSize({width:1280,height:1050});
+    await page.screenshot({path:path.join(output,'desktop-settings-saved.png'),fullPage:true});
+    connectionSettingsSaved=true;
+  }
   assert.deepEqual(pageErrors,[]);passed=true;
 }catch(error){failure=error.message;}
 finally{
@@ -88,7 +115,7 @@ finally{
     startupError:boot?null:stderr,
     browser:process.env.FOX_SETUP_BROWSER_CHANNEL||'chromium',requests,pageErrors,
     serverExit:exit,serverClosed:terminal?.closed===true,
-    finalState:terminal?.state,syntheticTestStateRetained:true,
+    finalState:terminal?.state,syntheticTestStateRetained:true,connectionSettingsSaved,
     secretsIncluded:false,oracleOrModelCalls:false};
   await fs.writeFile(path.join(output,'result.json'),JSON.stringify(summary,null,2),{flag:'wx'});
   console.log(JSON.stringify({passed:summary.passed,failure,serverClosed:summary.serverClosed,

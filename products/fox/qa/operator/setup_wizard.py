@@ -15,6 +15,7 @@ import secrets
 from time import monotonic
 
 from . import installer_storage as step
+from . import installer_connections as connections
 
 ASSETS = Path(__file__).resolve().parents[2] / 'installer' / 'web'
 MAX_BODY = 4096
@@ -30,7 +31,7 @@ def require(value, code):
 
 def closed(error):
     value = str(error)
-    return value if isinstance(error, (WizardError, step.InstallerStorageError,
+    return value if isinstance(error, (WizardError, connections.InstallerConnectionError, step.InstallerStorageError,
         step.storage.FreshStorageError)) and re.fullmatch(r'[A-Z][A-Z0-9_]{1,95}', value) else 'SETUP_OPERATION_UNCONFIRMED'
 
 
@@ -39,19 +40,23 @@ class Controller:
         require(os.name == 'posix' and os.geteuid() > 0, 'POSIX_SETUP_OWNER_REQUIRED')
         self.value = None; self.hash = None; self.result = None
         self.state = 'CHOOSE_LOCATION'; self.code = None; self.attempted = False
+        self.connection_result = None; self.connection_attempted = False
 
     def status(self):
         return {'state': self.state, 'code': self.code,
             'write_attempted':self.attempted,
             'installation_root': self.value['installation_root'] if self.value else None,
             'plan_sha256': self.hash, 'storage': self.result,
+            'connections': self.connection_result,
+            'connection_write_attempted': self.connection_attempted,
+            'connection_targets': connections.targets(),
             'conversion_ready': False, 'installation_complete': False,
             'remaining_phases': ['Runtime dependencies', 'OPAF and APEX connections',
                                  'Service startup', 'End-to-end verification']}
 
     def plan(self, body):
         require(not self.attempted, 'EXISTING_ATTEMPT_REQUIRES_RECHECK')
-        self.value=None;self.hash=None;self.result=None;self.state='CHOOSE_LOCATION'
+        self.value=None;self.hash=None;self.result=None;self.connection_result=None;self.state='CHOOSE_LOCATION'
         require(type(body) is dict and set(body) == {'installation_root'}, 'PLAN_REQUEST_INVALID')
         value = step.plan(body['installation_root'], owner_uid=os.geteuid())
         digest = step.digest(value)
@@ -72,8 +77,32 @@ class Controller:
         try:
             self.result = step.initialize(self.value, expected_plan_sha256=self.hash, apply=True)
             self.state = 'STORAGE_PREPARED'; self.code = None
+            self._connections_observation()
         except Exception as error:
             self.result = None;self.state = 'ATTENTION'; self.code = closed(error)
+        return self.status()
+
+    def _connections_observation(self):
+        self.connection_result = None
+        self.connection_result = connections.inspect(self.value, expected_plan_sha256=self.hash)
+        if self.connection_result['status'] == 'CONNECTION_INPUTS_SAVED_NOT_TESTED':
+            self.state = 'CONNECTION_INPUTS_SAVED'; self.code = None
+
+    def configure(self, body):
+        require(type(body) is dict and set(body) == {'plan_sha256', 'confirmed', 'settings'}
+                and body['confirmed'] is True and self.value is not None
+                and type(body['plan_sha256']) is str
+                and hmac.compare_digest(body['plan_sha256'], self.hash), 'EXACT_CONFIRMED_PLAN_REQUIRED')
+        if self.connection_attempted:return self.status()
+        require(self.state == 'STORAGE_PREPARED', 'VERIFIED_SETUP_STORAGE_REQUIRED')
+        connections.validate_body(body['settings'])
+        self.connection_attempted = True; self.connection_result = None
+        try:
+            self.connection_result = connections.prepare(self.value,
+                expected_plan_sha256=self.hash, body=body['settings'], apply=True)
+            self.state = 'CONNECTION_INPUTS_SAVED'; self.code = None
+        except Exception as error:
+            self.state = 'ATTENTION'; self.code = closed(error)
         return self.status()
 
     def recheck(self):
@@ -82,8 +111,9 @@ class Controller:
                 self.result = step.inspect(self.value, expected_plan_sha256=self.hash)
                 if self.result['status'] == 'STORAGE_OBSERVED_NOT_INSTALLED':
                     self.state = 'STORAGE_PREPARED'; self.code = None
+                    self._connections_observation()
             except Exception as error:
-                self.result = None;self.state = 'ATTENTION'; self.code = closed(error)
+                self.result = None;self.connection_result=None;self.state = 'ATTENTION'; self.code = closed(error)
         return self.status()
 
 
@@ -125,7 +155,7 @@ def create_server(*, port=0, controller=None):
                 self.send_header(key,item)
             self.end_headers()
             try:self.wfile.write(raw)
-            except (BrokenPipeError,ConnectionResetError):pass  # Controller retains the outcome.
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):pass  # Controller retains the outcome.
         def checked(self, *, mutation=False, authorized=False):
             expected='127.0.0.1:'+str(self.server.server_port)
             require(self.headers.get_all('Host') == [expected], 'SETUP_HOST_REJECTED')
@@ -136,6 +166,19 @@ def create_server(*, port=0, controller=None):
                 auth=self.headers.get_all('Authorization')
                 require(auth is not None and len(auth)==1 and hmac.compare_digest(auth[0],'Bearer '+token),
                         'SETUP_AUTHENTICATION_REQUIRED')
+        def discard_small_rejected_body(self):
+            # A close with unread TCP bytes can lose the error response on
+            # Windows. Discard only a bounded, length-delimited small body;
+            # never parse it, authorize it, or relax the accepted body limit.
+            if getattr(self, '_body_read', False) or self.headers.get('Transfer-Encoding') is not None:return
+            lengths = self.headers.get_all('Content-Length')
+            if lengths is None or len(lengths) != 1 or not re.fullmatch(r'[0-9]{1,5}', lengths[0]):return
+            length = int(lengths[0])
+            if not 0 < length <= MAX_BODY + 1:return
+            try:
+                self.connection.settimeout(.1)
+                self.rfile.read(length)
+            except (OSError, ValueError):pass
         def do_GET(self):
             try:
                 self.checked(authorized=self.path.startswith('/api/'))
@@ -151,18 +194,23 @@ def create_server(*, port=0, controller=None):
         def do_POST(self):
             try:
                 self.checked(mutation=True,authorized=True)
-                require(self.path in ('/api/plan','/api/initialize'),'SETUP_ROUTE_NOT_FOUND')
+                require(self.path in ('/api/plan','/api/initialize','/api/connections'),'SETUP_ROUTE_NOT_FOUND')
                 require(self.headers.get_all('Content-Type') == ['application/json']
                         and self.headers.get('Transfer-Encoding') is None,'REQUEST_ENCODING_REJECTED')
                 lengths=self.headers.get_all('Content-Length')
-                require(lengths is not None and len(lengths)==1 and lengths[0].isdigit()
+                require(lengths is not None and len(lengths)==1 and re.fullmatch(r'[0-9]{1,5}',lengths[0])
                         and 0<int(lengths[0])<=MAX_BODY,'REQUEST_SIZE_INVALID')
                 self.connection.settimeout(5)
+                self._body_read=True
                 raw=self.rfile.read(int(lengths[0]));require(len(raw)==int(lengths[0]),'REQUEST_TRUNCATED')
                 body=json_body(raw)
-                result=controller.plan(body) if self.path=='/api/plan' else controller.initialize(body)
+                actions={'/api/plan':controller.plan, '/api/initialize':controller.initialize}
+                if self.path=='/api/connections':result=controller.configure(body)
+                else:result=actions[self.path](body)
                 self.reply(200,result)
-            except Exception as error:self.reply(400,{'code':closed(error)})
+            except Exception as error:
+                self.discard_small_rejected_body()
+                self.reply(400,{'code':closed(error)})
 
     server=HTTPServer(('127.0.0.1',port),Handler)
     server.timeout=1

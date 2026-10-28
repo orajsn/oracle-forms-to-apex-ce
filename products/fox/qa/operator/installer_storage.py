@@ -91,13 +91,15 @@ def _create_installation_root(base):
 
 def _existing(base, value):
     storage._private_dir(base)
-    allowed = {MARKER, *DIRECTORIES.values()}
+    allowed = {MARKER, *DIRECTORIES.values(), 'configuration'}
     for index, path in enumerate(base.iterdir()):
         need(index < len(allowed) and path.name in allowed,
              'EXISTING_INSTALLATION_CONTENTS_REQUIRE_REVIEW')
     need((base / MARKER).is_file(), 'EXISTING_INSTALLATION_NOT_ADOPTED')
     need(storage._read(base / MARKER) == storage.canonical(value),
          'RETAINED_INSTALLER_STORAGE_PLAN_CHANGED')
+    if os.path.lexists(base / 'configuration'):
+        storage._private_dir(base / 'configuration')
 
 
 def inspect(value, *, expected_plan_sha256):

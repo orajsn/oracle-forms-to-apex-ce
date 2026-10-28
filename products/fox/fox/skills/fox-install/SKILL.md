@@ -89,6 +89,13 @@ literal loopback only. Use the private short-lived setup code in the local
 browser; never request it in chat, publish it or record bootstrap output in a
 service log. Opening the page or preparing storage is not full installation:
 connections, service binding and end-to-end verification must still pass.
+If supplied, `docs/installer-connections-step.md` describes the wizard's real
+protected-input phase. Keep passwords in the operator's local setup form, never
+chat, arguments or logs. This phase currently selects the registered JSN test
+profile only: do not replace it with customer values or claim connectivity from
+saved settings. Reuse is not rotation; partial/changed files need inspection,
+not deletion or resubmission. The public app must not receive the entire private
+configuration root.
 Keep the exact selected folder across restart and use read-only recheck after
 an uncertain request. Do not resubmit an unknown write to advance the wizard.
 

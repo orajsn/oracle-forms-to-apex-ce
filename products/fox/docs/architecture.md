@@ -27,7 +27,9 @@ Readable approved source           │
 
 The development administrator setup path is separate from this conversion path:
 `install-fox.sh` → OS bootstrap Python → pinned private setup runtime → loopback
-browser wizard → verified single-folder storage (S0). It does not install/start
+browser wizard → verified single-folder storage (S0) → protected access/OPAF
+input files. See [protected settings](installer-connections-step.md).
+It does not install/start
 the business services or establish the Oracle/OPAF/verifier connections yet.
 See [managed setup runtime](managed-setup-runtime.md). Those connected phases
 and a clean installed multi-form output remain distribution gates.

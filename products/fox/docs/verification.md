@@ -88,6 +88,14 @@ bounds, session expiry, genuine nonroot storage, duplicate approval suppression,
 unknown-outcome recheck and actual CLI startup/shutdown. These are local setup
 tests, not a conversion-service installation proof.
 
+`tests/test_fox_installer_connections.py` uses genuine private Linux storage,
+synthetic passwords, actual project profile/client loaders and authenticated
+loopback save. It checks repeat/restart preservation, partial-write refusal,
+drift and closed diagnostics without live service/Oracle/model calls. Set
+`FOX_SETUP_TEST_CONNECTIONS=1` for the optional browser journey to save synthetic
+settings, recheck them, verify cleared password inputs and close its owned
+listener. The result must still show connectivity unchecked and conversion not ready.
+
 The optional developer browser journey requires existing Playwright/browser and
 an explicit isolated Python; it does not download either. Run
 `node tests/run_setup_wizard_browser.mjs` with `FOX_SETUP_TEST_PYTHON`, a new

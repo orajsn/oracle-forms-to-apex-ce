@@ -96,6 +96,7 @@ class StubController:
     def __init__(self):self.calls=[]
     def plan(self,b):self.calls.append(('plan',b));return {'state':'REVIEW_PLAN'}
     def initialize(self,b):self.calls.append(('initialize',b));return {'state':'STORAGE_PREPARED','conversion_ready':False}
+    def configure(self,b):self.calls.append(('configure',None));return {'state':'CONNECTION_INPUTS_SAVED','conversion_ready':False}
     def recheck(self):self.calls.append(('recheck',None));return {'state':'CHOOSE_LOCATION','conversion_ready':False}
 
 
@@ -130,8 +131,9 @@ def test_server_is_literal_loopback_and_static_assets_have_policy(server):
 
 
 @pytest.mark.parametrize('options',[{'auth':False},{'origin':False},{'host':'untrusted.example'}])
-def test_unauthorized_or_cross_site_mutation_never_reaches_controller(server,options):
-    status,_,_=request(server,'/api/initialize',method='POST',body={},**options)
+@pytest.mark.parametrize('path',['/api/initialize','/api/connections'])
+def test_unauthorized_or_cross_site_mutation_never_reaches_controller(server,options,path):
+    status,_,_=request(server,path,method='POST',body={},**options)
     assert status==400 and not server[2].calls
 
 
@@ -140,7 +142,8 @@ def test_actual_transport_routes_and_status_are_separate(server):
     assert server[2].calls==[('recheck',None)]
     assert request(server,'/api/plan',method='POST',body={'installation_root':'/synthetic/root'})[0]==200
     assert request(server,'/api/initialize',method='POST',body={})[0]==200
-    assert [a for a,_ in server[2].calls]==['recheck','plan','initialize']
+    assert request(server,'/api/connections',method='POST',body={})[0]==200
+    assert [a for a,_ in server[2].calls]==['recheck','plan','initialize','configure']
 
 
 @pytest.mark.parametrize('path',['/api/status?token=synthetic','/../private','/api/initialize','/missing'])
@@ -153,6 +156,20 @@ def test_oversized_and_duplicate_payloads_do_not_run(server):
     for body in (b'{"a":1,"a":2}',b'X'*4097):
         assert request(server,'/api/plan',method='POST',raw=body)[0]==400
     assert not server[2].calls
+
+
+@pytest.mark.parametrize('length',['-1','+2','\u00b2','9'*5000])
+def test_malformed_or_unbounded_length_is_rejected_without_integer_conversion(server,length):
+    s,token,c=server
+    connection=http.client.HTTPConnection('127.0.0.1',s.server_port,timeout=10)
+    connection.putrequest('POST','/api/connections')
+    for key,value in {'Origin':'http://127.0.0.1:'+str(s.server_port),
+        'Authorization':'Bearer '+token,'Content-Type':'application/json','Content-Length':length}.items():
+        connection.putheader(key,value)
+    connection.endheaders()
+    response=connection.getresponse()
+    assert response.status==400 and json.loads(response.read())['code']=='REQUEST_SIZE_INVALID'
+    connection.close();assert not c.calls
 
 
 def test_read_status_requires_setup_auth(server):

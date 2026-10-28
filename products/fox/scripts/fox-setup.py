@@ -567,7 +567,7 @@ def installer_step_module():
                 ('qa/operator/installer_storage.py', 'qa/operator/fresh_storage.py',
                  'fox/fox/storage.py')), 'STORAGE_STEP_COMPONENTS_MISSING')
     # Explicit product roots, never a caller-provided import path or app import.
-    for directory in (ROOT, ROOT / 'fox'):
+    for directory in (ROOT, ROOT / 'fox', ROOT / 'converter'):
         if str(directory) not in sys.path:
             sys.path.insert(0, str(directory))
     from qa.operator import installer_storage as step
@@ -612,6 +612,9 @@ def main(argv=None):
                 'UNPRIVILEGED_SETUP_PORT_REQUIRED')
         installer_step_module()
         require(safe_path(ROOT / 'qa/operator/setup_wizard.py').is_file(), 'WIZARD_COMPONENTS_MISSING')
+        require(all(safe_path(ROOT / name).is_file() for name in
+            ('qa/operator/installer_connections.py', 'converter/forms2apex/target_profile.py')),
+            'CONNECTION_SETUP_COMPONENTS_MISSING')
         require(all(safe_path(ROOT / 'installer/web' / name).is_file()
                     for name in ('index.html', 'wizard.js', 'wizard.css')), 'WIZARD_ASSETS_MISSING')
         from qa.operator import setup_wizard

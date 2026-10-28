@@ -14,7 +14,11 @@ rechecked without downloads. System Python and project data are unchanged.
 The [runtime guide](managed-setup-runtime.md) covers inspection, explicit
 unattended preparation, fixed offline artifacts and interruption handling.
 
-This implements the wizard runtime and storage phase, not complete connected
+The wizard also saves [protected access/OPAF inputs](installer-connections-step.md)
+for the registered JSN synthetic-test target. This is real local configuration,
+not connectivity testing, password rotation or customer target onboarding.
+
+This implements the wizard runtime, storage and input phases, not complete connected
 installation. No successful exit or page view means the product is installed.
 The basic OS bootstrap Python is provided by the supported Linux baseline;
 end users do not configure it, install pip packages or run setup themselves.

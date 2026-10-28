@@ -64,7 +64,7 @@ explicit private cache location without changing existing parent permissions.
 
 ## Remaining product work
 
-This runtime supports the wizard/storage phase, not the full application,
+This runtime supports the wizard/storage and protected-input phases, not the full application,
 converter, SQLcl, Oracle Forms tooling, OPAF, target onboarding or protected
 verifier. Full connected installation, update/recovery, third-party distribution
 review and a clean-host native APEX output remain release gates. The optional

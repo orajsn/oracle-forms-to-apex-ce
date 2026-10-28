@@ -8,7 +8,7 @@ import threading
 
 def main():
     root=Path(__file__).resolve().parents[1]
-    sys.path[:0]=[str(root),str(root/'fox')]
+    sys.path[:0]=[str(root),str(root/'fox'),str(root/'converter')]
     from qa.operator.setup_wizard import Controller,create_server
     controller=Controller();server,token=create_server(controller=controller)
     directory=tempfile.mkdtemp(prefix='fox-setup-browser-')
