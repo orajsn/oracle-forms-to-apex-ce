@@ -7,6 +7,21 @@ repository's root `install.py` installs the CE skill, not FOX.
 
 ## Local assessment on Windows
 
+Before changing a selected installation directory, the product-root setup helper
+offers read-only discovery. From `products/fox`, using the selected Python:
+
+```text
+<python> scripts/fox-setup.py inspect --installation-root <selected-directory>
+```
+
+It distinguishes a missing/empty path, a source checkout, the separate CE skill,
+assessment metadata and retained deployment state. It creates nothing, does not
+start FOX or open a database/credential, and reports only closed status/action
+codes. It inspects the selected directory only, not the entire machine. Exit 0
+means observation succeeded, never installation or conversion readiness. Existing
+state still requires its actual route's ownership/runtime checks. Full connected
+installation and its wizard are not released by this discovery increment.
+
 Prerequisites: CPython 3.12, PowerShell and Node/npm compatible with the checked-in
 lockfile. Use a short, private checkout path. From `products/fox/fox`:
 

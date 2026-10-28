@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only FOX installation declaration checker and create-only packager.
+"""Local-only FOX discovery, declaration checker and create-only packager.
 
 No installation, application startup, credential resolution, target activation,
 cloud/DB/model access, image pull, network request, or configuration command is
@@ -483,13 +483,98 @@ def prepare(manifest_raw, source_root, output):
     return result
 
 
+def inspect_installation(installation_root):
+    """Bounded read-only discovery for setup/skill callers, never admission.
+
+    Only known metadata is read; database, credential and uploaded-source files
+    are never opened. The actual installer must recheck ownership and readiness
+    through its existing storage/runtime contracts before reuse or mutation.
+    """
+    root = safe_path(installation_root)
+    result = {'schema_version': 1, 'scope': 'fox-installation-discovery-v1',
+              'inspection_scope': 'selected_directory_only',
+              'read_only': True, 'changes_performed': False,
+              'runtime_checked': False, 'release_integrity_verified': False,
+              'conversion_ready': False, 'installation_verified': False,
+              'automatic_install_authorized': False,
+              'secret_references_resolved': False, 'network_calls_performed': False}
+
+    def observed(status, action):
+        return {**result, 'status': status, 'next_action': action}
+
+    try:
+        before = root.stat()
+    except FileNotFoundError:
+        return observed('NOT_INSTALLED', 'SELECT_REVIEWED_FULL_RELEASE')
+    require(stat.S_ISDIR(before.st_mode), 'INSTALLATION_ROOT_NOT_DIRECTORY')
+    # A root may contain arbitrary user files. Do not print their names, descend
+    # into them, or read unrecognized content to identify the installation.
+    names = set()
+    with os.scandir(root) as entries:
+        for entry in entries:
+            require(len(names) < 256, 'INSTALLATION_ROOT_INVENTORY_BOUND')
+            names.add(entry.name)
+    if not names:
+        status, action = 'EMPTY_DIRECTORY_NOT_INSTALLED', 'SELECT_REVIEWED_FULL_RELEASE'
+    elif '.fox-local-session.json' in names:
+        require(not names & {'projection.json', 'live-admission.json', 'installation.json'},
+                'CONFLICTING_INSTALLATION_MARKERS')
+        status, action = 'ASSESSMENT_SESSION_UNVERIFIED', 'USE_SELECTED_SESSION_RESUME_CHECKS'
+    elif names & {'fox.sqlite3', 'intent.json', 'roots.json', 'complete.json',
+                  'projection.json', 'backend-initialization.json',
+                  'live-admission.json', 'installation.json'}:
+        status, action = 'EXISTING_STATE_UNVERIFIED', 'VERIFY_EXISTING_ATTEMPT_AND_RUNTIME'
+    elif 'fox-installation.json' in names:
+        manifest = validate_manifest(regular_bytes(root / 'fox-installation.json', MAX_JSON))
+        if manifest['route'] == 'localhost-assessment':
+            status, action = 'ASSESSMENT_BUNDLE_UNVERIFIED', 'CHECK_SELECTED_ASSESSMENT_BUNDLE'
+        else:
+            status, action = 'HOSTED_REFERENCE_NOT_INSTALLER', 'SELECT_REVIEWED_FULL_RELEASE'
+    else:
+        def files_exist(required):
+            for name in required:
+                path = safe_path(root / name)
+                try:
+                    info = path.stat()
+                except FileNotFoundError:
+                    return False
+                require(stat.S_ISREG(info.st_mode), 'INSTALLATION_SENTINEL_NOT_FILE')
+            return True
+        product = ('fox/requirements-lock.txt', 'converter/forms2apex/target_profile.py',
+                   'qa/operator/hosted_service.py', 'scripts/fox-setup.py')
+        runtime = ('requirements-lock.txt', 'package.json', 'scripts/start-local.ps1',
+                   'fox/local_assessment.py')
+        ce_skill = ('install.py', 'oracle-forms-to-apex-ce/SKILL.md')
+        if files_exist(product):
+            status, action = 'PRODUCT_SOURCE_NOT_INSTALLATION', 'SELECT_REVIEWED_FULL_RELEASE'
+        elif files_exist(runtime):
+            status, action = 'RUNTIME_SOURCE_NOT_INSTALLATION', 'SELECT_REQUESTED_SETUP_ROUTE'
+        elif files_exist(ce_skill):
+            status, action = 'CE_SKILL_NOT_FOX_INSTALLATION', 'SELECT_FOX_PRODUCT_ROOT'
+        else:
+            status, action = 'UNRECOGNIZED_NONEMPTY_DIRECTORY', 'CHOOSE_NEW_ROOT_OR_INSPECT_EXISTING_STATE'
+    after = root.stat()
+    fields = ('st_dev', 'st_ino', 'st_mode', 'st_mtime_ns', 'st_ctime_ns')
+    require(all(getattr(before, key) == getattr(after, key) for key in fields)
+            and safe_path(root) == root, 'INSTALLATION_ROOT_CHANGED_DURING_INSPECTION')
+    return observed(status, action)
+
+
 def main(argv=None):
     parser = SafeParser(description=__doc__)
-    parser.add_argument('command', choices=('check', 'prepare'))
-    parser.add_argument('manifest')
-    parser.add_argument('--source-root', required=True)
+    parser.add_argument('command', choices=('inspect', 'check', 'prepare'))
+    parser.add_argument('manifest', nargs='?')
+    parser.add_argument('--source-root')
+    parser.add_argument('--installation-root')
     parser.add_argument('--output')
     args = parser.parse_args(argv)
+    if args.command == 'inspect':
+        require(args.installation_root is not None and args.manifest is None
+                and args.source_root is None and args.output is None, 'INSPECT_ARGUMENTS_INVALID')
+        print(json.dumps(inspect_installation(args.installation_root), sort_keys=True))
+        return 0  # Successful observation, not installation or readiness.
+    require(args.manifest is not None and args.source_root is not None
+            and args.installation_root is None, 'SETUP_ARGUMENTS_INVALID')
     require((args.command == 'prepare') == (args.output is not None), 'OUTPUT_ONLY_FOR_CREATE_ONLY_PREPARE')
     raw = regular_bytes(args.manifest, MAX_JSON)
     result = prepare(raw, args.source_root, args.output) if args.command == 'prepare' else check(raw, args.source_root)

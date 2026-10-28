@@ -17,9 +17,25 @@ Help the operator use the selected release's actual installation route. This is 
 
 ## Check before changes
 
+For the approved public repository, FOX is under `products/fox`; the repository's
+root `install.py` installs the CE skill, not the FOX product. Resolve the selected
+checkout/release and operator-approved installation directory explicitly.
+Where its actual setup entry point offers `inspect`, run:
+
+```text
+<python> scripts/fox-setup.py inspect --installation-root <selected-directory>
+```
+
+This classifies only that directory. A missing directory can lead to a reviewed
+installation plan, but does not authorize downloads or imply machine-wide
+absence. A source checkout, assessment session or retained deployment state
+requires its own checks, never overwrite/adoption. Exit 0 is a completed
+observation, not installed or conversion-ready. Continue through the selected
+release's real route; do not invent an install command where none is shipped.
+
 Inspect the selected interpreter, lockfiles, launcher, built UI, storage location and requested loopback port. Use installed dependency metadata rather than importing `fox.app`: that import initializes storage. A source build needs Python and Node/npm compatible with its declared files; a reviewed bundle with built assets may not need Node.
 
-When the supplied parent-level package includes `scripts/fox-setup.py`, its schema and a release declaration, inspect its CLI and run documented `check` using the intended runtime interpreter. It currently offers only `check` and create-only `prepare`, not install/start/activate/restore. The development example is deliberately unfrozen and should report `NOT_READY`; never invent hashes to make it pass. A standalone Git checkout without this packager can still use the documented local route, but must not be reported as a checked frozen bundle.
+When the supplied parent-level package includes `scripts/fox-setup.py`, its schema and a release declaration, inspect its CLI and run documented `check` using the intended runtime interpreter. Current source offers read-only `inspect`, `check` and create-only `prepare`, not install/start/activate/restore. Older releases may omit `inspect`; follow their actual CLI. The development example is deliberately unfrozen and should report `NOT_READY`; never invent hashes to make it pass. A standalone Git checkout without this packager can still use the documented local route, but must not be reported as a checked frozen bundle.
 
 Report missing prerequisites and the proposed changes. An intact package or passing prerequisite check is not a running service, Oracle compatibility certification or conversion readiness.
 

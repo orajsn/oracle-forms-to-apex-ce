@@ -38,3 +38,21 @@ checkout commands/results separately. It excludes generated artifacts,
 credentials and customer files. Source unit counts never substitute for shipped
 runtime import/browser proof. Fresh connected installation and full end-to-end
 acceptance remain release gates, not claims made by this source snapshot.
+
+## Installation discovery
+
+The same setup entry point now distinguishes selected missing/empty directories,
+source checkouts, CE skill roots, assessment metadata and retained installation
+state without starting an app or reading databases/credentials:
+
+```text
+<selected-python> scripts/fox-setup.py inspect --installation-root <selected-directory>
+<test-python> -B -m pytest -p no:cacheprovider tests/test_fox_installation_discovery.py
+```
+
+The suite uses its own synthetic metadata and checks preserved file contents,
+no application/database/network execution, conflicting markers, bounded
+inventory, changes during observation, linked roots where the test host permits
+them, and closed diagnostics. A successful inspection is not installation,
+release verification or permission to initialize/reuse the directory. The
+connected installer and wizard must consume the actual storage/runtime gates.
