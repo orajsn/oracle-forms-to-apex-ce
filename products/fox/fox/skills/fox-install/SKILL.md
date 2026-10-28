@@ -17,6 +17,16 @@ Help the operator use the selected release's actual installation route. This is 
 
 ## Check before changes
 
+When the selected Linux product supplies `scripts/install-fox.sh`, read its
+`docs/managed-setup-runtime.md` and use `bash scripts/install-fox.sh --inspect`
+for the private setup runtime first. This uses the supported OS bootstrap Python,
+not an assumed manually prepared Python3.12 environment. If setup preparation
+is explicitly approved, the same launcher can obtain its pinned runtime and
+open the wizard. Downloads require its interactive consent or separately
+authorized `--allow-download`; do not add that flag to a check-only request.
+Keep a partial/changed cache, never delete it or install arbitrary replacement
+packages to make checks pass. Runtime verification is not product installation.
+
 For the approved public repository, FOX is under `products/fox`; the repository's
 root `install.py` installs the CE skill, not the FOX product. Resolve the selected
 checkout/release and operator-approved installation directory explicitly.

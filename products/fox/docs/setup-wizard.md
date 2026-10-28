@@ -1,5 +1,10 @@
 # Guided FOX setup: implemented storage phase
 
+The preferred Linux development entry point is now
+`bash scripts/install-fox.sh`. It prepares or verifies a private setup runtime
+and enters this same wizard; see [managed setup runtime](managed-setup-runtime.md).
+The explicit Python command below remains useful for operator/developer checks.
+
 The administrator can now start a real browser wizard through the same setup
 entry point, using the supplied source and an isolated supported Python on
 nonroot Linux:

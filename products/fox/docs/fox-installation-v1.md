@@ -5,6 +5,20 @@ assessment can run independently. Connected conversion uses the guarded JSN lab
 adapter; a supported fresh customer installer is not yet complete. The CE
 repository's root `install.py` installs the CE skill, not FOX.
 
+## Guided setup preview on Linux
+
+From `products/fox`, run `bash scripts/install-fox.sh`. The launcher handles the
+private setup interpreter and XML dependency, then enters the browser wizard.
+The initial download needs the operator's consent; a verified existing cache is
+rechecked without downloads. System Python and project data are unchanged.
+The [runtime guide](managed-setup-runtime.md) covers inspection, explicit
+unattended preparation, fixed offline artifacts and interruption handling.
+
+This implements the wizard runtime and storage phase, not complete connected
+installation. No successful exit or page view means the product is installed.
+The basic OS bootstrap Python is provided by the supported Linux baseline;
+end users do not configure it, install pip packages or run setup themselves.
+
 ## Local assessment on Windows
 
 Before changing a selected installation directory, the product-root setup helper

@@ -30,6 +30,14 @@ JSN lab adapter. Non-secret target identifiers/guards in that adapter are
 reference scope, not portable customer defaults or credentials. Do not change
 them to bypass a failed gate or point a demo at production.
 
+## Linux setup preview
+
+Run `bash scripts/install-fox.sh` from this product folder as a nonroot
+operator. It checks/prepares a private pinned Python runtime with download
+consent, then opens the loopback setup wizard. This currently prepares storage
+only, not connected FOX services. Read the [managed setup runtime guide](docs/managed-setup-runtime.md)
+before use. `--inspect` checks that runtime without downloads or file changes.
+
 ## Supported conversion profile
 
 The initial native profile supports a narrow synthetic prototype: reviewed

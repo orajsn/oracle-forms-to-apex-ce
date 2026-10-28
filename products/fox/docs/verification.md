@@ -73,6 +73,16 @@ installation, Oracle/model execution or customer distribution readiness.
 
 ## Browser setup wizard
 
+The optional real bootstrap test is `tests/test_fox_bootstrap_integration.py`.
+It requires explicit pinned upstream artifacts through
+`FOX_BOOTSTRAP_PYTHON_ARCHIVE` and `FOX_BOOTSTRAP_XML_WHEEL`, plus nonroot Linux.
+It exercises the actual OS-Python launcher, cold/warm cache, interruption
+checkpoints, real wizard startup/shutdown and rejection of altered code before
+execution. Without the artifacts it is skipped, not a successful installation
+test. Pure archive/guard checks are in `tests/test_fox_bootstrap_runtime.py`.
+The installed setup runtime contains no pytest dependency; the isolated test
+driver is separate. See [managed setup runtime](managed-setup-runtime.md).
+
 `tests/test_fox_setup_wizard.py` covers real loopback HTTP, origin/host/auth/body
 bounds, session expiry, genuine nonroot storage, duplicate approval suppression,
 unknown-outcome recheck and actual CLI startup/shutdown. These are local setup

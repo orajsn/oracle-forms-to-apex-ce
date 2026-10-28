@@ -18,3 +18,12 @@ reference APEX's built-in theme; no Oracle installer or vendor runtime is bundle
 
 No production migration, Oracle Support entitlement, trademark license or Oracle
 product endorsement is established by this development snapshot.
+
+The development Linux setup launcher downloads a pinned Astral Python
+Standalone Builds archive and a pinned defusedxml wheel only after explicit
+operator consent (or uses those exact supplied offline bytes). It retains all
+upstream files/notices and adds no Oracle media. No runtime archive or installed
+dependency tree is tracked in this repository. The pins/URLs are in
+`deployment/bootstrap_runtime.py`. Review the exact upstream license/notices
+and the complete binary distribution before a customer release; a successful
+download or runtime probe is not redistribution clearance.
