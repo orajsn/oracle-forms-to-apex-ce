@@ -16,6 +16,9 @@ separate. Complete source evidence does not guarantee equivalent business
 behavior. Missing definitions and unsupported constructs are explicit findings;
 FOX must not invent keys, omit selected forms silently or guess human meaning.
 
+The [product and UI roadmap](docs/product-roadmap.md) defines the feature goals,
+user journey and acceptance criteria. These are targets, not released features.
+
 ## Development status
 
 This is experimental source, not an Oracle product, Support commitment or
