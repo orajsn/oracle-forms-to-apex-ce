@@ -7,6 +7,7 @@ import ast
 import base64
 from copy import deepcopy
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,6 +29,17 @@ from fox.project_qa_plan import derive_project_qa_plan, derive_project_qa_profil
 from fox.project_verification import ProjectVerificationError
 
 
+@pytest.fixture(autouse=True)
+def restore_process_umask():
+    # execute() deliberately restricts its dedicated operator process. These
+    # in-process tests must not change unrelated fixtures' permission setup.
+    previous=os.umask(0o077);os.umask(previous)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
 @pytest.fixture
 def qa_case(case):
     plan, package, package_raw = case
@@ -35,7 +47,7 @@ def qa_case(case):
     plan = deepcopy(plan)
     plan['operator_code_sha256'] = descriptor['clean_operator_code_sha256']
     raw = c.canonical_bytes(plan)
-    allocation = clean_remote._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(c.VERSIONS))
+    allocation = clean_remote._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(plan['expected_versions']))
     allocation_raw = c.canonical_bytes(allocation)
     policy_raw = c.canonical_bytes(pc.make_verification_profile(plan, allocation_raw))
     tables = clean_remote.verify_tables(table_markers(package), package, plan['target']['parsing_schema'])

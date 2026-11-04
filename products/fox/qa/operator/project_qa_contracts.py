@@ -15,11 +15,16 @@ from fox.project_verification import _validate_clean
 HANDOFF = ('package.zip', 'native-project-spec.json', 'source-to-apex.json',
            'allocate.evidence.json', 'verification-profile.json',
            'verify.evidence.json', 'runtime-credentials.json')
+EVIDENCE = tuple(name for name in HANDOFF if name != 'runtime-credentials.json')
 
 
-def prepare_inputs(plan_raw, files, *, operator_code_sha256):
-    """Derive every form's target/profile; reject omitted or changed evidence."""
-    c._require(type(files) is dict and set(files) == set(HANDOFF)
+def prepare_evidence(plan_raw, files, *, operator_code_sha256):
+    """Validate existing clean evidence without receiving runtime credentials.
+
+    This pure reader grants no retry, stage, launch or technical promotion.
+    Recovery observers can check retained imports without exporting passwords.
+    """
+    c._require(type(files) is dict and set(files) == set(EVIDENCE)
                and all(type(raw) is bytes and raw for raw in files.values()), 'Project handoff members differ.')
     plan = pc.validate_plan(plan_raw, operator_code_sha256=operator_code_sha256)
     package = pc.load_package(files['package.zip'], plan['binding']['package_sha256'])
@@ -43,11 +48,6 @@ def prepare_inputs(plan_raw, files, *, operator_code_sha256):
     c._require(imported.get('authenticated_runtime_passed') is False
                and imported.get('human_acceptance_recorded') is False,
                'Clean import must not claim browser or human acceptance.')
-    accounts = c.load_json(files['runtime-credentials.json'])
-    c._require(set(accounts) == {'username', 'password', 'second_username', 'second_password'}
-               and all(type(v) is str and 0 < len(v) <= 1024 for v in accounts.values())
-               and accounts['username'] == 'FOX_QA_A' and accounts['second_username'] == 'FOX_QA_B'
-               and accounts['password'] != accounts['second_password'], 'Two allocator runtime identities are required.')
     profile_raw = c.canonical_bytes(derive_project_qa_profile(package['project'], qa_plan))
     target = {'schema_version': 1, 'scope': 'fox-project-qa-target-v1', **binding,
               'target': policy.target, 'url': ORDS + '/r/'
@@ -55,3 +55,18 @@ def prepare_inputs(plan_raw, files, *, operator_code_sha256):
               'profile_sha256': c.digest(profile_raw), 'import_receipt_sha256': c.digest(files['verify.evidence.json']),
               'test_plan_sha256': qa_plan_sha256(qa_plan), 'synthetic_qa_approved': True}
     return {'profile.json': profile_raw, 'target.json': c.canonical_bytes(target)}
+
+
+def prepare_inputs(plan_raw, files, *, operator_code_sha256):
+    """Derive every form's target/profile and require both runtime identities."""
+    c._require(type(files) is dict and set(files) == set(HANDOFF)
+               and all(type(raw) is bytes and raw for raw in files.values()),
+               'Project handoff members differ.')
+    prepared = prepare_evidence(plan_raw, {name: files[name] for name in EVIDENCE},
+                                operator_code_sha256=operator_code_sha256)
+    accounts = c.load_json(files['runtime-credentials.json'])
+    c._require(set(accounts) == {'username', 'password', 'second_username', 'second_password'}
+               and all(type(v) is str and 0 < len(v) <= 1024 for v in accounts.values())
+               and accounts['username'] == 'FOX_QA_A' and accounts['second_username'] == 'FOX_QA_B'
+               and accounts['password'] != accounts['second_password'], 'Two allocator runtime identities are required.')
+    return prepared

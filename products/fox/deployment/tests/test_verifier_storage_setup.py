@@ -47,7 +47,11 @@ def test_all_paths_checked_before_creating_anything(tmp_path,change):
     elif change=='linked':
         if os.name!='posix':pytest.skip('Actual POSIX symlink fixture')
         (root/'project-clean-install').symlink_to(tmp_path,target_is_directory=True)
-    else:(root/'project-clean-install').mkdir(mode=0o755)
+    else:
+        # mkdir's requested mode is filtered by the caller's umask. Establish
+        # the actual unsafe state so this negative test cannot silently pass
+        # a private 0700 directory when run after an operator-process test.
+        path=root/'project-clean-install';path.mkdir(mode=0o755);path.chmod(0o755)
     with pytest.raises((M.CutoverError,AssertionError)):h.prepare_working_roots()
     assert not (root/'clean-install').exists()
 
