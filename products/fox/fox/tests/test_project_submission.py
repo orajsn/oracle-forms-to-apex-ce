@@ -57,6 +57,30 @@ def test_project_configuration_never_reads_secrets_or_claims_connectivity(client
     assert 'Configuration only' in session['configuration_scope']
 
 
+def test_ready_project_has_no_false_configuration_error(client, monkeypatch):
+    c,root,pid,plan=prepare(client,monkeypatch)
+    assert plan['can_generate'] is True
+    assert c.get(f'/api/projects/{pid}').json()['project_capabilities']['process']=={'enabled':True,'reason':None}
+    assert_not_queued(root)  # Capability is not an action or a connectivity claim.
+
+
+def test_unconfigured_ready_project_keeps_its_specific_administrator_action(client, monkeypatch):
+    c,root,pid,plan=prepare(client,monkeypatch)
+    monkeypatch.delenv('FOX_CONVERTER_URL',raising=False)
+    assert plan['can_generate'] is True
+    assert c.get(f'/api/projects/{pid}').json()['project_capabilities']['process']=={
+        'enabled':False,'reason':'Conversion is not configured for this deployment.'}
+    assert_not_queued(root)
+
+
+def test_incomplete_source_explains_findings_instead_of_configuration(client, monkeypatch):
+    c,root,pid,plan=prepare(client,monkeypatch,pair()[:1])
+    assert plan['can_generate'] is False
+    capability=c.get(f'/api/projects/{pid}').json()['project_capabilities']['process']
+    assert capability=={'enabled':False,'reason':'Resolve every selected form\u2019s findings before converting.'}
+    assert_not_queued(root)
+
+
 def mapped_profile(client):
     from fox.native_project_pipeline import PROJECT_MAPPING_CAPABILITY
     path = client[3]
@@ -85,7 +109,7 @@ def test_mapped_configuration_freezes_original_sources_and_explicit_stub_contrac
     mapped_profile(client)
     session = c.get('/api/session').json()
     assert session['conversion_configured'] and session['configured_project_schema_versions'] == [1, 2]
-    assert c.get(f'/api/projects/{pid}').json()['project_capabilities']['process']['enabled'] is True
+    assert c.get(f'/api/projects/{pid}').json()['project_capabilities']['process']=={'enabled':True,'reason':None}
     response = c.post(f'/api/projects/{pid}/runs', json=consent(plan))
     assert response.status_code == 202, response.text
     snapshot = json.loads((root / 'jobs' / response.json()['id'] / 'source-snapshot.json').read_text())

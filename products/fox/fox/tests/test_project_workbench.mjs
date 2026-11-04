@@ -63,6 +63,13 @@ const project={id:fixtures.ready.project_id,name:'Synthetic UI QA — two forms'
 const baseRun=(overrides={})=>({id:'fox-'+'a'.repeat(20),project_id:project.id,source_hash:fixtures.ready.source_hash,state:'VERIFIED',message:'Synthetic UI fixture only.',artifact_generated:true,technical_verified:true,human_accepted:false,downloadable:false,preview_available:true,review_available:true,...overrides});
 const common={project,source:binding(),plan:fixtures.ready,runs:[],capabilities:{upload:{enabled:true},generate:{enabled:true},select_version:{enabled:true}},processingNotice:'Synthetic UI fixture: no source is transmitted by this test.',onUpload:async()=>({status:'confirmed'}),onGenerate:async()=>({status:'confirmed'})};
 
+test('ready capability accepts a null wire reason without a false configuration error',()=>{
+ const capability={enabled:true,reason:null};
+ assert.deepEqual(api.available(capability,true,'Not configured'),{enabled:true});
+ assert.deepEqual(api.processAvailability(fixtures.ready,capability,true,confirmations,common.processingNotice),{enabled:true});
+ assert.deepEqual(api.available({enabled:false,reason:null},true,'Ask your administrator'),{enabled:false,reason:'Ask your administrator'});
+});
+
 test('dependency guidance preserves the actual button path, missing part and impact',()=>{
  const plan=api.readProjectPlan(fixtures.dependency_missing_body,binding(fixtures.dependency_missing_body));
  const form=plan.forms[0],dependency=form.dependencies.find(item=>item.kind==='package');

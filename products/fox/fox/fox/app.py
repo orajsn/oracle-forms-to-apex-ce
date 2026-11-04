@@ -586,7 +586,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 'process': {'enabled': configured and plan_ready and storage_configured,
                     'reason': ('Resolve every selected form\u2019s findings before converting.' if not plan_ready else
                                'Processing these original table names needs the mapped-project workflow configuration.' if not storage_configured else
-                               'Conversion is not configured for this deployment.')},
+                               'Conversion is not configured for this deployment.' if not configured else None)},
                 'local_preparation': {'enabled': enable_local_preparation},
             }
             p['processing_notice'] = ('Conversion uses embedded OPAF and the configured AI provider. '
