@@ -14,10 +14,16 @@ children; old and new Python namespaces are not mixed.
 Commands are `inspect`, `apply --apply` and read-only `status`, each with
 `--plan` and `--plan-sha256`. Inspection checks current resources, stopped
 candidates, source/profile/runtime boundaries, service syntax and backup limits.
+On a labelled host it also checks the two new nonsecret profile files against
+their working access-label references before any service stop. Prepare only
+those exact new-file labels when required. Do not disable SELinux, recursively
+relabel shared data, change key/wallet permissions or alter source bytes.
 Only an explicit apply can drain public access, stop the old pair, capture a
 full backup and test an isolated restore, retain the old containers, assign/start
 the new pair and verify its actual connectivity. It then replaces the verifier
-unit, observes a genuine empty first session and releases HTTPS.
+unit, observes a genuine first idle claim and releases HTTPS. The normal verifier
+may keep polling inside its bounded batch; an idle claim is not relabelled as a
+completed batch. Any already-completed session's normal seal is still checked.
 
 Original journals and failures are exported and retained unchanged. A closed
 precheck is not a successful session or permission to retry its claim. The

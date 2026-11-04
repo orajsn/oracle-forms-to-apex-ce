@@ -55,7 +55,27 @@ def test_new_probe_does_not_pump_replay_accept_or_run_a_conversion_tool():
     for forbidden in ('.pump(','.reserve_retry(','.complete_retry(','.import_validated_draft(','.generate_apex_draft(','.accept('):
         assert forbidden not in M.NEW_PROBE
     assert "completed_jobs']==[]" in M.NEW_PROBE
+    assert 'GENUINE_NEW_VERIFIER_IDLE_CLAIM' in M.NEW_PROBE
+    assert "batch_completion_claimed':False" in M.NEW_PROBE
+    assert "if not (directory/'complete.json').exists():continue" not in M.NEW_PROBE
     assert 'admission.check()' in M.NEW_PROBE
+
+
+@pytest.mark.parametrize('new_label,new_process',[
+    ('unconfined_u:object_r:data_home_t:s0','system_u:system_r:container_t:s0:c1,c2'),
+    ('system_u:object_r:container_file_t:s0:c3,c4','system_u:system_r:container_t:s0:c1,c2'),
+    ('system_u:object_r:container_file_t:s0:c1,c2','system_u:system_r:container_t:s0:c3,c4'),
+])
+def test_wrong_new_profile_access_label_stops_before_service_actions(new_label,new_process):
+    with pytest.raises(M.TransitionError,match='PREPARE_NEW_PROFILE_ACCESS_LABELS_FIRST'):
+        M.validate_profile_access_labels('system_u:object_r:container_file_t:s0:c1,c2',new_label,
+            'system_u:system_r:container_t:s0:c1,c2',new_process)
+
+
+def test_matching_profile_labels_and_genuinely_unlabelled_hosts_are_distinct_valid_cases():
+    label='system_u:object_r:container_file_t:s0:c1,c2';process='system_u:system_r:container_t:s0:c1,c2'
+    M.validate_profile_access_labels(label,label,process,process)
+    M.validate_profile_access_labels(None,None,'','')
 
 
 def container():

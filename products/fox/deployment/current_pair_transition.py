@@ -92,6 +92,13 @@ def load(name,ref):
     sys.modules[name]=m;exec(compile(raw,str(path),'exec'),m.__dict__);return m
 
 
+def validate_profile_access_labels(old_label,new_label,old_process,new_process):
+    """Installation metadata, not source bytes or permission broadening."""
+    if old_label is None and new_label is None and not old_process and not new_process:return
+    need(type(old_label)is str and ':object_r:container_file_t:' in old_label
+        and new_label==old_label and old_process==new_process,'PREPARE_NEW_PROFILE_ACCESS_LABELS_FIRST')
+
+
 BACKEND=r'''
 import base64,json,pathlib,sys,types
 p=json.load(sys.stdin);sys.path[:0]=p['paths']
@@ -144,14 +151,18 @@ elif p['mode']=='idle':
   if journal.root.exists():
    for directory in sorted(journal.root.glob('session-*')):
     assert not (directory/'attention.json').exists(),'NEW_VERIFIER_ATTENTION'
-    if not (directory/'complete.json').exists():continue
-    header=journal.read(directory,'session.json');complete=journal.read(directory,'complete.json')
+    if not (directory/'p0001-claim.complete.json').exists():continue
+    header=journal.read(directory,'session.json')
     assert header['release_sha256']==admission.release and header['startup_authorized'] is True
-    assert complete['status']=='SESSION_COMPLETE' and complete['completed_jobs']==[]
-    journal._check_seal(directory,complete)
+    assert header['bounds']==admission.document['bounds']
     intent=journal.raw(directory,'p0001-claim.intent.json');outcome=journal.read(directory,'p0001-claim.complete.json')
+    assert json.loads(intent)=={'scope':'fox-product-verifier-step-v1','release_sha256':admission.release,'step':'p0001-claim','binding_sha256':None}
     assert outcome['result']=={'status':'IDLE'} and outcome['intent_sha256']==hashlib.sha256(intent).hexdigest()
-    result={'status':'GENUINE_NEW_VERIFIER_IDLE','session':directory.name,'complete_sha256':hashlib.sha256(journal.raw(directory,'complete.json')).hexdigest(),'release_sha256':admission.release}
+    if (directory/'complete.json').exists():
+     complete=journal.read(directory,'complete.json')
+     assert complete['status']=='SESSION_COMPLETE' and complete['completed_jobs']==[]
+     journal._check_seal(directory,complete)
+    result={'status':'GENUINE_NEW_VERIFIER_IDLE_CLAIM','session':directory.name,'claim_complete_sha256':hashlib.sha256(journal.raw(directory,'p0001-claim.complete.json')).hexdigest(),'release_sha256':admission.release,'batch_completion_claimed':False}
     break
   if result:break
   time.sleep(1)
@@ -280,6 +291,15 @@ class Transition:
             profiles={'fox':A.mount_map(old['fox'])['/run/fox-native/profile.json'][0],
                 'converter':A.mount_map(old['forms2apex-mcp'])['/run/fox-target/profile.json'][0]}
             _,mounts=A.candidate_argv(role,old[name],self.candidate_plan,self.release,self.root,baseline_profiles=profiles)
+            destination='/run/fox-native/profile.json' if role=='fox' else '/run/fox-target/profile.json'
+            def label(path):
+                import errno
+                try:return os.getxattr(path,'security.selinux').decode().strip('\0')
+                except OSError as error:
+                    if error.errno in (errno.ENODATA,errno.ENOTSUP):return None
+                    raise
+            validate_profile_access_labels(label(profiles[role]),label(mounts[destination][0]),
+                old[name].get('ProcessLabel'),candidate.get('ProcessLabel'))
             A.check_candidate(candidate,role,self.candidate_plan,self.release,env,mounts,baseline_item=old[name])
             signatures['new'][role]=self.M.configuration_signature(A,candidate)
         need(not set(self.retained.values())&set(A.command(['/usr/bin/podman','ps','-a','--format','{{.Names}}']).decode().splitlines()),'RETAINED_NAMES_ALREADY_EXIST')
@@ -395,6 +415,14 @@ class Transition:
         need(self.A.read(self.root/'plan.json',private=True)==cb(self.p),'RECORDED_TRANSITION_PLAN_CHANGED')
         result={'status':'OBSERVED_NOT_REPLAYED','records':sorted(x.name for x in self.root.iterdir()),'automatic_replay_permitted':False}
         if (self.root/'complete.json').exists():result['completion']=document(self.A.read(self.root/'complete.json',private=True))
+        elif (self.root/'complete-after-idle-claim.json').exists():
+            recovered=document(self.A.read(self.root/'complete-after-idle-claim.json',private=True))
+            need(recovered.get('status')=='CURRENT_PAIR_FORWARD_UPGRADE_ACTIVATED_AFTER_OBSERVED_RECOVERY'
+                and recovered.get('new_release')==self.R
+                and recovered.get('installation_sha256')==self.p['new_installation']['sha256']
+                and recovered.get('operator_first_idle_claim',{}).get('status')=='GENUINE_NEW_VERIFIER_IDLE_CLAIM'
+                and recovered.get('batch_completion_claimed') is False,'RECOVERED_TRANSITION_RECORD_CHANGED')
+            result['completion']=recovered
         owner=document(self.A.read(self.root/'owner-process.json',private=True));proc=Path('/proc')/str(owner['pid'])
         try:live=int((proc/'stat').read_text().rsplit(')',1)[1].split()[19])==owner['start_ticks'] and Path('/proc/sys/kernel/random/boot_id').read_text().strip()==owner['boot_id']
         except FileNotFoundError:live=False
