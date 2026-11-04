@@ -1,0 +1,13 @@
+<?xml version = '1.0' encoding = 'UTF-8'?>
+<Module version="141020000" xmlns="http://xmlns.oracle.com/Forms">
+   <FormModule Name="FOX_PEER_SYNTHETIC" Title="FOX_PEER_SYNTHETIC" MenuModule="DEFAULT&amp;SMARTBAR">
+      <Coordinate CharacterCellWidth="7" RealUnit="Point" DefaultFontScaling="true" CharacterCellHeight="16" CoordinateSystem="Real"/>
+      <Block Name="WORK_ITEMS" QueryDataSourceName="FOX_NATIVE_PEER" DatabaseBlock="true" QueryDataSourceType="Table">
+         <Item Name="ID" DatabaseItem="true" ItemType="Text Item"/>
+         <Item Name="TITLE" Prompt="Work title" DatabaseItem="true" ItemType="Text Item"/>
+         <Item Name="STATUS" Prompt="Status" DatabaseItem="true" ItemType="Text Item"/>
+         <Item Name="AMOUNT" Prompt="Amount" DatabaseItem="true" ItemType="Text Item"/>
+         <Item Name="DUE_DATE" Prompt="Due date" DatabaseItem="true" ItemType="Text Item"/>
+      </Block>
+   </FormModule>
+</Module>

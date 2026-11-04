@@ -29,6 +29,25 @@ def consent(plan):
         'approved_prototype_scope': True}
 
 
+def test_oracle_generated_coordinate_reaches_normal_submission(client, monkeypatch):
+    from test_project_layout_metadata import sources
+    files = sources()
+    c, root, pid, plan = prepare(client, monkeypatch, files)
+    assert plan['state'] == 'READY' and plan['can_generate'] is True
+    response = c.post(f'/api/projects/{pid}/runs', json=consent(plan))
+    assert response.status_code == 202, response.text
+    snapshot = json.loads((root / 'jobs' / response.json()['id'] / 'source-snapshot.json').read_text())
+    expected = {item['name']: (item['text'], item['sha256'], item['bytes']) for item in files}
+    actual = {item['name']: (item['text'], item['sha256'], item['bytes']) for item in snapshot['files']}
+    assert actual == expected  # Storage may add IDs and sort, never change source bytes.
+    assert '<Coordinate ' in actual['oracle-coordinate.xml'][0]
+    assert snapshot['native_project']['source_manifest_sha256'] == plan['source_hash']
+    assert len(snapshot['native_project']['forms']) == 1
+    assert c.get(f'/api/projects/{pid}/runs/{response.json()["id"]}/download').status_code == 409
+    with sqlite3.connect(root / 'fox.sqlite3') as db:
+        assert db.execute('SELECT COUNT(*) FROM acceptances').fetchone()[0] == 0
+
+
 def test_project_configuration_never_reads_secrets_or_claims_connectivity(client, monkeypatch):
     c, _, _, _ = prepare(client, monkeypatch)
     session = c.get('/api/session').json()

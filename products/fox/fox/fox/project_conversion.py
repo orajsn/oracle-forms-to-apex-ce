@@ -33,7 +33,12 @@ _SHA = re.compile(r"[a-f0-9]{64}\Z")
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
 _APEX_SUBSTITUTION = re.compile(r"&[A-Za-z0-9_$#]+\.")
 _NAMESPACES = {"", "http://xmlns.oracle.com/Forms"}
-_DISPLAY_ONLY_OBJECTS = {"formmodule", "block", "item", "formitem", "canvas", "window"}
+# Oracle Forms2XML emits Coordinate even for a minimal real binary. Its screen
+# units/font metrics are presentation metadata, not a missing business mapping.
+# Preserve the original bytes in the source binding; native APEX recomposes the
+# layout rather than reproducing desktop measurements. This does not exempt
+# nested objects, code attributes or foreign namespaces from the normal audits.
+_DISPLAY_ONLY_OBJECTS = {"formmodule", "block", "item", "formitem", "canvas", "window", "coordinate"}
 _HUMAN_CODES = {"BUSINESS_CODE_REVIEW_REQUIRED", "AMBIGUOUS_ITEM_PROMPT",
                 "FORM_SELECTION_REQUIRED", "UNNAMED_FORM_MODULE", "LABEL_REVIEW_REQUIRED"}
 _MISSING_CODES = {"DDL_REQUIRED", "EXPLICIT_KEY_REQUIRED", "ITEM_COLUMN_MISSING",
@@ -111,6 +116,11 @@ def _xml_property_issues(root, source):
                     "Multiple XML properties normalize to the same name. No last-value selection is allowed.",
                     source, location + ".@" + local, owner="SOURCE_OWNER",
                     action="Resolve the conflicting property definitions in the authoritative source, then re-export.")))
+        if _tag(element) == "coordinate" and (len(element) or (element.text or "").strip()):
+            issues.append((element, _finding("UNMAPPED_COORDINATE_CONTENT", "UNSUPPORTED",
+                "Coordinate screen measurements are supported, but nested objects or text are not layout properties and cannot be discarded.",
+                source, location, owner="SOURCE_OWNER",
+                action="Re-export the authoritative Forms XML or provide an explicit mapping for the additional content.")))
     return issues
 
 
