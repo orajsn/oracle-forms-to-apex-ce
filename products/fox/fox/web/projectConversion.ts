@@ -3,8 +3,9 @@ import {presentVerificationStatus} from './verificationPresentation';
 export type FormReadiness='READY'|'MISSING_INPUT'|'NEEDS_HUMAN'|'UNSUPPORTED';
 export type FindingCategory='MISSING_INPUT'|'NEEDS_HUMAN'|'UNSUPPORTED';
 export type FindingOwner='SOURCE_OWNER'|'BUSINESS_OWNER'|'OPERATOR';
-export type ProjectFinding={code:string;category:FindingCategory;message:string;source:string;evidence:string;owner:FindingOwner;required_action:string};
-export type ProjectDependency={kind:string;target:string;status:'SOURCE_PRESENT'|'MISSING';source:string;evidence:string;action:string};
+export type SourceLocation={form?:string;block?:string;item?:string;button?:string;trigger?:string;program_unit?:string;code_property?:string;code_line?:number};
+export type ProjectFinding={code:string;category:FindingCategory;message:string;source:string;evidence:string;owner:FindingOwner;required_action:string;source_location?:SourceLocation;impact?:string};
+export type ProjectDependency={kind:string;target:string;status:'SOURCE_PRESENT'|'MISSING';source:string;evidence:string;action:string;source_location?:SourceLocation;routine?:string;missing_parts?:('package'|'package_body')[];routine_check?:'MISSING_SOURCE'|'DECLARATIONS_FOUND'|'NOT_CONFIRMED'};
 export type ProjectStorageMapping={schema_version:1;scope:'fox-project-storage-v1';project_id:string;source_table_name:string;source_schema_sha256:string;identity_sha256:string;target_table_name:string};
 export type ProjectForm={module_id:string;form_name:string;source_name:string;source_sha256:string;state:FormReadiness;table_name:string|null;storage_mapping?:ProjectStorageMapping;findings:ProjectFinding[];dependencies:ProjectDependency[];ddl_sources:{name:string;sha256:string}[];mapping:{source_component:string;target_component:string;status:string}[];planned_pages:{report_page:number;form_page:number}|null};
 export type ProjectSource={name:string;sha256:string;bytes:number;kind:'FORM_XML'|'TABLE_DDL'|'SUPPORTING_SOURCE'|'UNSUPPORTED_XML';module_ids:string[];disposition:'MAPPED'|'BLOCKED'|'UNASSIGNED'};
@@ -29,15 +30,37 @@ const owners=['SOURCE_OWNER','BUSINESS_OWNER','OPERATOR'] as const;
 const fail=()=>new Error('The project assessment is incomplete or out of date. Refresh it before converting.');
 const need=(condition:unknown):void=>{if(!condition)throw fail();};
 
+function sourceLocation(value:unknown):SourceLocation|undefined{
+ if(value===undefined)return undefined;
+ if(!record(value))throw fail();
+ const names=['form','block','item','button','trigger','program_unit','code_property'];
+ const result:Record<string,string|number>={};
+ for(const [key,item] of Object.entries(value)){
+  if(key==='code_line'){if(!integer(item,1))throw fail();result[key]=item;}
+  else{if(!names.includes(key)||!text(item,160))throw fail();result[key]=item;}
+ }
+ return result as SourceLocation;
+}
+
 function finding(value:unknown):ProjectFinding{
  if(!record(value)||!text(value.code,160)||!oneOf(value.category,categories)||!text(value.message)
   ||!(value.source===null||optionalText(value.source,256))||!(value.evidence===null||optionalText(value.evidence))||!oneOf(value.owner,owners)||!text(value.required_action))throw fail();
- return {code:value.code,category:value.category,message:value.message,source:value.source??'',evidence:value.evidence??'',owner:value.owner,required_action:value.required_action};
+ const location=sourceLocation(value.source_location);
+ if(value.impact!==undefined&&!text(value.impact))throw fail();
+ return {code:value.code,category:value.category,message:value.message,source:value.source??'',evidence:value.evidence??'',owner:value.owner,required_action:value.required_action,
+  ...(location?{source_location:location}:{}),...(typeof value.impact==='string'?{impact:value.impact}:{})};
 }
 function dependency(value:unknown):ProjectDependency{
  if(!record(value)||!text(value.kind,160)||!text(value.target,512)||!oneOf(value.status,['SOURCE_PRESENT','MISSING'])
   ||!optionalText(value.source,256)||!optionalText(value.evidence)||!text(value.action))throw fail();
- return {kind:value.kind,target:value.target,status:value.status,source:value.source,evidence:value.evidence,action:value.action};
+ const location=sourceLocation(value.source_location);
+ if(value.routine!==undefined&&!text(value.routine,128))throw fail();
+ if(value.routine_check!==undefined&&!oneOf(value.routine_check,['MISSING_SOURCE','DECLARATIONS_FOUND','NOT_CONFIRMED']))throw fail();
+ if(value.missing_parts!==undefined&&(!Array.isArray(value.missing_parts)||!value.missing_parts.every(item=>oneOf(item,['package','package_body']))||new Set(value.missing_parts).size!==value.missing_parts.length))throw fail();
+ return {kind:value.kind,target:value.target,status:value.status,source:value.source,evidence:value.evidence,action:value.action,
+  ...(location?{source_location:location}:{}),...(typeof value.routine==='string'?{routine:value.routine}:{}),
+  ...(Array.isArray(value.missing_parts)?{missing_parts:value.missing_parts as ('package'|'package_body')[]}:{}),
+  ...(value.routine_check?{routine_check:value.routine_check as ProjectDependency['routine_check']}:{})};
 }
 function storageMapping(value:unknown,projectId:string,sourceTable:unknown):ProjectStorageMapping{
  const fields=['schema_version','scope','project_id','source_table_name','source_schema_sha256','identity_sha256','target_table_name'];

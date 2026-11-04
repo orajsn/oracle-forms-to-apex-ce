@@ -39,13 +39,18 @@ files=pair()+pair('BETA','FOX_NATIVE_BETA')
 human=pair();human[0]=source('alpha.xml',xml(module(extra='<Trigger Name="WHEN-BUTTON-PRESSED" TriggerText="UTIL.RUN();"/>')))
 unsupported=pair();unsupported[0]=source('alpha.xml',xml(module().replace('Prompt="Title"','Prompt="Title" ItemType="Push Button"')))
 ordinary_human=pair('BETA','ORDER_ITEMS');ordinary_human[0]=source('beta.xml',xml(module('BETA','ORDER_ITEMS',extra='<Trigger Name="WHEN-BUTTON-PRESSED" TriggerText="UTIL.RUN();"/>')))
+guide=runpy.run_path('tests/test_dependency_guidance.py')
+dep_files=[guide['form'](),guide['ddl'](),guide['spec']()]
 result={'ready':assess(files),'changed':assess(pair(prompt='Revised title')+pair('BETA','FOX_NATIVE_BETA')),
  'missing':assess(pair()[:1]),'human':assess(human),'unsupported':assess(unsupported),'empty':assess([]),
  'orders':assess(pair(table='ORDERS')),'orders_shared':assess(pair(table='ORDERS')+pair('BETA','ORDERS')),
  'orders_mixed':assess(pair(table='ORDERS')+pair('BETA','FOX_NATIVE_BETA')),
  'orders_multi':assess(pair(table='ORDERS')+pair('BETA','ORDER_ITEMS')),
  'orders_blocked':assess(pair(table='ORDERS')+ordinary_human),
- 'capacity':assess([source('note'+str(x)+'.txt','Synthetic note.') for x in range(51)])}
+ 'capacity':assess([source('note'+str(x)+'.txt','Synthetic note.') for x in range(51)]),
+ 'dependency_missing_body':assess(dep_files),
+ 'dependency_complete':assess(dep_files+[guide['body']()]),
+ 'dependency_wrong_routine':assess([guide['form'](),guide['ddl'](),guide['spec']('CANCEL_ORDER'),guide['body']('CANCEL_ORDER')])}
 print(json.dumps(result,ensure_ascii=False))
 `;
 const python=process.env.FOX_TEST_PYTHON??path.join(foxRoot,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
@@ -57,6 +62,35 @@ const confirmations={approved_redacted_source:true,approved_external_ai:true,app
 const project={id:fixtures.ready.project_id,name:'Synthetic UI QA — two forms',customer:'Automated UI test only',description:'No live conversion, model call or business acceptance is performed by this test.'};
 const baseRun=(overrides={})=>({id:'fox-'+'a'.repeat(20),project_id:project.id,source_hash:fixtures.ready.source_hash,state:'VERIFIED',message:'Synthetic UI fixture only.',artifact_generated:true,technical_verified:true,human_accepted:false,downloadable:false,preview_available:true,review_available:true,...overrides});
 const common={project,source:binding(),plan:fixtures.ready,runs:[],capabilities:{upload:{enabled:true},generate:{enabled:true},select_version:{enabled:true}},processingNotice:'Synthetic UI fixture: no source is transmitted by this test.',onUpload:async()=>({status:'confirmed'}),onGenerate:async()=>({status:'confirmed'})};
+
+test('dependency guidance preserves the actual button path, missing part and impact',()=>{
+ const plan=api.readProjectPlan(fixtures.dependency_missing_body,binding(fixtures.dependency_missing_body));
+ const form=plan.forms[0],dependency=form.dependencies.find(item=>item.kind==='package');
+ assert.equal(dependency.source_location.button,'Approve order');
+ assert.deepEqual(dependency.missing_parts,['package_body']);
+ const html=render(components.FormDetails,{form,onResolve:()=>{}});
+ assert.match(html,/ORDER_API.APPROVE_ORDER/);assert.match(html,/Approve order/);
+ assert.match(html,/WHEN-BUTTON-PRESSED/);assert.match(html,/Why this matters/);
+ assert.match(html,/Package body \(.pkb or SQL\)/);assert.doesNotMatch(html,/Package specification \(.pks or SQL\)/);
+ const finding=form.findings.find(item=>item.code==='MISSING_DEPENDENCY');
+ const card=render(components.Finding,{finding,moduleName:form.form_name,onUpload:()=>{}});
+ assert.match(card,/Add requested files/);assert.match(card,/cannot reproduce/);assert.match(card,/Approve order/);
+});
+test('supplied declarations do not imply converted behavior and wrong routines remain explicit',()=>{
+ const complete=api.readProjectPlan(fixtures.dependency_complete,binding(fixtures.dependency_complete));
+ const html=render(components.FormDetails,{form:complete.forms[0],onResolve:()=>{}});
+ assert.match(html,/Declarations found/);assert.match(html,/business behavior are not verified/);
+ assert.equal(complete.can_generate,false);
+ const wrong=api.readProjectPlan(fixtures.dependency_wrong_routine,binding(fixtures.dependency_wrong_routine));
+ assert.match(render(components.FormDetails,{form:wrong.forms[0],onResolve:()=>{}}),/Routine not confirmed/);
+ assert.equal(wrong.can_generate,false);
+});
+for(const change of [d=>{d.source_location.code_line=0;},d=>{d.source_location.button=42;},d=>{d.missing_parts=['made_up'];},d=>{d.routine_check='VERIFIED';}]){
+ test('malformed dependency details cannot become a trusted UI readiness claim',()=>{
+  const raw=clone(fixtures.dependency_missing_body);change(raw.forms[0].dependencies.find(item=>item.kind==='package'));
+  assert.throws(()=>api.readProjectPlan(raw,binding(raw)));
+ });
+}
 
 test('real two-form producer is presented as one project plan, not generated output',()=>{
  const plan=api.readProjectPlan(fixtures.ready,binding());
@@ -351,9 +385,11 @@ const f=${JSON.stringify(fixtures)},project=${JSON.stringify(project)};
 window.__events=[];window.__heldByteReads=[];window.__holdBytes=false;window.__holdRefresh=false;window.__holdReview=false;const actualArrayBuffer=File.prototype.arrayBuffer;
 File.prototype.arrayBuffer=function(){if(!window.__holdBytes)return actualArrayBuffer.call(this);const file=this;return new Promise((resolve,reject)=>window.__heldByteReads.push(()=>actualArrayBuffer.call(file).then(resolve,reject)))};
 window.__releaseBytes=async()=>{window.__holdBytes=false;await Promise.all(window.__heldByteReads.map(release=>release()))};
-const fixtureVersions=Object.entries(f).map(([name,p],index)=>({id:'ss-'+String(index+1).repeat(32),label:name==='ready'?'Original supplied version':name==='changed'?'Revised supplied version':name+' fixture',source_hash:p.source_hash,file_count:p.source_files.length}));
+const fixtureVersions=Object.entries(f).map(([name,p],index)=>({id:'ss-'+(index+1).toString(16).repeat(32).slice(0,32),label:name==='ready'?'Original supplied version':name==='changed'?'Revised supplied version':name+' fixture',source_hash:p.source_hash,file_count:p.source_files.length}));
 const sourceFor=p=>({project_id:p.project_id,source_hash:p.source_hash,selected_source_set_id:fixtureVersions.find(v=>v.source_hash===p.source_hash).id});
 function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState([]),[unknown,setUnknown]=useState(false),[safe,setSafe]=useState(false),[invalid,setInvalid]=useState(false);
+ window.__showMissingBody=()=>{setPlan(f.dependency_missing_body);setRuns([])};
+ window.__showWrongRoutine=()=>{setPlan(f.dependency_wrong_routine);setRuns([])};
  const source=invalid?{...sourceFor(plan),source_hash:'b'.repeat(64)}:sourceFor(plan),contextNote='Automated isolated UI QA only. No model, database, conversion or live acceptance.';
  const run=()=>({id:'fox-'+ 'a'.repeat(20),project_id:project.id,source_hash:f.ready.source_hash,state:'VERIFIED',message:contextNote,artifact_generated:true,technical_verified:true,human_accepted:false,downloadable:false,preview_available:true,review_available:true});
  window.__showVerificationAttention=()=>setRuns([{...run(),state:'QA_REQUIRED',technical_verified:false,
@@ -361,7 +397,7 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
   steps:[{id:'generation',label:'Generate application',state:'complete'},{id:'technical',label:'Run technical checks',state:'running'}],
   recovery:{kind:'check_status',enabled:true,safety:'read_only',label:'Check run status'}}]);
  return <><div className="fixture-controls" aria-label="Synthetic test controls"><strong>Isolated UI QA only</strong><button onClick={()=>{setPlan(f.human);setRuns([])}}>Show human blocker</button><button onClick={()=>{setPlan(f.ready);setRuns([])}}>Show ready plan</button><button onClick={()=>{setPlan(f.empty);setRuns([])}}>Show empty project</button><button onClick={()=>setPlan(f.changed)}>Change source version</button><button onClick={()=>setUnknown(true)}>Simulate unconfirmed action</button><button onClick={()=>setSafe(true)}>Confirm safe status</button><button onClick={()=>setInvalid(true)}>Invalidate source binding</button><button onClick={()=>setRuns([run()])}>Show verified fixture</button><button onClick={()=>setRuns([{...run(),state:'ACCEPTED',human_accepted:true,downloadable:true}])}>Show accepted fixture</button></div><main><Workbench project={project} source={source} plan={plan} runs={runs} processingNotice={contextNote} versions={fixtureVersions} capabilities={{upload:{enabled:true},generate:{enabled:true},select_version:{enabled:true}}}
- onUpload={async(files,mode,context)=>{window.__events.push({kind:'upload',files:files.map(x=>x.name),mode,context});return{status:'confirmed'}}}
+ onUpload={async(files,mode,context)=>{window.__events.push({kind:'upload',files:files.map(x=>x.name),mode,context});if(plan===f.dependency_missing_body&&files.some(x=>x.name==='order_api.pkb'))setPlan(f.dependency_complete);return{status:'confirmed'}}}
  onGenerate={async(context,confirmations)=>{window.__events.push({kind:'generate',context,confirmations});return{status:unknown?'unconfirmed':'confirmed'}}}
  onRefresh={async(context)=>{window.__events.push({kind:'refresh',context});if(window.__holdRefresh)return new Promise(resolve=>window.__releaseRefresh=resolve);return{status:'confirmed',safe_to_continue:safe}}}
  onReloadProject={async(projectId)=>{window.__events.push({kind:'reload-project',projectId});setInvalid(false);return{status:'confirmed'}}}
@@ -375,7 +411,7 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
  const js=built.outputFiles.find(file=>file.path.endsWith('.js')).text,css=built.outputFiles.find(file=>file.path.endsWith('.css')).text;
  const browser=await chromium.launch({channel:'msedge',headless:true});
  let context;
- const events=[];
+ const events=[],dependencyEvents=[];
  try{
   context=await browser.newContext({viewport:{width:1440,height:1100},reducedMotion:'reduce'});
   await context.setOffline(true);await context.route('**/*',route=>route.abort());
@@ -383,6 +419,37 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
   await page.setContent('<div id="root"></div>');await page.addStyleTag({content:css+'body{margin:0}.fixture-controls{padding:10px 18px;background:#e6ebe2;display:flex;gap:8px;flex-wrap:wrap}.fixture-controls button{padding:7px 10px;font-size:12px}main{max-width:1280px;padding:32px 40px}'});await page.addScriptTag({content:js});
   await page.getByRole('heading',{name:'Review every form'}).waitFor();
   await page.screenshot({path:path.join(out,'desktop-form-review.png')});
+  await page.evaluate(()=>window.__showMissingBody());
+  const dependency=page.getByRole('article',{name:'Dependency ORDER_API.APPROVE_ORDER',exact:true});
+  await dependency.getByText('Approve order',{exact:true}).waitFor();
+  assert.equal(await dependency.getByText('Source missing',{exact:true}).isVisible(),true);
+  assert.match(await dependency.innerText(),/Package body \(.pkb or SQL\)/);
+  assert.doesNotMatch(await dependency.innerText(),/Package specification \(.pks or SQL\)/);
+  await dependency.screenshot({path:path.join(out,'desktop-missing-package-body.png')});
+  await page.setViewportSize({width:390,height:844});
+  await dependency.screenshot({path:path.join(out,'mobile-missing-package-body.png')});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.setViewportSize({width:1440,height:1100});
+  await page.getByRole('button',{name:'3 Resolve',exact:true}).click();
+  const missingPackageFinding=page.locator('.fw-finding').filter({has:page.getByRole('heading',{name:'A referenced package source is missing: ORDER_API.',exact:true})});
+  await missingPackageFinding.getByRole('button',{name:'Add requested files',exact:true}).click();
+  await page.getByRole('radio',{name:'Readable files, without a preparation manifest'}).check();
+  await page.getByLabel('Choose project source files').setInputFiles({name:'order_api.pkb',mimeType:'text/plain',buffer:Buffer.from('CREATE PACKAGE BODY ORDER_API AS PROCEDURE APPROVE_ORDER IS BEGIN NULL; END; END;')});
+  await page.getByRole('button',{name:'Upload and assess',exact:true}).click();
+  await page.getByRole('heading',{name:'Review every form'}).waitFor();
+  await dependency.getByText('Declarations found',{exact:true}).waitFor();
+  assert.match(await dependency.innerText(),/business behavior are not verified/);
+  await dependency.screenshot({path:path.join(out,'desktop-package-source-resolved.png')});
+  dependencyEvents.push(...await page.evaluate(()=>window.__events));
+  assert.equal(dependencyEvents.filter(event=>event.kind==='upload').length,1);
+  assert.equal(dependencyEvents.some(event=>event.kind==='generate'),false);
+  assert.equal(dependencyEvents[0].context.source_hash,fixtures.dependency_missing_body.source_hash);
+  await page.getByRole('button',{name:'4 Convert',exact:true}).click();
+  assert.equal(await page.getByRole('button',{name:'Generate APEX application',exact:true}).isDisabled(),true);
+  await page.evaluate(()=>window.__showWrongRoutine());
+  await dependency.getByText('Routine not confirmed',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Show ready plan',exact:true}).click();
+  await page.evaluate(()=>{window.__events=[];});
   await page.evaluate(()=>window.__showVerificationAttention());await page.getByRole('button',{name:'5 Output',exact:true}).click();
   await page.getByRole('alert',{name:'Run needs attention'}).waitFor();
   assert.equal(await page.getByRole('button',{name:'Download APEX package',exact:true}).isDisabled(),true);
@@ -480,7 +547,7 @@ function Fixture(){const[plan,setPlan]=useState(f.ready),[runs,setRuns]=useState
   await page.getByRole('heading',{name:'Add your source files first',exact:true}).waitFor();
   assert.equal(await page.getByText('This source plan is ready.',{exact:false}).count(),0);
   assert.deepEqual(events,[]);
-  await writeFile(path.join(out,'result.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:true,producer:'actual project_conversion assessment on synthetic source',source_sha256:Object.fromEntries(Object.entries(sources).map(([name,raw])=>[name,sha(raw)])),browser:await browser.version(),page_errors:events,scenarios:['per-form review','verification attention preserves generated output and blocks technical spinner','status-only recovery cannot duplicate or start a new conversion','unknown-write blocked and read-only refresh','source-change clears consent','raw binary rejected and readable upload bound','duplicate upload blocked across deferred validation','invalid binding has project-only reload','human-meaning blocker','review controls share mutation guard and preserve draft notes','current verified vs historical accepted output','390px no horizontal overflow','empty project is not ready'],backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));
+  await writeFile(path.join(out,'result.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:true,producer:'actual project_conversion assessment on synthetic source',source_sha256:Object.fromEntries(Object.entries(sources).map(([name,raw])=>[name,sha(raw)])),browser:await browser.version(),page_errors:events,dependency_events:dependencyEvents,scenarios:['exact button/trigger and missing body guidance','one body upload changes source and resolves availability only','wrong routine remains unconfirmed','per-form review','verification attention preserves generated output and blocks technical spinner','status-only recovery cannot duplicate or start a new conversion','unknown-write blocked and read-only refresh','source-change clears consent','raw binary rejected and readable upload bound','duplicate upload blocked across deferred validation','invalid binding has project-only reload','human-meaning blocker','review controls share mutation guard and preserve draft notes','current verified vs historical accepted output','390px no horizontal overflow','empty project is not ready'],backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));
  }catch(error){await writeFile(path.join(out,'failure.json'),JSON.stringify({scope:'isolated-business-workbench-ui-proof-v1',passed:false,code:error?.name??'Error',message:String(error?.message??'UI proof failed').slice(0,2000),backend_simulated:true,oracle_executed:false,model_executed:false,live_acceptance_recorded:false},null,2));throw error;}
  finally{await context?.close();await browser.close();}
 });

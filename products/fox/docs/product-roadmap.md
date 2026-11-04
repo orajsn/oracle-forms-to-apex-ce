@@ -1,6 +1,6 @@
 # FOX product and UI roadmap
 
-Updated 4 November 2026. Jason requested a broader, product-driven feature view, including the business-user UI. The goal definitions below refine the existing one-project/multiple-Forms/one-native-APEX contract. They are a roadmap, not completed features, a new active goal-controller run, or deployment authority. Implementation evidence and deployment status must be tracked separately. This roadmap is not a released-feature or availability claim.
+Updated 4 November 2026. Implementation of the broader product/UI goals has been explicitly started. The goal definitions below refine the existing one-project/multiple-Forms/one-native-APEX contract. Implementation evidence and deployment status are tracked separately; a started goal is not a completed feature, deployed release or availability claim.
 
 ## Product outcome
 

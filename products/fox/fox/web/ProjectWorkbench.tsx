@@ -2,7 +2,7 @@ import React,{useEffect,useId,useMemo,useRef,useState,type ReactNode} from 'reac
 import {ArrowLeft,ArrowRight,Check,CheckCircle2,ChevronDown,Download,FileCode2,FolderOpen,HelpCircle,Layers,LoaderCircle,Plus,RefreshCw,Search,ShieldCheck,TriangleAlert,Upload} from 'lucide-react';
 import {checkSelectedSources,uploadManifestName,type UploadMode} from './preparedUpload';
 import {actionContext,available,findingOwnerLabels,formReadinessLabels,presentProjectPlan,presentProjectRun,processAvailability,recoveryAvailability,runBelongsToProject,validSourceBinding,workbenchSteps,
- type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectFinding,type ProjectForm,type ProjectRun,type SourceBinding,type WorkbenchStep} from './projectConversion';
+ type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectDependency,type ProjectFinding,type ProjectForm,type ProjectRun,type SourceBinding,type SourceLocation,type WorkbenchStep} from './projectConversion';
 import './projectWorkbench.css';
 
 export type WorkbenchProject={id:string;name:string;customer:string;description?:string;file_count?:number;run_count?:number};
@@ -53,10 +53,36 @@ function StatusBadge({state}:{state:ProjectForm['state']}){
  return <span className={`fw-badge fw-${readyTone(state)}`}>{state==='READY'?<CheckCircle2 size={14}/>:state==='NEEDS_HUMAN'?<HelpCircle size={14}/>:<TriangleAlert size={14}/>} {formReadinessLabels[state]}</span>;
 }
 
+function SourceTrail({location}:{location?:SourceLocation}){
+ if(!location)return null;
+ const parts=[['Form',location.form],['Block',location.block],
+  [location.button?'Button':'Item',location.button??location.item],['Trigger',location.trigger],['Program',location.program_unit]]
+  .filter((item):item is [string,string]=>typeof item[1]==='string'&&item[1].length>0);
+ return <div className="fw-call-path" aria-label="Where the call was found">
+  {parts.length>0&&<ol>{parts.map(([kind,value])=><li key={kind}><span>{kind}</span><strong>{value}</strong></li>)}</ol>}
+  {location.code_line&&<p className="fw-small">Line {location.code_line} within the extracted code{location.code_property?` (${location.code_property})`:''}; not an XML file line number.</p>}
+ </div>;
+}
+
+function DependencyDetails({dependency}:{dependency:ProjectDependency}){
+ const unconfirmed=dependency.routine_check==='NOT_CONFIRMED';
+ const label=dependency.status==='MISSING'?'Source missing':unconfirmed?'Routine not confirmed':dependency.routine_check==='DECLARATIONS_FOUND'?'Declarations found':'Source present';
+ return <article className="fw-dependency-card" aria-label={`Dependency ${dependency.target}${dependency.routine?'.'+dependency.routine:''}`}>
+  <div className="fw-detail-heading"><div><strong><code>{dependency.target}{dependency.routine?'.'+dependency.routine:''}</code></strong><p className="fw-small">{dependency.source}</p></div><span className={`fw-badge ${dependency.status==='MISSING'||unconfirmed?'fw-attention':'fw-neutral'}`}>{label}</span></div>
+  <SourceTrail location={dependency.source_location}/>
+  {dependency.kind==='package'&&<p><strong>Why this matters:</strong> FOX needs the called behavior to reproduce this action. Package files alone do not prove it has been converted.</p>}
+  {dependency.missing_parts&&dependency.missing_parts.length>0&&<p><strong>Still needed:</strong> {dependency.missing_parts.map(part=>part==='package'?'Package specification (.pks or SQL)':'Package body (.pkb or SQL)').join(' and ')}</p>}
+  <p className="fw-next-action"><strong>Next action</strong>{dependency.action}</p>
+  {dependency.routine_check==='DECLARATIONS_FOUND'&&<p className="fw-small">Static declaration evidence only. Routine signatures, compilation and business behavior are not verified by this check.</p>}
+ </article>;
+}
+
 function Finding({finding,moduleName,onUpload}:{finding:ProjectFinding;moduleName?:string;onUpload:()=>void}){
  const title=finding.code==='BUSINESS_CODE_REVIEW_REQUIRED'?'Business behavior needs a human decision':finding.message;
  return <article className={`fw-finding fw-finding-${finding.category.toLowerCase()}`}>
   <div className="fw-finding-title">{finding.category==='NEEDS_HUMAN'?<HelpCircle size={19}/>:<TriangleAlert size={19}/>}<div><h3>{title}</h3>{moduleName&&<p className="fw-small">Form: {moduleName}</p>}</div></div>
+  <SourceTrail location={finding.source_location}/>
+  {finding.impact&&<p><strong>Why this matters:</strong> {finding.impact}</p>}
   <p className="fw-next-action"><strong>Next action</strong>{finding.required_action}</p>
   <p className="fw-owner">Who can help: <strong>{findingOwnerLabels[finding.owner]}</strong></p>
   {finding.category==='NEEDS_HUMAN'&&<p className="fw-human-boundary">FOX will not guess the intended business behavior. This remains blocked until the required meaning is supplied.</p>}
@@ -74,7 +100,7 @@ function FormDetails({form,onResolve}:{form:ProjectForm;onResolve:()=>void}){
   {form.mapping.length>0&&<details className="fw-evidence"><summary>Component mapping <ChevronDown size={14}/></summary><ul>{form.mapping.map((item,index)=><li key={`${item.source_component}-${index}`}><span>{item.source_component}</span> → <span>{item.target_component==='native_report'?'Native APEX report':'Native APEX form'}</span> <small>(Planned)</small></li>)}</ul></details>}
   <h3>Linked source and definitions</h3>
   {form.ddl_sources.length>0?<ul className="fw-dependencies">{form.ddl_sources.map(item=><li key={item.name}><FileCode2 size={16}/><span>{item.name}</span><span className="fw-badge fw-neutral">Definition supplied</span></li>)}</ul>:<p className="fw-small">No database definition has been linked to this form.</p>}
-  {form.dependencies.length>0?<ul className="fw-dependencies">{form.dependencies.map((item,index)=><li key={`${item.kind}-${item.target}-${index}`}><FileCode2 size={16}/><div><strong>{item.target}</strong><p>{item.action}</p></div><span className={`fw-badge ${item.status==='MISSING'?'fw-attention':'fw-neutral'}`}>{item.status==='MISSING'?'Missing':'Source present'}</span></li>)}</ul>:<p className="fw-small">No additional dependency candidates were reported. This is not a completeness guarantee.</p>}
+  {form.dependencies.length>0?<ul className="fw-dependencies">{form.dependencies.map((item,index)=><li key={`${item.kind}-${item.target}-${index}`}><DependencyDetails dependency={item}/></li>)}</ul>:<p className="fw-small">No additional dependency candidates were reported. This is not a completeness guarantee.</p>}
   {form.findings.length>0&&<div className="fw-inline-action"><p>{form.findings.length} {form.findings.length===1?'finding needs':'findings need'} attention.</p><button type="button" className="fw-secondary" onClick={onResolve}>Resolve findings <ArrowRight size={16}/></button></div>}
  </section>;
 }

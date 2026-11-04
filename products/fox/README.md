@@ -58,6 +58,11 @@ is part of this source distribution.
 
 ## Components
 
+The [dependency-guidance source/UI slice](docs/dependency-guidance.md) explains
+the current object-level call path, missing-package-part actions and declaration
+checks. It includes the tested boundaries and remaining conversion/deployment
+work; source presence must not be confused with translated business behavior.
+
 - `fox/`: React/TypeScript UI and Python API, preparation and persistent jobs.
 - `converter/`: internal MCP tools, deterministic native generation, validation
   and guarded import/export.

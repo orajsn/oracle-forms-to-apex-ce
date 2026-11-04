@@ -742,7 +742,10 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         if inv['source_hash']!=body.source_hash: raise HTTPException(409,'Sources changed. Review the current assessment.')
         native = inv.get('native_assessment')
         if inv['conversion_profile'] == NATIVE_PROFILE and (not native or native['state'] != 'READY'):
-            messages = ' '.join(item['message'] for item in (native or {}).get('blockers', []))
+            # Keep all source gates visible, including assessment-only DML,
+            # rather than hiding them behind a generic native-mapping error.
+            messages = ' '.join(dict.fromkeys(item['message'] for item in
+                [*inv.get('conversion_blockers', []), *(native or {}).get('blockers', [])]))
             raise HTTPException(409, messages or 'The native source profile is not ready. Review the assessment.')
         if inv['conversion_profile'] == PROJECT_PROFILE:
             if (body.expected_current_source_set_id is None
