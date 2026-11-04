@@ -160,6 +160,13 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                       and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?', (job_id,)).fetchone() is None,
                       'RETIREMENT_REMOTE_QUEUED_WORK_NOT_ADMISSIBLE')
                 waiting.append({'binding': binding.payload(), 'record_sha256': row['record_sha256']})
+            elif value['recovery_state'] == 'precheck_failed_closed':
+                # The production recovery reader has revalidated the separate
+                # append-only row, original queue/claim and retained package.
+                # This is not a technical pass, completed retry or replay grant.
+                _need(value == {'blocks_admission': False,
+                    'recovery_state': 'precheck_failed_closed', 'retry_eligible': False},
+                    'RETIREMENT_REMOTE_PRECHECK_ELIGIBILITY_INVALID')
             else:
                 _need(value['recovery_state'] in {'failed_closed', 'no_active_verification', 'retry_completed_verified'},
                       'RETIREMENT_REMOTE_ELIGIBILITY_INVALID')

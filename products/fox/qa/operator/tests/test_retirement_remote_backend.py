@@ -226,6 +226,80 @@ def test_real_closed_c_completed_f_and_g_proofs_remain_distinct_and_read_only(hi
     assert _snapshot(case) == before
 
 
+def _precheck_case(case, tmp_path, monkeypatch, *, close=True):
+    """Real retained package and queue; only the stopped host observer is synthetic."""
+    fixture = _load_fixtures(monkeypatch)
+    pending = _case(fixture, tmp_path/'precheck-source', monkeypatch, 'f', '261017_98765432')
+    pending['snapshot']['project'] = 'synthetic-precheck'
+    with closing(sqlite3.connect(case.database)) as db, db:
+        db.execute('INSERT INTO projects VALUES(?,?)', ('synthetic-precheck','synthetic-owner'))
+    queue, claim = _seed_normal(pending, case.root, '9'*64)
+    queue.attention(claim)
+    from test_precheck_recovery import assessment
+    inputs = (None, case.database, queue, claim, case.store, None)
+    value = assessment(inputs)
+    case.store.initialize_precheck_ledger(apply=True)
+    if close:
+        raw = recovery.canonical_bytes(value)
+        result = case.store.close_precheck_failure(raw, expected_sha256=recovery.digest(raw),
+            observer=lambda *_: deepcopy(value), apply=True,
+            now=importlib.import_module('test_native_verification').NOW)
+        assert result['technical_success'] is result['human_acceptance_recorded'] is False
+    return queue, claim, value
+
+
+def test_separate_closed_precheck_is_admissible_without_success_retry_or_writes(historical_case,tmp_path,monkeypatch):
+    case = historical_case
+    queue, claim, _ = _precheck_case(case,tmp_path,monkeypatch)
+    before = _snapshot(case)
+    result = _read(case)
+    assert result['admission_state'] == 'READY'
+    assert result['waiting_verification_count'] == result['busy_conversion_count'] == 0
+    assert result['completed_idle_jobs'] == case.history['idle']['completed_jobs']
+    assert queue.get(claim.binding.job_id)['state'] == 'attention'
+    with closing(sqlite3.connect(case.database)) as db:
+        assert db.execute('SELECT state FROM runs WHERE id=?',(claim.binding.job_id,)).fetchone()[0] == 'QA_REQUIRED'
+        for table in ('technical_verifications','acceptances','verification_retry_attempts'):
+            key = 'run' if table != 'verification_retry_attempts' else 'job_id'
+            assert db.execute('SELECT COUNT(*) FROM '+table+' WHERE '+key+'=?',(claim.binding.job_id,)).fetchone()[0] == 0
+    assert _snapshot(case) == before
+
+
+def test_empty_precheck_ledger_does_not_close_an_attention_claim(historical_case,tmp_path,monkeypatch):
+    case = historical_case
+    _precheck_case(case,tmp_path,monkeypatch,close=False)
+    before = _snapshot(case)
+    from qa.operator.retirement_remote import RetirementRemoteError
+    with pytest.raises(RetirementRemoteError,match='UNRESOLVED_OR_ACTIVE_WORK'):
+        _read(case)
+    assert _snapshot(case) == before
+
+
+@pytest.mark.parametrize('member',['apex-package.zip','source-snapshot.json','release-evidence.json'])
+def test_closed_precheck_rechecks_retained_bytes_on_every_admission(historical_case,tmp_path,monkeypatch,member):
+    case = historical_case
+    _, claim, _ = _precheck_case(case,tmp_path,monkeypatch)
+    path = case.root/'jobs'/claim.binding.job_id/member
+    path.write_bytes(path.read_bytes()+b'\n')
+    before = _snapshot(case)
+    with pytest.raises(Exception):
+        _read(case)
+    assert _snapshot(case) == before
+
+
+def test_closed_precheck_cannot_become_retry_eligible_through_reader_projection(historical_case,tmp_path,monkeypatch):
+    case = historical_case
+    _, claim, _ = _precheck_case(case,tmp_path,monkeypatch)
+    actual = recovery.VerificationRecovery._eligibility
+    def altered(self,db,job):
+        value=actual(self,db,job)
+        return {**value,'retry_eligible':True} if job==claim.binding.job_id else value
+    monkeypatch.setattr(recovery.VerificationRecovery,'_eligibility',altered)
+    from qa.operator.retirement_remote import RetirementRemoteError
+    with pytest.raises(RetirementRemoteError,match='PRECHECK_ELIGIBILITY_INVALID'):
+        _read(case)
+
+
 def test_current_queued_jobs_are_startup_only_and_no_new_proof_is_created(historical_case):
     case = historical_case
     _waiting(case, number=1)

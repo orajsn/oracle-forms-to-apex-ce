@@ -212,12 +212,15 @@ class PrivateJournal:
         stream = lock.open('r+b')
         locked, lease = False, None
         try:
-            if os.name == 'nt':
-                import msvcrt
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                if os.name == 'nt':
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                raise ProductVerifierError('ANOTHER_PRODUCT_VERIFIER_ACTIVE_OR_LOCK_UNAVAILABLE') from None
             locked = True
             # Lazy import avoids the legacy failed-verification reader cycle.
             # Issued only after this fd acquired the actual OS lock; invalidated
@@ -226,8 +229,6 @@ class PrivateJournal:
             lease = HeldOperatorLock(_LEASE_KEY, self.release, self.root, stream)
             lease.require_active(self.release, self.root)
             yield lease
-        except OSError:
-            raise ProductVerifierError('ANOTHER_PRODUCT_VERIFIER_ACTIVE_OR_LOCK_UNAVAILABLE') from None
         finally:
             if lease is not None:
                 lease._active = False

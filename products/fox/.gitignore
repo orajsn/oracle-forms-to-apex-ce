@@ -17,6 +17,7 @@ build-provenance/
 secrets/
 .env
 .env.*
+/deployment/native-beta-profile.json
 *.pem
 *.key
 *.p12

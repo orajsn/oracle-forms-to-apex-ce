@@ -251,6 +251,28 @@ class Harness:
 
 
 class ProductVerifierTests(unittest.TestCase):
+    def test_real_lock_contention_still_refuses_a_second_owner(self):
+        with self.h.journal.lock() as lease:
+            lease.require_active(self.h.release,self.h.journal.root)
+            with self.assertRaisesRegex(p.ProductVerifierError,'ACTIVE_OR_LOCK_UNAVAILABLE'):
+                with self.h.journal.lock(create=False):
+                    self.fail('Contended journal unexpectedly granted another lease')
+            lease.require_active(self.h.release,self.h.journal.root)
+        with self.h.journal.lock(create=False):
+            pass
+
+    def test_body_io_failure_is_not_misreported_as_lock_contention(self):
+        original=OSError(7,'Synthetic operation transport failure')
+        lease=None
+        with self.assertRaises(OSError) as caught:
+            with self.h.journal.lock() as lease:
+                raise original
+        self.assertIs(caught.exception,original)
+        with self.assertRaises(Exception):
+            lease.require_active(self.h.release,self.h.journal.root)
+        with self.h.journal.lock(create=False):
+            pass
+
     def setUp(self):
         self.h = Harness()
         self.addCleanup(self.h.close)
