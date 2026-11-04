@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEPLOYMENT = ROOT/'deployment'
 OLD_HASH = '7c7b73d43febc9befb1d43e47449a02cc7894b879dd4bc32904cec538e5f95e6'
 NEW_HASH = '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3'
+PATCH_HASH = 'e1e4b7b9f1439ebd3c6d02e11c241053d16f346a7406272f49ae2a122b1ff7f9'
 
 
 def document(name):
@@ -32,7 +33,7 @@ def select_harness_profile(harness, target):
     write_json(harness.profile_path, harness.profile)
 
 
-def test_registered_profile_pair_loads_offline_and_keeps_legacy_and_candidates(monkeypatch):
+def test_registered_profile_pair_loads_offline_and_keeps_legacy_and_candidates(monkeypatch, tmp_path):
     monkeypatch.setattr(OpafClient, '_request', lambda *_a, **_k: pytest.fail('No network'))
     profile = load_project_profile(DEPLOYMENT/'project-opaf-profile-v2.json')
     target = document('target-profile.jsn-project-v2.json')
@@ -47,14 +48,19 @@ def test_registered_profile_pair_loads_offline_and_keeps_legacy_and_candidates(m
     assert profile['certificate_sha256'] == target['opaf']['certificate_sha256']
     assert target['scope']['customer_deployment_authorized'] is False
     assert target['scope']['existing_resources_only'] is True
-    assert load_native_profile(DEPLOYMENT/'native-beta-profile.json')['mapper'] == old['opaf']['roles']['mapper']
+    # Private configured runtime files are not public checkout prerequisites.
+    legacy_path = tmp_path/'legacy-profile.json'
+    write_json(legacy_path, {'schema_version': 1, 'profile_id': pipeline.PROFILE_ID,
+        'opaf_base_url': old['opaf']['base_url'],
+        'certificate_sha256': old['opaf']['certificate_sha256'], **old['opaf']['roles']})
+    assert load_native_profile(legacy_path)['mapper'] == old['opaf']['roles']['mapper']
     assert document('project-opaf-target-profile-v2.candidate.json')['active'] is False
     assert all(document('project-opaf-profile-v2.candidate.json')[role]['workflow_id'] is None
                for role in ('mapper', 'reviewer'))
 
 
 def test_historical_hashes_append_both_snapshots_without_an_unknown_profile():
-    assert pipeline.HISTORICAL_TARGET_PROFILE_HASHES == frozenset({OLD_HASH, NEW_HASH})
+    assert pipeline.HISTORICAL_TARGET_PROFILE_HASHES == frozenset({OLD_HASH, NEW_HASH, PATCH_HASH})
     unknown = document('target-profile.jsn-project-v2.json')
     unknown['profile_id'] = 'unknown-history'
     assert canonical_hash(unknown) not in pipeline.HISTORICAL_TARGET_PROFILE_HASHES
@@ -99,7 +105,7 @@ def test_cached_old_mapper_does_not_authorize_reviewer_after_profile_swap(tmp_pa
     assert (harness.checkpoints/'mapper.json').read_bytes() == saved
 
 
-@pytest.mark.parametrize('filename', ['target-profile.jsn.json', 'target-profile.jsn-project-v2.json'])
+@pytest.mark.parametrize('filename', ['target-profile.jsn.json', 'target-profile.jsn-project-v2.json', 'target-profile.jsn-project-2616.json'])
 def test_both_registered_historical_packages_verify_without_current_profile_or_dispatch(tmp_path,monkeypatch,filename):
     from test_native_pipeline import package_bytes
     harness = NativeHarness(tmp_path, monkeypatch)

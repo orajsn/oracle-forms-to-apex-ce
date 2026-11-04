@@ -12,7 +12,8 @@ import {crc32} from './package-evidence.mjs';
 import {deriveProjectQaArtifacts,PROJECT_PROFILE_ID} from './project-profile.mjs';
 
 const INSTANCE='ocid1.instance.oc1.iad.anuwcljtc7x6gxic5w37qsyp3rst64betkt4uk2pdcrtmy3okspcpbv77qea';
-const VERSIONS={apex:'26.1.5',sqlcl:'26.1.2.0',database:'23.26.4.1.0',mmd:'26.1.0+3102'};
+// Reviewed exact tuples, never a minimum-version or patch-range match.
+const VERSION_TUPLES=['26.1.5','26.1.6'].map(apex=>({apex,sqlcl:'26.1.2.0',database:'23.26.4.1.0',mmd:'26.1.0+3102'}));
 const FIXED_KEYS=['compartment_id','database_id','region','db_name'];
 const object=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const exact=(v,keys)=>object(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
@@ -136,14 +137,14 @@ function validatePolicy(verification,allocation,allocationRaw) {
   const allocatedDate=new Date(Date.UTC(year,month-1,day));
   check(allocatedDate.getUTCFullYear()===year&&allocatedDate.getUTCMonth()===month-1&&allocatedDate.getUTCDate()===day,
     'Project target allocation date token is invalid');
-  check(same(verification.expected_versions,VERSIONS),'Project runtime version tuple is not actively supported');
+  check(VERSION_TUPLES.some(tuple=>same(verification.expected_versions,tuple)),'Project runtime version tuple is not actively supported');
   check(Number.isSafeInteger(verification.max_evidence_age_seconds)&&verification.max_evidence_age_seconds>=60
     &&verification.max_evidence_age_seconds<=604800,'Project verification freshness bound is invalid');
   check(sha256(allocationRaw)===binding.allocation_receipt_sha256
     &&exact(allocation,['schema_version','scope','passed','plan_sha256','allocated_at_utc','binding','target','observed_versions','fresh_namespace'])
     &&allocation.schema_version===1&&allocation.scope==='fox-clean-allocation-v2'&&allocation.passed===true&&isHash(allocation.plan_sha256)
     &&same(allocation.binding,Object.fromEntries(['job_id','source_manifest_sha256','package_sha256'].map(k=>[k,binding[k]])))
-    &&same(allocation.target,{...target,instance_id:INSTANCE})&&same(allocation.observed_versions,VERSIONS),
+    &&same(allocation.target,{...target,instance_id:INSTANCE})&&same(allocation.observed_versions,verification.expected_versions),
     'Project allocation is not bound to the approved package, target and versions');
   utc(allocation.allocated_at_utc);
   check(same(allocation.fresh_namespace,{workspace_created_fresh:true,schema_created_fresh:true,application_count:0,user_object_count:0}),

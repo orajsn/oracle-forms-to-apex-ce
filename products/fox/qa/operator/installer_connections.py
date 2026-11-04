@@ -44,6 +44,9 @@ def targets():
     # authority. Keep generic/customer onboarding visibly unfinished.
     return [{'profile_id': 'jsn-native-project-v2',
              'label': 'Existing JSN synthetic-test target',
+             'customer_target': False},
+            {'profile_id': 'jsn-native-project-2616-v1',
+             'label': 'Existing JSN synthetic-test target (APEX 26.1.6)',
              'customer_target': False}]
 
 

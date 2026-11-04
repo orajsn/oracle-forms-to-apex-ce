@@ -263,7 +263,7 @@ class SqlclDriver(r.SqlclDriver):
 
     def tables(self, plan, allocation, package, password):
         name, ws = plan['target']['parsing_schema'], allocation['target']['workspace_id']
-        markers = self.sql(name, password, r._guard_sql(name, name, ws) + tables_sql(package))
+        markers = self.sql(name, password, r._guard_sql(name, name, ws, versions=self.expected_versions) + tables_sql(package))
         require(r.one(markers, 'IDENTITY') == 'VERIFIED', 'SCHEMA_IDENTITY_UNPROVEN')
         return verify_tables(markers, package, name)
 
@@ -401,7 +401,7 @@ def execute(command, plan_raw, package_raw, *, expected_plan_sha256, phase=None,
         require(expected_plan_sha256 == plan_hash, 'APPROVED_PLAN_DIGEST_MISMATCH')
         package = p.load_package(package_raw, plan['binding']['package_sha256'])
         p.validate_plan(plan, package=package)
-        driver = driver or SqlclDriver()
+        driver = driver or SqlclDriver(expected_versions=plan['expected_versions'])
         driver.scope(plan)
         versions = None if command == 'status' else driver.versions(admin_password)
         require(command == 'status' or versions == plan['expected_versions'], 'TESTED_VERSION_PROFILE_MISMATCH')

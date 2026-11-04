@@ -197,10 +197,11 @@ class PrivateStore:
             raise RemoteError('ANOTHER_OPERATOR_IS_ACTIVE') from None
 
 
-def _guard_sql(username, workspace=None, workspace_id=None):
+def _guard_sql(username, workspace=None, workspace_id=None, *, versions=None):
     """Same-session identity assertion, preceding each fixed write batch."""
     require(username == 'ADMIN' or re.fullmatch(r'FOX_QA_[0-9]{6}_[A-F0-9]{8}', username) is not None,
             'SQL_USERNAME_INVALID')
+    expected = c.reviewed_versions(versions)
     sql = f"""
 declare n pls_integer; v varchar2(100);
 begin
@@ -209,7 +210,7 @@ begin
     sys_context('USERENV','DB_NAME')<>'{c.DB_NAME}' then
   raise_application_error(-20001,'Operator identity mismatch'); end if;
  select version_no into v from apex_release;
- if v<>'{c.VERSIONS['apex']}' then raise_application_error(-20002,'Operator APEX version mismatch'); end if;
+ if v<>'{expected['apex']}' then raise_application_error(-20002,'Operator APEX version mismatch'); end if;
 """
     if username == 'ADMIN':
         sql += f"""
@@ -219,7 +220,7 @@ begin
  json_value(cloud_identity,'$.REGION')='{c.REGION}';
  if n<>1 then raise_application_error(-20003,'Operator cloud identity mismatch'); end if;
  select version_full into v from v$instance;
- if v<>'{c.VERSIONS['database']}' then raise_application_error(-20004,'Operator database version mismatch'); end if;
+ if v<>'{expected['database']}' then raise_application_error(-20004,'Operator database version mismatch'); end if;
 """
     else:
         require(workspace == username and type(workspace_id) is str and re.fullmatch(r'[1-9][0-9]{0,37}', workspace_id),
@@ -301,15 +302,15 @@ begin
 end;
 /
 """.encode('ascii')
-    sql += _guard_sql('ADMIN') + f'grant create session, create table, create sequence to {name};\n'.encode('ascii')
-    sql += _guard_sql('ADMIN') + f"""
+    sql += _guard_sql('ADMIN', versions=plan['expected_versions']) + f'grant create session, create table, create sequence to {name};\n'.encode('ascii')
+    sql += _guard_sql('ADMIN', versions=plan['expected_versions']) + f"""
 begin
  apex_instance_admin.add_workspace(p_workspace=>'{name}',p_primary_schema=>'{name}',p_additional_schemas=>NULL);
 end;
 /
 """.encode('ascii')
     for user, key in (('FOX_QA_A', 'password'), ('FOX_QA_B', 'second_password')):
-        sql += _guard_sql('ADMIN') + f"""
+        sql += _guard_sql('ADMIN', versions=plan['expected_versions']) + f"""
 begin
  apex_util.set_security_group_id(apex_util.find_security_group_id(p_workspace=>'{name}'));
  apex_util.create_user(p_user_name=>'{user}',p_web_password=>'{credentials[key]}',
@@ -321,12 +322,12 @@ begin
 end;
 /
 """.encode('ascii')
-    return _guard_sql('ADMIN') + sql + b'prompt FOX_OPERATOR_ALLOCATE_RETURNED=TRUE\n'
+    return _guard_sql('ADMIN', versions=plan['expected_versions']) + sql + b'prompt FOX_OPERATOR_ALLOCATE_RETURNED=TRUE\n'
 
 
 def schema_sql(plan, allocation, package):
     name, ws = plan['target']['workspace'], allocation['target']['workspace_id']
-    return _guard_sql(name, name, ws) + f"""
+    return _guard_sql(name, name, ws, versions=plan['expected_versions']) + f"""
 declare n pls_integer;
 begin
  select count(*) into n from user_objects;
@@ -341,7 +342,7 @@ end;
 def import_sql(plan, allocation, package):
     name, alias = plan['target']['workspace'], plan['target']['application_alias']
     ws, app = allocation['target']['workspace_id'], allocation['target']['application_id']
-    return _guard_sql(name, name, ws) + f"""
+    return _guard_sql(name, name, ws, versions=plan['expected_versions']) + f"""
 declare n pls_integer;
 begin
  select count(*) into n from apex_applications where workspace='{name}' or application_id={app} or upper(alias)='{alias}';
@@ -498,7 +499,15 @@ def verify_compiled(original, actual, allocation):
 class SqlclDriver:
     """Real driver. All subprocess diagnostics are withheld, including on errors."""
 
+    def __init__(self, *, expected_versions=None):
+        self._expected_versions = c.reviewed_versions(expected_versions)
+
+    @property
+    def expected_versions(self):
+        return dict(self._expected_versions)
+
     def scope(self, plan):
+        require(plan['expected_versions'] == self.expected_versions, 'DRIVER_PLAN_VERSION_MISMATCH')
         request = urllib.request.Request('http://169.254.169.254/opc/v2/instance/', headers={'Authorization': 'Bearer Oracle'})
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
@@ -537,7 +546,7 @@ class SqlclDriver:
             raise RemoteError('SQL_EXECUTION_UNAVAILABLE', diagnostics=sql_diagnostics('SQL_CLIENT_UNAVAILABLE', None)) from None
 
     def versions(self, admin):
-        markers = self.sql('ADMIN', admin, _guard_sql('ADMIN') + b"select 'FOX_OPERATOR_APEX='||version_no from apex_release;\nselect 'FOX_OPERATOR_DATABASE='||version_full from v$instance;\n")
+        markers = self.sql('ADMIN', admin, _guard_sql('ADMIN', versions=self.expected_versions) + b"select 'FOX_OPERATOR_APEX='||version_no from apex_release;\nselect 'FOX_OPERATOR_DATABASE='||version_full from v$instance;\n")
         require(one(markers, 'IDENTITY') == 'VERIFIED', 'DATABASE_IDENTITY_UNPROVEN')
         try:
             result = subprocess.run([SQLCL, '-V'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
@@ -550,13 +559,13 @@ class SqlclDriver:
         except Exception:
             raise RemoteError('TOOLING_VERSION_UNAVAILABLE') from None
         versions = {'apex': one(markers, 'APEX'), 'database': one(markers, 'DATABASE'), 'sqlcl': found[0], 'mmd': mmd}
-        require(versions == c.VERSIONS, 'TESTED_VERSION_PROFILE_MISMATCH')
+        require(versions == self.expected_versions, 'TESTED_VERSION_PROFILE_MISMATCH')
         return versions
 
     def observe(self, plan, admin, allocation=None):
         app = allocation['target']['application_id'] if allocation else None
         sql, keys = _counts_sql(plan, app)
-        markers = self.sql('ADMIN', admin, _guard_sql('ADMIN') + sql)
+        markers = self.sql('ADMIN', admin, _guard_sql('ADMIN', versions=self.expected_versions) + sql)
         require(one(markers, 'IDENTITY') == 'VERIFIED', 'DATABASE_IDENTITY_UNPROVEN')
         state = {key: number(markers, key) for key in keys}
         state['workspace_id'] = one(markers, 'WORKSPACE_ID') if state['WORKSPACE_COUNT'] == 1 else None
@@ -570,7 +579,7 @@ class SqlclDriver:
         temporary = {'target': {'workspace_id': ws}}
         assert_isolated(state, temporary)
         require(state['OBJECT_COUNT'] == state['APPLICATION_COUNT'] == state['ALIAS_COUNT'] == 0, 'ALLOCATION_NOT_EMPTY')
-        reserve = _guard_sql(name, name, ws) + b"begin apex_application_install.generate_application_id; dbms_output.put_line('FOX_OPERATOR_APPLICATION_ID='||to_char(apex_application_install.get_application_id,'TM9')); end;\n/\n"
+        reserve = _guard_sql(name, name, ws, versions=self.expected_versions) + b"begin apex_application_install.generate_application_id; dbms_output.put_line('FOX_OPERATOR_APPLICATION_ID='||to_char(apex_application_install.get_application_id,'TM9')); end;\n/\n"
         markers = self.sql(name, credentials['schema_password'], reserve)
         app = number(markers, 'APPLICATION_ID')
         require(0 < app <= c.MAX_SAFE_INTEGER and app not in (plan['binding']['source_application_id'],
@@ -590,13 +599,13 @@ class SqlclDriver:
 
     def table(self, plan, allocation, package, password):
         name, ws = plan['target']['workspace'], allocation['target']['workspace_id']
-        markers = self.sql(name, password, _guard_sql(name, name, ws) + table_sql(package['native_form']))
+        markers = self.sql(name, password, _guard_sql(name, name, ws, versions=self.expected_versions) + table_sql(package['native_form']))
         require(one(markers, 'IDENTITY') == 'VERIFIED', 'SCHEMA_IDENTITY_UNPROVEN')
         return verify_table(markers, package['native_form'], name)
 
     def export(self, plan, allocation, password):
         name, target = plan['target']['workspace'], allocation['target']
-        return parse_export(self.sql(name, password, _guard_sql(name, name, target['workspace_id']) + export_sql(target['application_id'])))
+        return parse_export(self.sql(name, password, _guard_sql(name, name, target['workspace_id'], versions=self.expected_versions) + export_sql(target['application_id'])))
 
 
 def _phase_record(plan, phase, state, started, evidence=None):
@@ -795,7 +804,7 @@ def execute(command, plan_raw, package_raw, *, expected_plan_sha256, phase=None,
             native_raw = archive.read('native-form-spec.json')
         c.validate_plan(plan, validated_package=package, native_spec_sha256=c.digest(native_raw))
         require(len(package_raw) == plan['source_origin']['package_bytes'], 'SOURCE_PACKAGE_SIZE_CHANGED')
-        driver = driver or SqlclDriver()
+        driver = driver or SqlclDriver(expected_versions=plan['expected_versions'])
         driver.scope(plan)
         versions = None
         if command != 'status':

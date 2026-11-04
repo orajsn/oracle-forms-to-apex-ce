@@ -151,6 +151,15 @@ _PROFILE_JSN_PROJECT_20261025 = {
     },
 }
 
+# A separate locally authorized revalidation target. The legacy field name
+# tested_versions declares the exact required tuple, not completed generation,
+# import/runtime QA or a vendor-wide compatibility claim. Activation still
+# requires a bound deployment and actual readiness/acceptance evidence.
+_PROFILE_JSN_PROJECT_2616 = json.loads(json.dumps(_PROFILE_JSN_PROJECT_20261025))
+_PROFILE_JSN_PROJECT_2616['profile_id'] = 'jsn-native-project-2616-v1'
+_PROFILE_JSN_PROJECT_2616['tested_versions']['apex'] = '26.1.6'
+_PROJECT_2616_PROFILE_SHA256 = 'e1e4b7b9f1439ebd3c6d02e11c241053d16f346a7406272f49ae2a122b1ff7f9'
+
 # Append reviewed snapshots under new digests; never edit historical documents.
 # These legacy aliases remain for compatibility, not as runtime selectors.
 _ACTIVE_PROFILE_SHA256 = '7c7b73d43febc9befb1d43e47449a02cc7894b879dd4bc32904cec538e5f95e6'
@@ -159,6 +168,7 @@ _PROJECT_PROFILE_SHA256 = '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911de
 _KNOWN_HISTORICAL_PROFILES = {
     _ACTIVE_PROFILE_SHA256: _PROFILE_JSN_20261017,
     _PROJECT_PROFILE_SHA256: _PROFILE_JSN_PROJECT_20261025,
+    _PROJECT_2616_PROFILE_SHA256: _PROFILE_JSN_PROJECT_2616,
 }
 
 # Explicit current eligibility, independent of historical recognition. Adding a
@@ -167,6 +177,7 @@ _KNOWN_HISTORICAL_PROFILES = {
 _DEPLOYABLE_TARGET_PROFILES = {
     _ACTIVE_PROFILE_SHA256: _PROFILE_JSN_20261017,
     _PROJECT_PROFILE_SHA256: _PROFILE_JSN_PROJECT_20261025,
+    _PROJECT_2616_PROFILE_SHA256: _PROFILE_JSN_PROJECT_2616,
 }
 
 

@@ -52,6 +52,19 @@ def test_registry_selection_is_detached_and_never_adds_customer_authority():
         with pytest.raises(TargetProfileError):select_target_profile(value)
 
 
+def test_registered_patch_choices_are_exact_and_do_not_add_another_resource():
+    choices = c.targets()
+    assert [choice['profile_id'] for choice in choices] == [
+        'jsn-native-project-v2', 'jsn-native-project-2616-v1']
+    assert all(choice['customer_target'] is False for choice in choices)
+    old, new = (c.target(choice['profile_id']) for choice in choices)
+    assert old['oci'] == new['oci'] and old['apex'] == new['apex']
+    assert old['tested_versions']['apex'] == '26.1.5'
+    assert new['tested_versions']['apex'] == '26.1.6'
+    choices[0]['profile_id'] = 'unreviewed'
+    assert c.targets()[0]['profile_id'] == 'jsn-native-project-v2'
+
+
 @pytest.mark.parametrize('change', [
     {'target_profile_id': 'customer-production'}, {'fox_username': '../name'},
     {'opaf_username': 'name\n'}, {'fox_password': 'short'}, {'opaf_password': 'bad\npassword'},

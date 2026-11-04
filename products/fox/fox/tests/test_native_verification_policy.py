@@ -29,9 +29,10 @@ def policy_document():
     return json.loads(FIXTURE.read_bytes())
 
 
-def bind_v2(case, token='261017_89ABCDEF', workspace_id='22042420337195501', app_id=34567):
+def bind_v2(case, token='261017_89ABCDEF', workspace_id='22042420337195501', app_id=34567, *, apex='26.1.5'):
     case = deepcopy(case)
     profile = policy_document()
+    profile['expected_versions']['apex'] = apex
     profile['binding'].update(job_id=case['release']['job_id'], source_manifest_sha256=case['snapshot']['source_hash'],
                               package_sha256=sha(case['package']))
     profile['target'].update(workspace='FOX_QA_' + token, parsing_schema='FOX_QA_' + token,
@@ -48,6 +49,7 @@ def bind_v2(case, token='261017_89ABCDEF', workspace_id='22042420337195501', app
     policy = BoundVerificationPolicy(raw(profile))
     case['verification_policy'] = policy
     clean = case['clean']
+    clean['observed_versions'] = dict(profile['expected_versions'])
     clean.update(schema_version=2, scope='fox-clean-package-install-v2', **policy.target,
                  verification_profile_sha256=policy.sha256,
                  allocation_receipt_sha256=policy.binding['allocation_receipt_sha256'])
@@ -170,7 +172,7 @@ def test_exact_38_digit_workspace_id_is_preserved_as_string():
     ('target', 'application_id', True), ('target', 'application_id', 9_007_199_254_740_992),
     ('target', 'application_alias', 'F2A_ARBITRARY'), ('binding', 'job_id', 'not-a-job'),
     ('binding', 'package_sha256', 'G' * 64), ('binding', 'source_manifest_sha256', 'short'),
-    ('binding', 'allocation_receipt_sha256', None), ('expected_versions', 'apex', '26.1.6'),
+    ('binding', 'allocation_receipt_sha256', None), ('expected_versions', 'apex', '26.1.7'),
     ('expected_versions', 'sqlcl', '26.1.2.9999'), ('expected_versions', 'database', '23.26.4.2.0'),
 ])
 def test_operator_profile_rejects_unapproved_or_unbound_values(section, key, value):
@@ -205,6 +207,16 @@ def test_v2_exact_policy_and_qa_plan_embedded(v2_case):
     assert proof['test_plan_sha256'] == v2_case['qa']['test_plan_sha256']
     assert proof['target']['workspace_id'] == '22042420337195501'
     assert proof['human_acceptance_recorded'] is False
+
+
+def test_explicit_new_tuple_binds_detached_native_proof_without_acceptance(proof_case):
+    case = bind_v2(proof_case, apex='26.1.6')
+    proof = gate.verify_detached_proof(**v2_arguments(case))
+    assert proof['verification_profile']['expected_versions']['apex'] == '26.1.6'
+    assert proof['human_acceptance_recorded'] is False
+    case['clean']['observed_versions']['apex'] = '26.1.5'
+    with pytest.raises(gate.VerificationError):
+        gate.verify_detached_proof(**v2_arguments(case))
 
 
 def test_actual_shaped_v2_binding_scope_is_exact_and_byte_flags_remain_required(v2_case):

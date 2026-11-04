@@ -87,13 +87,13 @@ def _binding(value):
                and re.fullmatch(r'[A-Z][A-Z0-9_]{0,29}', value['original_parsing_schema']), 'Invalid original schema.')
 
 
-def make_plan(source, package, namespace, created_at, *, operator_code_sha256):
+def make_plan(source, package, namespace, created_at, *, operator_code_sha256, expected_versions=None):
     namespace = c._namespace(namespace)
     return validate_plan({'schema_version': 1, 'scope': PLAN_SCOPE, 'policy_id': c.POLICY_ID,
         'created_at_utc': created_at, 'operator_code_sha256': operator_code_sha256,
         'source_origin': c.validate_source_attestation(source), 'binding': package['binding'],
         'target': {**c.FIXED_TARGET, 'workspace': namespace, 'parsing_schema': namespace,
-                   'application_alias': 'F2A_QA_' + namespace[7:]}, 'expected_versions': dict(c.VERSIONS)})
+                   'application_alias': 'F2A_QA_' + namespace[7:]}, 'expected_versions': c.reviewed_versions(expected_versions)})
 
 
 def validate_plan(value, *, package=None, source_attestation=None, operator_code_sha256=None):
@@ -138,6 +138,7 @@ def validate_allocation(value, plan):
     c._require(value['binding'] == {key: plan['binding'][key] for key in ('job_id', 'source_manifest_sha256', 'package_sha256')},
                'Project allocation package differs.')
     c._target(value['target'], allocated=True); c._versions(value['observed_versions'])
+    c._require(value['observed_versions'] == plan['expected_versions'], 'Project allocation versions differ from its exact plan.')
     c._require(all(value['target'][key] == expected for key, expected in plan['target'].items())
                and value['target']['application_id'] not in {plan['binding']['source_application_id'],
                     plan['binding']['source_reimport_application_id'], *c.PROTECTED_APPLICATION_IDS}, 'Project clean identity is not fresh.')
@@ -151,11 +152,12 @@ def validate_allocation(value, plan):
 
 def make_verification_profile(plan, allocation_raw):
     c._require(type(allocation_raw) is bytes, 'Exact allocation bytes are required.')
+    plan = validate_plan(plan)
     allocation = validate_allocation(allocation_raw, plan)
     return {'schema_version': 1, 'scope': c.PROFILE_SCOPE, 'policy_id': c.POLICY_ID,
         'binding': {**allocation['binding'], 'allocation_receipt_sha256': c.digest(allocation_raw)},
         'target': {key: value for key, value in allocation['target'].items() if key != 'instance_id'},
-        'expected_versions': dict(c.VERSIONS), 'max_evidence_age_seconds': 86400}
+        'expected_versions': dict(plan['expected_versions']), 'max_evidence_age_seconds': 86400}
 
 
 def validate_phase_record(value, plan, phase):

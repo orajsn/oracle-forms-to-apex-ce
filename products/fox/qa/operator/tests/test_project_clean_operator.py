@@ -54,8 +54,8 @@ def vendor_sql(project, schema='FORMS2APEX_POC', workspace='1234', app=123, alia
     return text.encode()
 
 
-@pytest.fixture
-def case(project_job, monkeypatch):
+@pytest.fixture(params=['26.1.5','26.1.6'],ids=['legacy-2615','selected-2616'])
+def case(project_job, monkeypatch, request):
     job = project_job
     underlying = job.sqlcl
     def transport(path, args, commands, cwd, **kwargs):
@@ -71,7 +71,8 @@ def case(project_job, monkeypatch):
         'instance_id': c.INSTANCE, 'compartment_id': c.COMPARTMENT, 'region': c.REGION,
         'job_id': package['binding']['job_id'], 'run_state': 'QA_REQUIRED', 'package_sha256': c.digest(raw),
         'package_bytes': len(raw), 'source_manifest_sha256': package['binding']['source_manifest_sha256']}
-    plan = p.make_plan(source, package, NAME, TIME, operator_code_sha256=CODE)
+    plan = p.make_plan(source, package, NAME, TIME, operator_code_sha256=CODE,
+                       expected_versions={**c.VERSIONS,'apex':request.param})
     monkeypatch.setattr(r, 'utc_now', lambda: LATER)
     return plan, package, raw
 
@@ -97,7 +98,7 @@ class SQLclBoundary:
     def sql(self, username, password, body, *, timeout=120):
         self.scripts.append(body)
         script = body.decode()
-        assert legacy._guard_sql(username, username, self.ids['workspace_id']).decode() in script if username != 'ADMIN' else legacy._guard_sql('ADMIN').decode() in script
+        assert legacy._guard_sql(username, username, self.ids['workspace_id'],versions=self.plan['expected_versions']).decode() in script if username != 'ADMIN' else legacy._guard_sql('ADMIN',versions=self.plan['expected_versions']).decode() in script
         if 'FOX_OPERATOR_ALLOCATE_RETURNED' in script:
             assert 'allocate.intent.json' in self.store.files
             self.level = 1
@@ -153,11 +154,11 @@ def table_markers(package):
 
 def setup_boundary(case, monkeypatch):
     store = MemoryStore()
-    boundary, driver = SQLclBoundary(case, store), r.SqlclDriver()
+    boundary, driver = SQLclBoundary(case, store), r.SqlclDriver(expected_versions=case[0]['expected_versions'])
     monkeypatch.setattr(driver, 'sql', boundary.sql)
     # External IMDS/tool-version reads only; SQL builders and phase methods real.
     monkeypatch.setattr(driver, 'scope', lambda plan: None)
-    monkeypatch.setattr(driver, 'versions', lambda admin: dict(c.VERSIONS))
+    monkeypatch.setattr(driver, 'versions', lambda admin: dict(case[0]['expected_versions']))
     def run(command='apply', phase='allocate', **changes):
         plan, package, raw = case
         options = dict(expected_plan_sha256=p.plan_sha256(plan), phase=phase, apply=command == 'apply',
@@ -218,7 +219,7 @@ def test_all_table_metadata_fails_closed(case, change):
 
 def test_compiled_inventory_catches_orphan_pages_items_and_navigation(case):
     plan, package, raw = case
-    allocation = r._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(c.VERSIONS))
+    allocation = r._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(plan['expected_versions']))
     actual = vendor_sql(package['project'], NAME, '12345', 444, plan['target']['application_alias'], 100000)
     result = r.verify_compiled(package, actual, allocation)
     assert result['component_counts']['wwv_flow_imp_shared.create_list_item'] == 2
@@ -231,7 +232,7 @@ def test_compiled_inventory_catches_orphan_pages_items_and_navigation(case):
 @pytest.mark.parametrize('corruption', ['wrong_page', 'wrong_column', 'wrong_table', 'wrong_region', 'hidden_navigation'])
 def test_matching_export_bytes_cannot_fabricate_page_table_item_or_navigation_mapping(case, corruption):
     plan, package, raw = case
-    allocation = r._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(c.VERSIONS))
+    allocation = r._allocation(plan, {'workspace_id': '12345', 'application_id': 444}, dict(plan['expected_versions']))
     actual = vendor_sql(package['project'], NAME, '12345', 444, plan['target']['application_alias'], 100000)
     def corrupt(sql, offset):
         if corruption == 'wrong_page':
@@ -262,7 +263,7 @@ def test_ddl_deduplicates_shared_tables_and_ignores_injected_packaged_sql(case):
     changed['binding']['schema_script_sha256'] = c.digest(generated)
     changed['binding']['tables'] = [changed['project']['forms'][0]['native_form']['table_name']]
     new_plan = deepcopy(plan); new_plan['binding'] = changed['binding']
-    allocation = r._allocation(new_plan, {'workspace_id': '12345', 'application_id': 444}, dict(c.VERSIONS))
+    allocation = r._allocation(new_plan, {'workspace_id': '12345', 'application_id': 444}, dict(new_plan['expected_versions']))
     sql = r.schema_sql(new_plan, allocation, changed)
     assert sql.count(b'CREATE TABLE ') == 1 and b'DROP USER' not in sql
 

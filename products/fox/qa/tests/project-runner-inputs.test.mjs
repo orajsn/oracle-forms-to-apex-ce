@@ -29,7 +29,7 @@ function zip(entries) {
   end.writeUInt16LE(entries.length,8);end.writeUInt16LE(entries.length,10);end.writeUInt32LE(directory.length,12);end.writeUInt32LE(offset,16);
   return Buffer.concat([...locals,directory,end]);
 }
-function fixture({mapped=false,mutatePackage=()=>{},mutatePolicy=()=>{},mutateClean=()=>{},mutateTarget=()=>{},mutateProfile=()=>{},mutateCredentials=()=>{}}={}) {
+function fixture({mapped=false,apex='26.1.5',mutatePackage=()=>{},mutatePolicy=()=>{},mutateClean=()=>{},mutateTarget=()=>{},mutateProfile=()=>{},mutateCredentials=()=>{}}={}) {
   const sourceFixture=mapped?mappedFixtureRoot:fixtureRoot;
   const project=JSON.parse(readFileSync(new URL('native-project-spec.json',sourceFixture)));
   const trace=JSON.parse(readFileSync(new URL('source-to-apex.json',sourceFixture)));
@@ -64,7 +64,7 @@ function fixture({mapped=false,mutatePackage=()=>{},mutatePolicy=()=>{},mutateCl
   const target={...Object.fromEntries(['compartment_id','database_id','region','db_name'].map(k=>[k,SCOPE[k]])),
     workspace:'FOX_QA_261025_1234ABCD',parsing_schema:'FOX_QA_261025_1234ABCD',workspace_id:'900719925474099312345',
     application_id:2000,application_alias:'F2A_QA_261025_1234ABCD'};
-  const versions={apex:'26.1.5',sqlcl:'26.1.2.0',database:'23.26.4.1.0',mmd:'26.1.0+3102'};
+  const versions={apex,sqlcl:'26.1.2.0',database:'23.26.4.1.0',mmd:'26.1.0+3102'};
   const allocation={schema_version:1,scope:'fox-clean-allocation-v2',passed:true,plan_sha256:'f'.repeat(64),allocated_at_utc:'2026-10-25T03:00:00Z',
     binding:{job_id:release.job_id,source_manifest_sha256:project.source_manifest_sha256,package_sha256:sha256(packageRaw)},
     target:{...target,instance_id:INSTANCE},observed_versions:versions,
@@ -98,13 +98,28 @@ function fixture({mapped=false,mutatePackage=()=>{},mutatePolicy=()=>{},mutateCl
   return {targetRaw:bytes(receipt),profileRaw,projectRaw,traceRaw,importRaw,verificationRaw,allocationRaw,packageRaw,credentialRaw:bytes(credentials)};
 }
 
-test('synthetic project input bytes bind exact target, every module and both QA identities',()=>{
-  const input=fixture(),bound=validateProjectRunnerInputs(input,{now:NOW});
+for(const apex of ['26.1.5','26.1.6'])test(`synthetic project input bytes bind exact target and both QA identities on ${apex}`,()=>{
+  const input=fixture({apex}),bound=validateProjectRunnerInputs(input,{now:NOW});
   assert.equal(bound.plan.form_count,2);assert.equal(bound.target.target.application_id,2000);
   assert.equal(bound.plan.forms[1].form_page_id,4);assert.equal(bound.accounts.secondary.username,'FOX_QA_B');
   assert.equal(bound.targetReceiptSha256,sha256(input.targetRaw));
   assert.equal(bound.inputSha256.project_spec_sha256,sha256(input.projectRaw));
   assert.equal(bound.packageEvidence.package_sha256,sha256(input.packageRaw));
+});
+
+test('an unreviewed patch is not implicitly approved',()=>{
+  assert.throws(()=>validateProjectRunnerInputs(fixture({apex:'26.1.7'}),{now:NOW}),/version tuple/);
+});
+
+test('one reviewed tuple cannot borrow allocation evidence from another',()=>{
+  const input=fixture({apex:'26.1.6'});
+  const allocation=JSON.parse(input.allocationRaw);
+  allocation.observed_versions={...allocation.observed_versions,apex:'26.1.5'};
+  input.allocationRaw=bytes(allocation);
+  const verification=JSON.parse(input.verificationRaw);
+  verification.binding.allocation_receipt_sha256=sha256(input.allocationRaw);
+  input.verificationRaw=bytes(verification);
+  assert.throws(()=>validateProjectRunnerInputs(input,{now:NOW}),/allocation/);
 });
 
 test('mapped package envelope binds original DDL refs and physical QA targets without changing receipt scope',()=>{
@@ -157,7 +172,7 @@ for(const [name,options] of [
   ['impossible clean timestamp',{mutateClean:v=>v.finished_at_utc='2026-02-30T00:00:00Z'}],
   ['stale clean import',{mutateClean:v=>{v.started_at_utc='2026-10-23T00:00:00Z';v.finished_at_utc='2026-10-23T01:00:00Z';}}],
   ['unsupported active versions',{mutatePolicy:v=>v.expected_versions.apex='99.1'}],
-  ['non-test personal identity',{mutateCredentials:v=>v.username='person@example.invalid'}],
+  ['personal Jason identity',{mutateCredentials:v=>v.username='jason.japutra@oracle.com'}],
   ['acceptance identity',{mutateCredentials:v=>v.second_username='FOX_ACCEPTANCE'}],
   ['same account',{mutateCredentials:v=>v.second_username='fox_qa_a'}],
   ['incomplete second identity',{mutateCredentials:v=>delete v.second_password}],

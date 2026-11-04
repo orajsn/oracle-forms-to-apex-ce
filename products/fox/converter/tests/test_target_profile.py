@@ -282,7 +282,11 @@ def test_old_snapshot_and_new_selectable_tuple_are_exact_and_independent():
     assert target_profile_sha256(new) == '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3'
     assert module._JSN_PROFILE == old
     assert module._DEPLOYABLE_TARGET_PROFILES is not module._KNOWN_HISTORICAL_PROFILES
-    assert set(module._DEPLOYABLE_TARGET_PROFILES) == {target_profile_sha256(old), target_profile_sha256(new)}
+    candidate = module.select_target_profile('jsn-native-project-2616-v1')
+    assert set(module._DEPLOYABLE_TARGET_PROFILES) == {target_profile_sha256(old), target_profile_sha256(new), target_profile_sha256(candidate)}
+    assert target_profile_sha256(candidate) == 'e1e4b7b9f1439ebd3c6d02e11c241053d16f346a7406272f49ae2a122b1ff7f9'
+    assert candidate['tested_versions']['apex'] == '26.1.6'
+    assert old['tested_versions']['apex'] == new['tested_versions']['apex'] == '26.1.5'
     assert new['profile_id'] == 'jsn-native-project-v2'
     assert new['scope']['project_mapping'] == {
         'native_project_schema_versions': [1, 2],

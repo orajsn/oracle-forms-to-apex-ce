@@ -29,6 +29,11 @@ PROFILE_SCOPE = "fox-native-verification-profile-v2"
 PHASE_SCOPE = "fox-clean-operator-phase-v1"
 SOURCE_SCOPE = "fox-private-job-package-read-v1"
 VERSIONS = {"apex": "26.1.5", "sqlcl": "26.1.2.0", "database": "23.26.4.1.0", "mmd": "26.1.0+3102"}
+REVIEWED_VERSION_TUPLES = frozenset({
+    ('26.1.5', '26.1.2.0', '23.26.4.1.0', '26.1.0+3102'),
+    ('26.1.6', '26.1.2.0', '23.26.4.1.0', '26.1.0+3102'),
+})
+VERSION_KEYS = ('apex', 'sqlcl', 'database', 'mmd')
 FIXED_TARGET = {"compartment_id": COMPARTMENT, "database_id": DATABASE,
                 "region": REGION, "db_name": DB_NAME, "instance_id": INSTANCE}
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
@@ -191,7 +196,16 @@ def _integer(value):
 
 def _versions(value):
     _keys(value, VERSIONS, "Version tuple contains missing or unknown fields.")
-    _require(value == VERSIONS, "Version tuple is outside the tested JSN profile.")
+    _require(all(type(value[key]) is str for key in VERSION_KEYS)
+             and tuple(value[key] for key in VERSION_KEYS) in REVIEWED_VERSION_TUPLES,
+             "Version tuple is outside the exact reviewed JSN profiles.")
+
+
+def reviewed_versions(value=None):
+    """Copy an explicitly selected tuple; legacy default bytes stay unchanged."""
+    selected = dict(VERSIONS) if value is None else value
+    _versions(selected)
+    return dict(selected)
 
 
 def _namespace(value):
@@ -275,7 +289,8 @@ def _package_binding(package, native_spec_sha256):
             "sql_member": sql_member, "schema_member": schema_member}
 
 
-def make_plan(source_attestation, validated_package, namespace, created_at, *, native_spec_sha256, operator_code_sha256):
+def make_plan(source_attestation, validated_package, namespace, created_at, *, native_spec_sha256, operator_code_sha256,
+              expected_versions=None):
     """Bind an operator-observed retained package to one new QA namespace."""
     namespace = _namespace(namespace)
     plan = {"schema_version": 1, "scope": PLAN_SCOPE, "policy_id": POLICY_ID,
@@ -283,7 +298,7 @@ def make_plan(source_attestation, validated_package, namespace, created_at, *, n
             "source_origin": validate_source_attestation(source_attestation),
             "binding": _package_binding(validated_package, native_spec_sha256),
             "target": {**FIXED_TARGET, "workspace": namespace, "parsing_schema": namespace,
-                       "application_alias": "F2A_QA_" + namespace[7:]}, "expected_versions": dict(VERSIONS)}
+                       "application_alias": "F2A_QA_" + namespace[7:]}, "expected_versions": reviewed_versions(expected_versions)}
     return validate_plan(plan)
 
 
@@ -363,6 +378,8 @@ def validate_allocation(value, plan):
     _require(allocation["target"]["application_id"] not in PROTECTED_APPLICATION_IDS,
              "Allocation cannot target the retained golden application.")
     _versions(allocation["observed_versions"])
+    _require(allocation['observed_versions'] == plan['expected_versions'],
+             'Allocation versions differ from the exact selected plan.')
     fresh = allocation["fresh_namespace"]
     _keys(fresh, {"workspace_created_fresh", "schema_created_fresh", "application_count", "user_object_count"},
           "Allocation emptiness proof contains missing or unknown fields.")
@@ -380,7 +397,7 @@ def make_verification_profile(plan, allocation_raw):
     return {"schema_version": 1, "scope": PROFILE_SCOPE, "policy_id": POLICY_ID,
             "binding": {**allocation["binding"], "allocation_receipt_sha256": digest(allocation_raw)},
             "target": {key: value for key, value in allocation["target"].items() if key != "instance_id"},
-            "expected_versions": dict(VERSIONS), "max_evidence_age_seconds": 86_400}
+            "expected_versions": dict(plan['expected_versions']), "max_evidence_age_seconds": 86_400}
 
 
 def validate_phase_record(value, plan, phase):

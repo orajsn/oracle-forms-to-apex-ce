@@ -23,7 +23,10 @@ DB_NAME = 'ASZ8EQWFM8UNCA2_JSNF2APEX'
 FIXED_TARGET = {'compartment_id': COMPARTMENT, 'database_id': DATABASE,
                 'db_name': DB_NAME, 'region': 'us-ashburn-1'}
 VERSION_KEYS = ('apex', 'sqlcl', 'database', 'mmd')
-SUPPORTED_ACTIVE_VERSIONS = frozenset({('26.1.5', '26.1.2.0', '23.26.4.1.0', '26.1.0+3102')})
+SUPPORTED_ACTIVE_VERSIONS = frozenset({
+    ('26.1.5', '26.1.2.0', '23.26.4.1.0', '26.1.0+3102'),
+    ('26.1.6', '26.1.2.0', '23.26.4.1.0', '26.1.0+3102'),
+})
 
 
 class VerificationPolicyError(ValueError):

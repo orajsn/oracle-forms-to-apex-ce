@@ -265,7 +265,8 @@ def prepare(job_id, package_sha256, namespace=None):
     if namespace is None:
         namespace = 'FOX_QA_' + now().strftime('%y%m%d') + '_' + secrets.token_hex(4).upper()
     _, code_hash = code_bundle()
-    plan = pc.make_plan(source, package, namespace, created, operator_code_sha256=code_hash)
+    plan = pc.make_plan(source, package, namespace, created, operator_code_sha256=code_hash,
+                        expected_versions=native_cli.selected_versions())
     plan_raw = c.canonical_bytes(plan)
     digest = c.digest(plan_raw)
     root = private_root()

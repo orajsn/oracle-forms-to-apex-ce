@@ -62,6 +62,25 @@ def image_pins():
     return _provider_call(runtime_provider.image_pins, {'fox': FOX_IMAGE, 'converter': IMAGE})
 
 
+def selected_versions():
+    """Derive only from the already selected, validated installation target.
+
+    No env/UI tuple, target probing or implicit upgrade/downgrade selection.
+    Unconfigured legacy operation preserves its historical default exactly.
+    """
+    provider = runtime_provider.selected_hosted()
+    if provider is None:
+        return C.reviewed_versions()
+    try:
+        from forms2apex.target_profile import validate_target_profile
+        profile = validate_target_profile(provider.configuration['target_profile'])
+        declared = profile['tested_versions']
+        return C.reviewed_versions({'apex': declared['apex'], 'sqlcl': declared['sqlcl'],
+            'mmd': declared['apexlang_mmd'], 'database': C.VERSIONS['database']})
+    except Exception:
+        raise OperatorError('SELECTED_TARGET_VERSION_CONFIGURATION_INVALID') from None
+
+
 def now():
     return datetime.now(timezone.utc)
 
@@ -290,7 +309,8 @@ def prepare(job_id, package_sha256, namespace=None):
     if namespace is None:
         namespace = 'FOX_QA_' + now().strftime('%y%m%d') + '_' + secrets.token_hex(4).upper()
     _, code_hash = code_bundle()
-    plan = C.make_plan(source, validated, namespace, created, native_spec_sha256=native_digest(raw), operator_code_sha256=code_hash)
+    plan = C.make_plan(source, validated, namespace, created, native_spec_sha256=native_digest(raw),
+                       operator_code_sha256=code_hash, expected_versions=selected_versions())
     plan_raw = C.canonical_bytes(plan); digest = C.digest(plan_raw)
     root = private_root()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -25,11 +25,12 @@ TEMPLATE_ID = 'sqlcl-26.1.2-fox-native-v1'
 CANDIDATE_FIELDS = {'job_id', 'template_id', 'data_classification', 'generator',
                     'native_form', 'remediation_items', 'mapping_summary'}
 # Historical snapshots accepted without a job-local gateway-approved cache.
-# This records a tested configuration, not a signature or authorization to use
-# that target today. Keep registered historical hashes when active config moves.
+# These identify registered configurations, not proof of an import, a signature
+# or authorization to use that target today. Keep snapshots when config moves.
 HISTORICAL_TARGET_PROFILE_HASHES = frozenset({
     '7c7b73d43febc9befb1d43e47449a02cc7894b879dd4bc32904cec538e5f95e6',
     '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3',
+    'e1e4b7b9f1439ebd3c6d02e11c241053d16f346a7406272f49ae2a122b1ff7f9',
 })
 
 
