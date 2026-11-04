@@ -144,6 +144,15 @@ test('a closed precheck is explained without success, liveness or retry authorit
  assert.match(value.action,/do not restart this closed attempt/);
  assert.doesNotMatch(JSON.stringify(value),/PRIVATE_DIAGNOSTIC/);
 });
+
+test('a closed QA-stage fault preserves generated output without implying a browser pass',()=>{
+ const value=view({configured:true,state:'qa_stage_failed_closed',operator_contact:'recent',message:'PRIVATE_DIAGNOSTIC'});
+ assert.equal(value.state,'qa_stage_failed_closed');assert.equal(value.label,'Browser verification preparation failed');
+ assert.match(value.message,/APEX was generated and clean-imported/);
+ assert.match(value.message,/No technical success or automatic retry/);
+ assert.equal(value.contactOperator,true);assert.match(value.action,/do not restart this closed attempt/);
+ assert.doesNotMatch(JSON.stringify(value),/PRIVATE_DIAGNOSTIC/);
+});
 test('existing product rendering and consent proof acceptance download gates remain intact',()=>{
  assert.match(ui,/import \{presentSourceFindings,presentReviewer\} from '\.\/productPresentation'/);
  assert.match(ui,/\{r\.state==='QA_REQUIRED'&&<ManagedVerificationStatus run=\{r\}\/>\}/);

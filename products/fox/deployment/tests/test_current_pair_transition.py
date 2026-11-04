@@ -114,3 +114,29 @@ def test_initial_read_refuses_a_link_even_with_identical_bytes(tmp_path):
     target=tmp_path/'source.py';target.write_bytes(b'synthetic source\n')
     linked=tmp_path/'link.py';linked.symlink_to(target)
     with pytest.raises(M.TransitionError):M.initial_read(linked)
+
+
+def test_closed_stage_and_clean_check_transcripts_are_distinct_failure_families():
+    old={'job_id':'fox-'+'1'*20,'assessment_sha256':'a'*64,
+         'retained_sha256':{f'old-{number}.json':'b'*64 for number in range(7)}}
+    stage={'job_id':'fox-'+'2'*20,'assessment_sha256':'c'*64,
+           'retained_sha256':{f'stage-{number}.json':'d'*64 for number in range(17)}}
+    value={'closed_prechecks':{'session-'+'1'*24:old},'closed_qa_stages':{'session-'+'2'*24:stage}}
+    result=M.retained_failure_sessions(value)
+    assert result['session-'+'1'*24]['failure_family']=='clean_check'
+    assert result['session-'+'2'*24]['failure_family']=='qa_stage'
+    assert 'failure_family' not in old and 'failure_family' not in stage
+
+
+@pytest.mark.parametrize('fault',['missing','duplicate','wrong-count','unsafe-name','bad-sha'])
+def test_failure_family_mismatch_never_exempts_a_pending_session(fault):
+    session='session-'+'1'*24
+    row={'job_id':'fox-'+'1'*20,'assessment_sha256':'a'*64,
+         'retained_sha256':{f'old-{number}.json':'b'*64 for number in range(7)}}
+    value={'closed_prechecks':{session:row},'closed_qa_stages':{}}
+    if fault=='missing':del value['closed_qa_stages']
+    elif fault=='duplicate':value['closed_qa_stages'][session]=row
+    elif fault=='wrong-count':row['retained_sha256'].pop('old-0.json')
+    elif fault=='unsafe-name':row['retained_sha256']['../outside.json']=row['retained_sha256'].pop('old-0.json')
+    else:row['assessment_sha256']='not-a-sha'
+    with pytest.raises(M.TransitionError):M.retained_failure_sessions(value)

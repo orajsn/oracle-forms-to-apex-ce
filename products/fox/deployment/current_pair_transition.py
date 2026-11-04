@@ -116,9 +116,37 @@ with store._db(False) as db:
  if store._precheck_schema(db):
   for row in db.execute('SELECT assessment_raw FROM verification_precheck_failures'):
    a=m._load(row[0]);job=a['binding']['job_id'];store._closed_precheck(db,job)
+   assert a['session'] not in closed
    closed[a['session']]={'job_id':job,'assessment_sha256':m.digest(row[0]),'retained_sha256':a['retained_sha256']}
- print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed},sort_keys=True))
+ stages={}
+ if hasattr(store,'_qa_stage_schema') and store._qa_stage_schema(db):
+  for row in db.execute('SELECT assessment_raw FROM verification_qa_stage_failures'):
+   a=m._load(row[0]);job=a['binding']['job_id'];store._closed_qa_stage(db,job)
+   assert a['session'] not in stages and a['session'] not in closed
+   stages[a['session']]={'job_id':job,'assessment_sha256':m.digest(row[0]),'retained_sha256':a['retained_sha256']}
+ print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed,'closed_qa_stages':stages},sort_keys=True))
 '''
+
+
+def retained_failure_sessions(value):
+    """Read separately validated failure families, never infer a successful seal."""
+    need(type(value)is dict,'FAILURE_FAMILY_SNAPSHOT_INVALID')
+    result={}
+    for key,family,count in (('closed_prechecks','clean_check',7),('closed_qa_stages','qa_stage',17)):
+        entries=value.get(key)
+        need(type(entries)is dict,'FAILURE_FAMILY_SNAPSHOT_INVALID')
+        for session,row in entries.items():
+            need(type(session)is str and re.fullmatch(r'session-[a-f0-9]{24}',session)
+                and session not in result and type(row)is dict
+                and set(row)=={'job_id','assessment_sha256','retained_sha256'}
+                and type(row['job_id'])is str and re.fullmatch(r'fox-[a-f0-9]{20}',row['job_id'])
+                and type(row['assessment_sha256'])is str and re.fullmatch(r'[a-f0-9]{64}',row['assessment_sha256'])
+                and type(row['retained_sha256'])is dict and len(row['retained_sha256'])==count
+                and all(type(name)is str and re.fullmatch(r'[a-z0-9.-]+\.json',name)
+                    and type(digest)is str and re.fullmatch(r'[a-f0-9]{64}',digest)
+                    for name,digest in row['retained_sha256'].items()),'FAILURE_FAMILY_HISTORY_INVALID')
+            result[session]={**row,'failure_family':family}
+    return result
 
 
 NEW_PROBE=r'''
@@ -250,12 +278,12 @@ class Transition:
         r=subprocess.run(argv+['-I','-B','-c',BACKEND],input=cb(packet),capture_output=True,timeout=120)
         need(r.returncode==0 and len(r.stdout)<=1_000_000,'GLOBAL_IDLE_OR_HISTORY_UNCONFIRMED')
         value=document(r.stdout);journal=self.service.product.PrivateJournal(self.old.release)
-        pending=journal.pending()
+        pending=journal.pending();failures=retained_failure_sessions(value)
         for directory in pending:
-            need(directory.name in value['closed_prechecks'],'UNCLOSED_OLD_SESSION')
-            expected=value['closed_prechecks'][directory.name]['retained_sha256']
+            need(directory.name in failures,'UNCLOSED_OLD_SESSION')
+            expected=failures[directory.name]['retained_sha256']
             actual={x.name:sha(A.read(x,private=True)) for x in directory.iterdir()}
-            need(actual==expected,'OLD_PRECHECK_TRANSCRIPT_CHANGED')
+            need(actual==expected,'OLD_FAILED_TRANSCRIPT_CHANGED')
         files={x.relative_to(journal.root).as_posix():sha(A.read(x,private=True)) for x in journal.root.rglob('*') if x.is_file()}
         return {**value,'old_journal_inventory':files}
 
@@ -338,8 +366,8 @@ class Transition:
                     self.check_container(self.old_pins[name],name,signatures['old'][role],running=False)
                 need(self.data(stopped=True)==before,'STOPPED_OLD_DATA_NOT_IDLE')
                 self.S._host_guard(self.snapshot)
-                self.record('old-current-producer-retained.json',{'status':'STOPPED_WITH_PRECHECK_FAILURE_RETAINED','old_release':self.old.release,
-                    'journal_inventory':before['old_journal_inventory'],'failed_sessions':before['closed_prechecks'],
+                self.record('old-current-producer-retained.json',{'status':'STOPPED_WITH_FAILED_VERIFICATION_RETAINED','old_release':self.old.release,
+                    'journal_inventory':before['old_journal_inventory'],'failed_sessions':retained_failure_sessions(before),
                     'successful_completion_claimed':False,'automatic_replay_permitted':False})
                 capture='upgrade-capture-'+self.R[:16];restore='upgrade-restore-'+self.R[:16]
                 self.S.execute_under_lock(authority,action='capture',operation=capture,apply=True)

@@ -241,10 +241,11 @@ def public_status(root, run, config=None):
         recovery = VerificationRecovery(Path(root) / 'fox.sqlite3', enabled=True)
         with recovery._db() as connection:
             connection.execute('BEGIN')
-            if recovery._recovery_available(connection):
+            available = recovery._recovery_available(connection)
+            if available or recovery._qa_stage_schema(connection):
                 eligibility = recovery._eligibility(connection, run['id'])
                 attempt_row = connection.execute('SELECT attempt_id FROM verification_retry_attempts WHERE job_id=?',
-                                                  (run['id'],)).fetchone()
+                                                  (run['id'],)).fetchone() if available else None
                 attempt = recovery._attempt(connection, attempt_row['attempt_id']) if attempt_row else None
                 recovery_state = eligibility['recovery_state']
                 if attempt is not None:
@@ -254,6 +255,7 @@ def public_status(root, run, config=None):
                              'VERIFICATION_RECOVERY_RELEASE_CHANGED')
                     recovery_state = 'retry_' + attempt['state']
                 recovery_messages = {
+                    'qa_stage_failed_closed': 'APEX was generated and clean-imported, but browser verification stopped before staging because an environment component was missing. This failed attempt is closed; its app and original output are preserved. No technical success or automatic retry is implied.',
                     'precheck_failed_closed': 'Verification stopped before QA because an environment prerequisite was missing. This failed attempt is closed; its original output is preserved. No technical success or automatic retry is implied.',
                     'failed_closed': 'This verification attempt failed and is closed. No successful technical proof or automatic retry is implied.',
                     'retry_reserved': 'A separate verification retry is reserved. The original failed attempt is preserved.',

@@ -1059,6 +1059,7 @@ class VerificationRecovery:
             if existing:
                 _need(existing['assessment_sha256'] == expected_sha256, 'PRECHECK_DIFFERENT_CLOSURE_EXISTS')
                 return {**existing, 'action': 'ALREADY_RECORDED_NO_REPLAY'}
+            _need(self._closed_qa_stage(db,binding.job_id) is None,'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
             if self._recovery_available(db):
                 _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',
                                  (binding.job_id,)).fetchone() is None
@@ -1082,6 +1083,179 @@ class VerificationRecovery:
             closed = self._closed_precheck(db, binding.job_id)
             _need(self._precheck_original_rows(db) == original_rows, 'PRECHECK_ORIGINAL_ROWS_CHANGED')
             return {**closed, 'action': 'RECORDED_ONCE', 'original_rows_unchanged': True}
+
+    # Distinct from both completed-browser failures and pre-import prechecks:
+    # a clean application exists, but a positive dependency failure preceded
+    # any QA staging/launch. Never manufacture a browser result or retry grant.
+    _QA_STAGE_TABLE = 'verification_qa_stage_failures'
+    _QA_STAGE_COLUMNS = ('job_id', 'assessment_sha256', 'assessment_raw',
+        'legacy_record_sha256', 'closed_at_utc', 'record_sha256')
+
+    @classmethod
+    def _qa_stage_definitions(cls):
+        table = cls._QA_STAGE_TABLE
+        result = {('table', table): 'CREATE TABLE IF NOT EXISTS ' + table + '''(
+            job_id TEXT PRIMARY KEY REFERENCES verification_queue(job_id),
+            assessment_sha256 TEXT NOT NULL UNIQUE,assessment_raw BLOB NOT NULL,
+            legacy_record_sha256 TEXT NOT NULL,closed_at_utc TEXT NOT NULL,record_sha256 TEXT NOT NULL)'''}
+        for action in ('UPDATE', 'DELETE'):
+            name = table + '_no_' + action.lower()
+            result[('trigger', name)] = ('CREATE TRIGGER IF NOT EXISTS ' + name + ' BEFORE ' +
+                action + ' ON ' + table + " BEGIN SELECT RAISE(ABORT,'QA-stage failure history is append-only'); END")
+        return result
+
+    @classmethod
+    def _qa_stage_schema(cls, db, *, create=False):
+        expected = cls._qa_stage_definitions()
+        rows = [tuple(row) for row in db.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','trigger')")
+            if row[2] == cls._QA_STAGE_TABLE or (row[0], row[1]) in expected]
+        if not rows:
+            if not create:
+                return False
+            _need(db.in_transaction, 'QA_STAGE_SCHEMA_TRANSACTION_REQUIRED')
+            for sql in expected.values(): db.execute(sql)
+            return cls._qa_stage_schema(db)
+        actual = {(row[0], row[1]): row[3] for row in rows}
+        _need(set(actual) == set(expected) and all(
+            cls.normalized_schema_sql(actual[key]) == cls.normalized_schema_sql(sql)
+            for key, sql in expected.items()), 'QA_STAGE_SCHEMA_OR_FENCES_CHANGED')
+        _need(tuple(row[1] for row in db.execute('PRAGMA table_info(' + cls._QA_STAGE_TABLE + ')'))
+              == cls._QA_STAGE_COLUMNS, 'QA_STAGE_SCHEMA_COLUMNS_CHANGED')
+        return True
+
+    def initialize_qa_stage_failure_ledger(self, *, apply=False):
+        _need(apply is True, 'QA_STAGE_EXPLICIT_INITIALIZATION_REQUIRED')
+        with self._db(True) as db:
+            db.execute('SELECT job_id,record_sha256 FROM verification_queue LIMIT 0')
+            existed = self._qa_stage_schema(db)
+            self._qa_stage_schema(db, create=True)
+            return {'status': 'QA_STAGE_FAILURE_LEDGER_READY', 'created': not existed,
+                    'technical_success': False, 'automatic_retry_permitted': False}
+
+    @staticmethod
+    def _qa_stage_assessment(value):
+        fields = {'schema_version','scope','status','binding','session','installation_sha256',
+            'legacy_record_sha256','claim_sha256','retained_sha256','clean_sha256','capture_sha256',
+            'plan_sha256','qa_source_sha256','completed_steps','failed_phase','missing_dependency',
+            'target','expected_versions','current_admission_blocks','closure_performed',
+            'technical_success','human_acceptance_recorded','automatic_replay_permitted','recovery_authorized'}
+        _need(type(value) is dict and set(value) == fields, 'QA_STAGE_ASSESSMENT_FIELDS')
+        _need(type(value['schema_version']) is int and value['schema_version'] == 1
+              and value['scope'] == 'fox-project-qa-stage-failure-assessment-v1'
+              and value['status'] == 'CLASSIFIED_QA_STAGE_FAILURE_NOT_CLOSED'
+              and value['failed_phase'] == 'qa_stage' and value['missing_dependency'] == 'fox.native_verification'
+              and value['completed_steps'] == ['prepare','clean_check','allocate','schema','import','verify']
+              and value['current_admission_blocks'] is True
+              and all(value[k] is False for k in ('closure_performed','technical_success',
+                  'human_acceptance_recorded','automatic_replay_permitted','recovery_authorized')),
+              'QA_STAGE_ASSESSMENT_NOT_FAILURE')
+        binding = VerificationBinding.from_payload(value['binding'])
+        _need(type(value['session']) is str and _SESSION.fullmatch(value['session'])
+              and all(_sha(value[k]) for k in ('installation_sha256','legacy_record_sha256',
+                  'claim_sha256','capture_sha256','plan_sha256','qa_source_sha256')),
+              'QA_STAGE_ASSESSMENT_BINDING')
+        retained, clean = value['retained_sha256'], value['clean_sha256']
+        journal_names = {'session.json','attention.json','p0001-qa-stage.intent.json',
+            *('p0001-'+step+suffix for step in ('claim','prepare','clean-check','allocate','schema','import','verify')
+              for suffix in ('.intent.json','.complete.json'))}
+        clean_names = {'package.zip','native-project-spec.json','source-to-apex.json',
+            'allocate.evidence.json','verification-profile.json','verify.evidence.json','plan.json',
+            'schema.evidence.json','import.evidence.json',
+            *(phase+suffix for phase in ('allocate','schema','import','verify')
+              for suffix in ('.intent.json','.complete.json'))}
+        _need(type(retained) is dict and set(retained) == journal_names
+              and type(clean) is dict and set(clean) == clean_names
+              and all(_sha(item) for item in (*retained.values(),*clean.values()))
+              and clean['package.zip'] == binding.package_sha256
+              and clean['plan.json'] == value['plan_sha256'], 'QA_STAGE_MANIFEST_CHANGED')
+        # Historical failure reads preserve the exact recorded version tuple;
+        # they grant no new technical decision or application operation.
+        policy = BoundVerificationPolicy(canonical_bytes({'schema_version':1,
+            'scope':'fox-native-verification-profile-v2','policy_id':POLICY_ID,
+            'binding':{k:v for k,v in binding.payload().items() if k!='verifier_release_sha256'}
+                | {'allocation_receipt_sha256':clean['allocate.evidence.json']},
+            'target':value['target'],'expected_versions':value['expected_versions'],
+            'max_evidence_age_seconds':86400}), historical=True)
+        _need(policy.sha256 == clean['verification-profile.json'], 'QA_STAGE_POLICY_CHANGED')
+        return binding
+
+    def _qa_stage_current(self, db, assessment):
+        binding = self._qa_stage_assessment(assessment)
+        row = VerificationQueue._record(db.execute('SELECT * FROM verification_queue WHERE job_id=?',
+                                                    (binding.job_id,)).fetchone())
+        _need(row is not None and row['state'] == 'attention' and row['proof_sha256'] is None
+              and row['attention_code'] == 'BACKEND_OUTCOME_UNCONFIRMED'
+              and row['record_sha256'] == assessment['legacy_record_sha256']
+              and all(row[k] == v for k,v in binding.payload().items())
+              and claim_sha256(Claim(binding,row['claim_token'])) == assessment['claim_sha256'],
+              'QA_STAGE_ORIGINAL_QUEUE_CHANGED')
+        self._server_run(db,binding,unverified=True)
+        snapshot = _load((self.database.parent/'jobs'/binding.job_id/'source-snapshot.json').read_bytes())
+        _need(snapshot.get('conversion_profile') == 'native-project-v1','QA_STAGE_PROJECT_PROFILE_REQUIRED')
+        return binding
+
+    def _closed_qa_stage(self, db, job_id):
+        if not self._qa_stage_schema(db):
+            return None
+        row = db.execute('SELECT * FROM '+self._QA_STAGE_TABLE+' WHERE job_id=?',(job_id,)).fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        _need(set(value) == set(self._QA_STAGE_COLUMNS) and type(value['assessment_raw']) is bytes
+              and value['record_sha256'] == self._record_hash(value)
+              and digest(value['assessment_raw']) == value['assessment_sha256'], 'QA_STAGE_LEDGER_ROW_CHANGED')
+        assessment = _load(value['assessment_raw'])
+        self._qa_stage_assessment(assessment)
+        _need(canonical_bytes(assessment) == value['assessment_raw']
+              and assessment['binding']['job_id'] == value['job_id']
+              and assessment['legacy_record_sha256'] == value['legacy_record_sha256'],
+              'QA_STAGE_LEDGER_DOCUMENT_CHANGED')
+        _time(value['closed_at_utc'])
+        self._qa_stage_current(db,assessment)
+        return {'status':'FAILED_QA_STAGE_CLOSED','job_id':job_id,
+                'assessment_sha256':value['assessment_sha256'],'technical_success':False,
+                'human_acceptance_recorded':False,'automatic_retry_permitted':False}
+
+    def close_qa_stage_failure(self, assessment_raw, *, expected_sha256, observer=None, apply=False, now=None):
+        """Protected append only; no phase completion, import or retry is run.
+
+        The caller must own real host exclusion and a complete recovery export.
+        observer(binding, session) must freshly re-capture/re-classify under that
+        exclusion. This method cannot obtain or replace that host authority.
+        """
+        _need(apply is True and callable(observer),'QA_STAGE_PROTECTED_OBSERVER_REQUIRED')
+        _need(type(assessment_raw) is bytes and 0<len(assessment_raw)<=65536
+              and _sha(expected_sha256) and digest(assessment_raw)==expected_sha256,
+              'QA_STAGE_EXACT_REVIEWED_ASSESSMENT_REQUIRED')
+        assessment = _load(assessment_raw);binding = self._qa_stage_assessment(assessment)
+        _need(canonical_bytes(assessment)==assessment_raw,'QA_STAGE_CANONICAL_ASSESSMENT_REQUIRED')
+        with self._db(True) as db:
+            _need(self._qa_stage_schema(db),'QA_STAGE_EXPLICIT_LEDGER_INITIALIZATION_REQUIRED')
+            existing = self._closed_qa_stage(db,binding.job_id)
+            if existing:
+                _need(existing['assessment_sha256']==expected_sha256,'QA_STAGE_DIFFERENT_CLOSURE_EXISTS')
+                return {**existing,'action':'ALREADY_RECORDED_NO_REPLAY'}
+            _need(self._closed_precheck(db,binding.job_id) is None,'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
+            if self._recovery_available(db):
+                _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',(binding.job_id,)).fetchone() is None
+                      and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?',(binding.job_id,)).fetchone() is None,
+                      'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
+            self._qa_stage_current(db,assessment);original = self._precheck_original_rows(db)
+            try:
+                observed = observer(binding,assessment['session'])
+            except Exception:
+                raise RecoveryError('QA_STAGE_FRESH_OBSERVATION_UNCONFIRMED') from None
+            _need(type(observed) is dict and canonical_bytes(observed)==assessment_raw,'QA_STAGE_FRESH_OBSERVATION_CHANGED')
+            self._qa_stage_current(db,assessment)
+            value={'job_id':binding.job_id,'assessment_sha256':expected_sha256,'assessment_raw':assessment_raw,
+                'legacy_record_sha256':assessment['legacy_record_sha256'],'closed_at_utc':_clock(now).isoformat()}
+            value['record_sha256']=self._record_hash(value)
+            db.execute('INSERT INTO '+self._QA_STAGE_TABLE+' VALUES('+','.join('?' for _ in value)+')',
+                       tuple(value[k] for k in self._QA_STAGE_COLUMNS))
+            result=self._closed_qa_stage(db,binding.job_id)
+            _need(self._precheck_original_rows(db)==original,'QA_STAGE_ORIGINAL_ROWS_CHANGED')
+            return {**result,'action':'RECORDED_ONCE','original_rows_unchanged':True}
 
     @staticmethod
     def _record_hash(row):
@@ -1385,6 +1559,9 @@ class VerificationRecovery:
               and document['claim_sha256'] == claim_sha256(claim), 'RECOVERY_EXACT_DISPOSITION_REQUIRED')
         sha = digest(disposition_raw)
         with self._db(True) as db:
+            _need(self._closed_precheck(db,claim.binding.job_id) is None
+                  and self._closed_qa_stage(db,claim.binding.job_id) is None,
+                  'RECOVERY_CONFLICTING_FAILURE_FAMILY')
             prior = db.execute('SELECT * FROM verification_failed_dispositions WHERE job_id=?', (claim.binding.job_id,)).fetchone()
             if prior is not None:
                 _, saved = self._closed(db, claim.binding.job_id)
@@ -1486,8 +1663,13 @@ class VerificationRecovery:
         result = admission_status(dict(run), dict(legacy) if legacy else None, closed, retry)
         precheck = self._closed_precheck(db, job_id)
         if precheck is not None:
-            _need(closed is None and retry is None, 'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
+            _need(closed is None and retry is None and self._closed_qa_stage(db,job_id) is None,
+                  'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
             return {'blocks_admission': False, 'recovery_state': 'precheck_failed_closed', 'retry_eligible': False}
+        stage = self._closed_qa_stage(db,job_id)
+        if stage is not None:
+            _need(closed is None and retry is None,'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
+            return {'blocks_admission':False,'recovery_state':'qa_stage_failed_closed','retry_eligible':False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256
@@ -1521,6 +1703,10 @@ class VerificationRecovery:
         query = 'SELECT id AS job_id FROM runs UNION SELECT job_id FROM verification_queue'
         if self._recovery_available(db):
             query += ' UNION SELECT job_id FROM verification_retry_attempts'
+        if self._precheck_schema(db):
+            query += ' UNION SELECT job_id FROM '+self._PRECHECK_TABLE
+        if self._qa_stage_schema(db):
+            query += ' UNION SELECT job_id FROM '+self._QA_STAGE_TABLE
         return [row[0] for row in db.execute(query)]
 
     def _other_work_allows(self, db, *, except_job_id=None):

@@ -1,5 +1,5 @@
 // Read-only presentation of the owner-checked public status. Never a gate.
-type VerificationState='queued'|'running'|'attention'|'not_queued'|'unavailable'|'disabled'|'precheck_failed_closed';
+type VerificationState='queued'|'running'|'attention'|'not_queued'|'unavailable'|'disabled'|'precheck_failed_closed'|'qa_stage_failed_closed';
 type OperatorContact='recent'|'stale'|'not_reported'|'unknown';
 type SeenAt={value:string;label:string};
 export type VerificationPresentation={
@@ -7,10 +7,11 @@ export type VerificationPresentation={
  operatorContact:OperatorContact;contactMessage:string;lastSeen:SeenAt|null;
  contactOperator:boolean;action:string|null;
 };
-const activeStates=new Set(['queued','running','attention','not_queued','unavailable','precheck_failed_closed']);
+const activeStates=new Set(['queued','running','attention','not_queued','unavailable','precheck_failed_closed','qa_stage_failed_closed']);
 const contacts=new Set(['recent','stale','not_reported','unknown']);
 const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const descriptions:Record<VerificationState,{label:string;message:string}>={
+ qa_stage_failed_closed:{label:'Browser verification preparation failed',message:'APEX was generated and clean-imported, but browser verification stopped before staging. This failed attempt is closed; its app and original output are preserved. No technical success or automatic retry is implied.'},
  precheck_failed_closed:{label:'Verification precheck failed',message:'Verification stopped before QA and this failed attempt is closed. The original output is preserved; no technical success or automatic retry is implied.'},
  queued:{label:'Queued for verification',message:'This package is queued for the FOX verification operator. A result has not yet been recorded.'},
  running:{label:'Verification attempt started',message:'A verification attempt has started, but its result has not yet been recorded. This does not confirm that the attempt is still running.'},
@@ -56,5 +57,5 @@ export function presentVerificationStatus(runState:unknown,value:unknown):Verifi
  }
  const contactOperator=!['queued','running'].includes(state)||operatorContact!=='recent';
  return {state,...descriptions[state],operatorContact,contactMessage:contactMessages[operatorContact],lastSeen,
-  contactOperator,action:state==='precheck_failed_closed'?'Contact the FOX operator to complete environment repair; do not restart this closed attempt.':contactOperator?'Contact the FOX operator to check and reconcile verification for this package.':null};
+  contactOperator,action:['precheck_failed_closed','qa_stage_failed_closed'].includes(state)?'Contact the FOX operator to complete environment repair; do not restart this closed attempt.':contactOperator?'Contact the FOX operator to check and reconcile verification for this package.':null};
 }

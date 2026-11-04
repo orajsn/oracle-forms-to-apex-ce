@@ -27,6 +27,18 @@ operator must establish those facts, retain/export original evidence, re-observe
 the exact current state and use a separately reviewed disposition or
 continuation protocol. That live protocol is not provided by this reader.
 
+The separate protected backend offers explicit
+`initialize_qa_stage_failure_ledger(apply=True)` and
+`close_qa_stage_failure(...)` primitives. The latter requires exact reviewed
+assessment bytes and a callback that freshly re-observes/classifies under the
+operator's real exclusion. It appends a failure once, preserving original
+queue/run/claim rows and job files. Its SQLite record has update/delete fences;
+changed source, mixed failure families or lost metadata block admission. An
+identical recorded append is read back without replay. These primitives do not
+obtain a host lease, create a backup, close a journal seal, restart services,
+run browser tests or authorize an automatic retry. No public mutation endpoint
+is added. They are not a substitute for the guarded host recovery protocol.
+
 Do not apply the earlier `clean_check`-only failure closure here. An imported
 application already exists. Do not fabricate completion records, reset the
 claim, delete the application, repeat completed model/import operations or mark
