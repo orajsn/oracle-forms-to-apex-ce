@@ -352,9 +352,9 @@ def orchestration_fixture(monkeypatch):
     inventory_raw=A.canonical(inventory);b=A.sha(inventory_raw)
     root=Path('/home/opc/.local/share/fox-project-builds/'+b+'/bundle')
     native_sha=A.sha((ROOT/'deployment/project-opaf-profile-v2.json').read_bytes())
-    # This test exercises the ref/hash boundary, not full provider admission;
-    # the caller's production C validator is covered by candidate/service tests.
-    provider_raw=A.canonical({'scope':'synthetic-opaque-provider-ref','target':M.TARGET_SHA256})
+    from qa.operator.tests.test_hosted_release_binding import offline_configuration
+    declaration=offline_configuration()
+    provider_raw=A.canonical(declaration)
     provider_sha=A.sha(provider_raw)
     release.update(schema_version=3,scope=bridge.HOSTED_SCOPE,enabled=True,
         modules={name:'a'*64 for name in bridge.MODULES},
@@ -425,6 +425,24 @@ def test_full_orchestration_uses_real_validators_and_only_readonly_programs(monk
     for _,argv,kwargs,_ in calls:
         assert SECRET not in repr(argv) and SECRET not in repr(kwargs['env'])
     assert result['fox']==good_fox() and result['target']==good_target() and result['mcp']==good_mcp()
+
+
+def test_selected_2616_results_do_not_borrow_legacy_target_or_version():
+    from forms2apex.target_profile import select_target_profile
+    target=select_target_profile('jsn-native-project-2616-v1');digest=M.digest(target)
+    fox=good_fox();fox['target_profile_sha256']=digest
+    for value in fox['model_environment'].values():value['target_profile_sha256']=digest
+    database=good_target();database['target_profile_sha256']=digest
+    database['database']['apex_version']='26.1.6'
+    assert M._validate_fox(fox,target)==fox and M._validate_target(database,target)==database
+    database['database']['apex_version']='26.1.5'
+    with pytest.raises(M.ReadinessError):M._validate_target(database,target)
+    with pytest.raises(M.ReadinessError):M._validate_fox(fox,TARGET)
+
+
+def test_unregistered_target_cannot_self_authorize_with_its_own_hash():
+    target=deepcopy(TARGET);target['tested_versions']['apex']='26.1.99'
+    with pytest.raises(M.ReadinessError):M._registered_target_sha(target)
 
 
 @pytest.mark.parametrize('mutation',['release-reference','provider-reference','source-inventory','target-file','mapper','target-output','mcp-output'])

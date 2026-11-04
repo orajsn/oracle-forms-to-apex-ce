@@ -55,7 +55,18 @@ def _same(value, expected, code):
         raise ReadinessError(code) from None
 
 
+def _registered_target_sha(target):
+    try:
+        from forms2apex.target_profile import validate_target_profile,target_profile_sha256
+        validated=validate_target_profile(target)
+        need('project_mapping' in validated['scope'],'EXACT_PROJECT_TARGET_REQUIRED')
+        return target_profile_sha256(validated)
+    except Exception:
+        raise ReadinessError('EXACT_TARGET_REQUIRED') from None
+
+
 def _validate_fox(value, target):
+    target_sha=_registered_target_sha(target)
     need(type(value) is dict and set(value) == {'scope','target_profile_sha256','worker','capabilities',
          'model_environment','model_invoked','checkpoint_written'}, 'FOX_RESULT_FIELDS_INVALID')
     worker = value['worker']
@@ -77,16 +88,17 @@ def _validate_fox(value, target):
             raise ReadinessError('MODEL_OBSERVATION_TIME_INVALID') from None
         expected_observations[role] = {'schema_version':1,'scope':'opaf-model-environment-v1',
             'trust_boundary':'authenticated_fox_executor_not_vendor_attestation','job_id':'fox-'+'0'*20,'role':role,
-            'source_manifest_sha256':'0'*64,'target_profile_sha256':TARGET_SHA256,'observed_at_utc':stamp,
+            'source_manifest_sha256':'0'*64,'target_profile_sha256':target_sha,'observed_at_utc':stamp,
             'opaf':{key:target['opaf'][key] for key in ('base_url','certificate_sha256','model_authentication','version_number','build_id')},
             'workflow':{**target['opaf']['roles'][role],'published':True},'opaf_version':target['tested_versions']['opaf']}
-    _same(value,{'scope':'fox-project-connections-readonly-v1','target_profile_sha256':TARGET_SHA256,
+    _same(value,{'scope':'fox-project-connections-readonly-v1','target_profile_sha256':target_sha,
         'worker':{'enabled':True,'healthy':True,'state':worker['state']},'capabilities':expected_caps,
         'model_environment':expected_observations,'model_invoked':False,'checkpoint_written':False}, 'FOX_RESULT_CHANGED')
     return value
 
 
 def _validate_target(value, target):
+    target_sha=_registered_target_sha(target)
     need(type(value) is dict and set(value) == {'scope','target_profile_sha256','imds','oci','tooling','database','ords',
          'admin_used','database_writes','import_performed','temporary_sql_files_used'}, 'TARGET_RESULT_FIELDS_INVALID')
     tooling = value['tooling']
@@ -95,7 +107,7 @@ def _validate_target(value, target):
          and type(tooling.get('compiler_jar_sha256')) is str and _SHA.fullmatch(tooling['compiler_jar_sha256']),
          'TOOLING_RESULT_INVALID')
     oci = target['oci']
-    _same(value,{'scope':'fox-target-readonly-versions-v1','target_profile_sha256':TARGET_SHA256,
+    _same(value,{'scope':'fox-target-readonly-versions-v1','target_profile_sha256':target_sha,
         'imds':{key:oci[key] for key in ('instance_id','compartment_id','region')},
         'oci':{'database_id':oci['database_id'],'database_compartment_id':oci['compartment_id'],
                'instance_id':oci['instance_id'],'instance_compartment_id':oci['compartment_id'],'region':oci['region'],
@@ -152,7 +164,7 @@ def sources(root,pins):
 FOX_PROGRAM = COMMON + r'''
 def probe(packet):
  import urllib.request
- need(set(packet)=={'modules','target_profile','native_profile_sha256','release_sha256'},'FOX_PACKET_INVALID')
+ need(set(packet)=={'modules','target_profile','target_profile_sha256','native_profile_sha256','release_sha256'},'FOX_PACKET_INVALID')
  root=pathlib.Path('/app/fox');sources(root,packet['modules'])
  need(os.environ.get('FOX_CONVERSION_PROFILE')=='native-project-v1'
   and os.environ.get('FOX_VERIFIER_RELEASE_SHA256')==packet['release_sha256']
@@ -168,7 +180,8 @@ def probe(packet):
  from fox.native_project_pipeline import _configuration,PROJECT_MAPPING_CAPABILITY
  profile,gateway,client=_configuration()
  target=packet['target_profile']
- need(digest(target)=='7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3','TARGET_CHANGED')
+ need(type(packet['target_profile_sha256']) is str and re.fullmatch('[a-f0-9]{64}',packet['target_profile_sha256'])
+  and digest(target)==packet['target_profile_sha256'],'TARGET_CHANGED')
  envelope=gateway.request('GET','/fox/target-profile')
  need(envelope=={'target_profile':target,'target_profile_sha256':digest(target)},'CONVERTER_TARGET_CHANGED')
  capabilities=gateway.request('GET','/fox/capabilities')
@@ -202,14 +215,14 @@ def probe(packet):
 TARGET_PROGRAM = COMMON + r'''
 def probe(packet):
  import dataclasses,tempfile
- need(set(packet)=={'files','target_profile'},'TARGET_PACKET_INVALID')
+ need(set(packet)=={'files','target_profile','target_profile_sha256'},'TARGET_PACKET_INVALID')
  root=pathlib.Path('/opt/forms2apex/converter');sources(root,packet['files'])
  sys.path[:0]=['/opt/forms2apex/converter','/usr/local/lib64/python3.11/site-packages','/usr/local/lib/python3.11/site-packages']
  from forms2apex.config import Settings
  from forms2apex.runtime_preflight import bound_target_profile,collect_imds_identity,collect_tooling_versions,collect_database_identity,collect_ords_reachability
  from forms2apex.oci_identity import collect_oci_identity
  settings=Settings.from_env();profile=bound_target_profile(settings)
- need(profile==packet['target_profile'] and digest(profile)=='7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3','TARGET_CHANGED')
+ need(profile==packet['target_profile'] and digest(profile)==packet['target_profile_sha256'],'TARGET_CHANGED')
  # Verify actual approved OCI resources before opening the saved DB connection.
  imds=collect_imds_identity(profile);oci=collect_oci_identity(profile,imds)
  tooling=collect_tooling_versions(settings,profile)
@@ -530,7 +543,8 @@ def run(A, plan, release, candidate_records):
     A.plan_document(A.canonical(plan),A.sha(A.canonical(plan)))
     need(type(release) is dict and release.get('schema_version') == 3 and release.get('enabled') is True
          and hashlib.sha256(A.canonical(release)).hexdigest() == plan['release']['sha256']
-         and release['opaf_profile']['target_profile_sha256'] == TARGET_SHA256,'EXACT_RELEASE_REQUIRED')
+         and (plan['schema_version']==2 or release['opaf_profile']['target_profile_sha256']==TARGET_SHA256),
+         'EXACT_RELEASE_REQUIRED')
     need(A.read(Path(plan['release']['path']),private=True) == A.canonical(release),'RELEASE_REFERENCE_CHANGED')
     provider_raw = A.read(Path(plan['provider']['path']),private=True)
     need(hashlib.sha256(provider_raw).hexdigest() == plan['provider']['sha256']
@@ -553,15 +567,19 @@ def run(A, plan, release, candidate_records):
     need({'forms2apex/runtime_preflight.py','forms2apex/config.py','forms2apex/oci_identity.py','forms2apex/target_profile.py',
           'forms2apex/server.py'} <= set(converter_files),'CONVERTER_SOURCE_BINDING_INCOMPLETE')
     target = A.parse(A.read(root/'deployment/target-profile.jsn-project-v2.json'))
-    need(digest(target) == TARGET_SHA256,'EXACT_TARGET_REQUIRED')
+    target_sha=_registered_target_sha(target)
+    need(target_sha==release['opaf_profile']['target_profile_sha256'],'EXACT_TARGET_REQUIRED')
+    runtime=importlib.import_module('qa.operator.runtime_provider')
+    declared=runtime.configuration_document(provider_raw,expected_sha256=plan['provider']['sha256'])
+    need(declared['target_profile']==target and declared['target_profile_sha256']==target_sha,'PROVIDER_TARGET_CHANGED')
     modules = {**release['modules'],**release['project']['modules'],**release['project']['queue_modules']}
     need({'opaf.py','native_project_pipeline.py','native_pipeline.py'} <= set(modules),'FOX_SOURCE_BINDING_INCOMPLETE')
     before,_ = _guard(A,release,candidate_records)
     fox = _validate_fox(_exec(A,release,candidate_records,role='fox',program=FOX_PROGRAM,deadline=120,
-        payload={'modules':modules,'target_profile':target,'native_profile_sha256':release['native_profile_sha256'],
+        payload={'modules':modules,'target_profile':target,'target_profile_sha256':target_sha,'native_profile_sha256':release['native_profile_sha256'],
                  'release_sha256':plan['release']['sha256']}),target)
     target_result = _validate_target(_exec(A,release,candidate_records,role='converter',program=TARGET_PROGRAM,deadline=240,
-                         payload={'files':converter_files,'target_profile':target}),target)
+                         payload={'files':converter_files,'target_profile':target,'target_profile_sha256':target_sha}),target)
     _, containers = _guard(A,release,candidate_records)
     token = A.environment(containers['converter']).get('F2A_MCP_BEARER_TOKEN')
     # StaticTokenVerifier uses an opaque token, not necessarily base64/JWT.
@@ -570,16 +588,16 @@ def run(A, plan, release, candidate_records):
     need(type(token) is str and re.fullmatch(r'[!-~]{32,4096}',token),'MCP_CREDENTIAL_REFERENCE_INVALID')
     mcp = _validate_mcp(_probe_mcp_curl(A,release,candidate_records,token))
     del token
-    need(fox.get('scope') == 'fox-project-connections-readonly-v1' and fox.get('target_profile_sha256') == TARGET_SHA256
+    need(fox.get('scope') == 'fox-project-connections-readonly-v1' and fox.get('target_profile_sha256') == target_sha
          and fox.get('model_invoked') is False and fox.get('checkpoint_written') is False
-         and target_result.get('scope') == 'fox-target-readonly-versions-v1' and target_result.get('target_profile_sha256') == TARGET_SHA256
+         and target_result.get('scope') == 'fox-target-readonly-versions-v1' and target_result.get('target_profile_sha256') == target_sha
          and all(target_result.get(key) is False for key in ('admin_used','database_writes','import_performed'))
          and mcp.get('scope') == 'fox-internal-mcp-discovery-v1' and mcp.get('tool_names') == list(EXPECTED_TOOLS)
          and mcp.get('tool_count') == 5 and mcp.get('conversion_tools_called') is False,'READINESS_RESULT_SCOPE_CHANGED')
     after,_ = _guard(A,release,candidate_records)
     need(after == before,'CONTAINER_CHANGED_DURING_READINESS')
     return {'schema_version':1,'scope':'fox-paired-release-readiness-v1','status':'READ_ONLY_CONNECTIVITY_CONFIRMED',
-        'release_sha256':plan['release']['sha256'],'target_profile_sha256':TARGET_SHA256,
+        'release_sha256':plan['release']['sha256'],'target_profile_sha256':target_sha,
         'observed_at_utc':datetime.now(timezone.utc).isoformat(),'containers':after,
         'fox':fox,'target':target_result,'mcp':mcp,'model_invoked':False,'database_writes':False,
         'application_generated':False,'import_performed':False,'human_acceptance_recorded':False,'services_changed':False,
