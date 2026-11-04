@@ -43,7 +43,9 @@ QA_FILES = (
 MAX_FILE = 8_000_000
 MAX_TOTAL = 80_000_000
 QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conversion.py',
-                     'native_qa_plan.py','project_qa_plan.py')
+                     'native_qa_plan.py','project_qa_plan.py','native_verification.py',
+                     'native_verification_policy.py','native_pipeline.py','opaf.py',
+                     'project_verification.py')
 
 
 class BuildError(RuntimeError):
@@ -206,9 +208,10 @@ RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.
 USER root
 RUN python3.11 -I -B -c "import pathlib,shutil; p=pathlib.Path('/opt/forms2apex/converter/forms2apex'); assert p.is_dir() and not p.is_symlink() and p.resolve()==p; shutil.rmtree(p)"
 COPY --chown=10001:10001 converter /opt/forms2apex/converter
+# fox-qa-contract-closure-v2
 COPY --chown=10001:10001 qa-contract /opt/forms2apex/converter/fox
 USER 10001
-RUN python3.11 -B -c "import importlib.metadata as m; import forms2apex.project_workflow,fox_source_contract.project_conversion,defusedxml.ElementTree; from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile; assert {{n:m.version(n) for n in ('oci','fastmcp','defusedxml')}}=={{'oci':'2.188.0','fastmcp':'3.4.4','defusedxml':'0.7.1'}}"
+RUN python3.11 -B -c "import importlib.metadata as m; import forms2apex.project_workflow,fox_source_contract.project_conversion,defusedxml.ElementTree; from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile; from fox.native_verification import ORDS; from fox.native_verification_policy import BoundVerificationPolicy,validate_allocation_receipt; from fox.project_verification import _validate_clean; assert {{n:m.version(n) for n in ('oci','fastmcp','defusedxml')}}=={{'oci':'2.188.0','fastmcp':'3.4.4','defusedxml':'0.7.1'}}"
 """
     return {"fox": fox.encode(), "converter": converter.encode()}
 

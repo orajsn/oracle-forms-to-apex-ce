@@ -221,7 +221,7 @@ def test_existing_build_intent_never_replayed(monkeypatch):
         r.build("a" * 64, "fox", apply=True)
 
 
-def test_converter_context_contains_exact_six_file_pure_qa_closure(tmp_path):
+def test_converter_context_contains_exact_handoff_dependency_closure(tmp_path):
     output,result=prepared(tmp_path)
     files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
     assert p.QA_CONTRACT_FILES==r.QA_CONTRACT_FILES
@@ -254,6 +254,9 @@ def test_actual_contract_imports_without_frontend_package_or_development_path(tm
     code="""import pathlib,sys
 sys.path.insert(0,sys.argv[1])
 from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile,ProjectQaPlanError
+from fox.native_verification import ORDS
+from fox.native_verification_policy import BoundVerificationPolicy,validate_allocation_receipt
+from fox.project_verification import _validate_clean
 import fox.project_qa_plan as q
 assert pathlib.Path(q.__file__).resolve()==pathlib.Path(sys.argv[1])/'fox/project_qa_plan.py'
 assert 'fox.app' not in sys.modules and 'fastapi' not in sys.modules
@@ -265,6 +268,58 @@ print('PURE_QA_CLOSURE_IMPORTED_NO_FRONTEND')
     result=subprocess.run([sys.executable,'-I','-B','-c',code,str(tmp_path)],cwd=tmp_path,capture_output=True,timeout=20)
     assert result.returncode==0,result.stderr.decode()
     assert result.stdout.strip()==b'PURE_QA_CLOSURE_IMPORTED_NO_FRONTEND'
+
+
+@pytest.mark.parametrize('legacy',[False,True])
+def test_exact_operator_handoff_contract_imports_with_only_converter_closure(tmp_path,legacy):
+    # Mirror HANDOFF_READER's synthetic qa namespace, not the developer checkout.
+    # No handoff data, credentials, database or remote execution is involved.
+    folder=tmp_path/'fox';folder.mkdir()
+    for name in (r.LEGACY_QA_CONTRACT_FILES if legacy else p.QA_CONTRACT_FILES):
+        (folder/name).write_bytes((HERE.parent/'fox/fox'/name).read_bytes())
+    operator=tmp_path/'operator';operator.mkdir()
+    for name in ('contracts.py','project_contracts.py','project_qa_contracts.py'):
+        (operator/name).write_bytes((HERE.parent/'qa/operator'/name).read_bytes())
+    code="""import pathlib,sys,types
+sys.path[:0]=[sys.argv[1],sys.argv[2]]
+for name in ('qa','qa.operator'):
+ m=types.ModuleType(name);m.__path__=[];sys.modules[name]=m
+for filename in ('contracts.py','project_contracts.py','project_qa_contracts.py'):
+ name='qa.operator.'+filename[:-3];m=types.ModuleType(name);m.__package__='qa.operator';sys.modules[name]=m
+ path=pathlib.Path(sys.argv[1])/'operator'/filename
+ exec(compile(path.read_bytes(),filename,'exec'),m.__dict__)
+assert callable(sys.modules['qa.operator.project_qa_contracts'].prepare_inputs)
+assert 'fox.app' not in sys.modules and 'fastapi' not in sys.modules
+for name in ('fox.native_verification','fox.project_verification'):
+ assert pathlib.Path(sys.modules[name].__file__).parent==pathlib.Path(sys.argv[1])/'fox'
+print('EXACT_PROJECT_HANDOFF_IMPORTS_NO_FRONTEND')
+"""
+    result=subprocess.run([sys.executable,'-I','-B','-c',code,str(tmp_path),str(HERE.parent/'converter')],
+                          cwd=tmp_path,capture_output=True,timeout=20)
+    if legacy:
+        assert result.returncode!=0
+        assert b"No module named 'fox.native_verification'" in result.stderr
+        return
+    assert result.returncode==0,result.stderr.decode()
+    assert result.stdout.strip()==b'EXACT_PROJECT_HANDOFF_IMPORTS_NO_FRONTEND'
+
+
+def test_retained_six_module_archive_remains_readable_not_upgraded(tmp_path):
+    output,result=prepared(tmp_path)
+    files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
+    recipe='bundle/deployment/Containerfile.project-converter'
+    files[recipe]=files[recipe].replace(b'# fox-qa-contract-closure-v2\n',b'')
+    files['build/converter/Containerfile']=files[recipe]
+    for name in set(p.QA_CONTRACT_FILES)-set(r.LEGACY_QA_CONTRACT_FILES):
+        del files['build/converter/qa-contract/'+name]
+    inventory=json.loads(files['source-inventory.json'])
+    inventory['files']['deployment/Containerfile.project-converter']=r.digest(files[recipe])
+    files['source-inventory.json']=r.canonical(inventory)
+    manifest=json.loads(files['manifest.json'])
+    manifest['source_bundle_sha256']=r.digest(files['source-inventory.json'])
+    files['manifest.json']=r.canonical(manifest)
+    checked,_=r.validate_files(reseal(files))
+    assert not any('qa-contract/native_verification.py' in name for name in checked)
 
 
 def test_retained_original_archive_still_validates_without_new_projection():
