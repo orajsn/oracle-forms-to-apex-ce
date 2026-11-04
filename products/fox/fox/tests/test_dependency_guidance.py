@@ -147,6 +147,25 @@ def test_schema_qualified_package_call_is_one_dependency_not_two_names():
     assert dep['target'] == 'APP.ORDER_API' and dep['routine'] == 'APPROVE_ORDER'
 
 
+@pytest.mark.parametrize('header', ['PACKAGE BODY', 'PACKAGE   BODY', 'PACKAGE\nBODY'])
+def test_valid_package_header_whitespace_is_not_a_missing_file(header):
+    supplied = src('order_api.pkb', body()['text'].replace('PACKAGE BODY', header))
+    result = assess([form(), ddl(), spec(), supplied])
+    dep = package(result['forms'][0])
+    assert dep['status'] == 'SOURCE_PRESENT' and dep['routine_check'] == 'DECLARATIONS_FOUND'
+    assert dep['missing_parts'] == []
+
+
+def test_supplied_package_with_a_builtin_name_is_not_silently_ignored():
+    supplied = [src('ftree.pks', 'CREATE PACKAGE FTREE AS PROCEDURE FIND_TREE_NODE; END;'),
+                src('ftree.pkb', 'CREATE PACKAGE BODY FTREE AS PROCEDURE FIND_TREE_NODE IS BEGIN NULL; END; END;')]
+    result = inventory([form('FTREE.FIND_TREE_NODE();'), *supplied])
+    dep = package(result)
+    assert dep['target'] == 'FTREE' and dep['status'] == 'SOURCE_PRESENT'
+    assert dep['routine_check'] == 'DECLARATIONS_FOUND'
+    assert not any(item['target'] == 'FTREE.FIND_TREE_NODE' for item in result['issues'])
+
+
 @pytest.mark.parametrize('member', ['FIND_TREE_NODE', 'ADD_TREE_NODE', 'UNKNOWN_FUTURE_MEMBER'])
 def test_oracle_ftree_is_not_a_fictitious_custom_package_upload(member):
     result = inventory([form('FTREE.' + member + '();')])

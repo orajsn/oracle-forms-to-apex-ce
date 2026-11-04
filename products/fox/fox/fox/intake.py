@@ -263,7 +263,7 @@ def _package_routine_index(files):
             masked = _code_masks(text)[1]
             headers = list(CREATE_DEFINITION.finditer(masked))
             for index, header in enumerate(headers):
-                kind = header[1].lower().replace(' ', '_')
+                kind = re.sub(r'\s+', '_', header[1].lower())
                 if kind not in {'package', 'package_body'}: continue
                 target = re.sub(r'\s+', '', header[2]).upper()
                 end = headers[index + 1].start() if index + 1 < len(headers) else len(masked)
@@ -343,7 +343,7 @@ def inventory(files: list[dict]) -> dict:
                 forms_source_files.append(name)
         else:
             for m in CREATE_DEFINITION.finditer(_code_masks(text)[1]):
-                define(m[2],m[1].lower().replace(' ','_'))
+                define(m[2],re.sub(r'\s+', '_', m[1].lower()))
             if name.lower().endswith('.pld'): define(PurePosixPath(name).stem,'library')
         dml_kind, dml_locations = _dml_classification(text, root)
         if dml_kind != 'NONE':
@@ -366,7 +366,7 @@ def inventory(files: list[dict]) -> dict:
             call_candidates = CREATE_DEFINITION.sub(lambda m: ' ' * len(m[0]), without_strings)
             for m in re.finditer(r'(?i)(?<![\w$#.:])((?:[A-Z][\w$#]*\s*\.\s*)?[A-Z][\w$#]*)\s*\.\s*([A-Z][\w$#]*)\s*\(',call_candidates):
                 target = re.sub(r'\s+', '', m[1]).upper()
-                if target == 'FTREE':
+                if target == 'FTREE' and not any((target, kind) in routine_index for kind in ('package', 'package_body')):
                     known = m[2].upper() in FORMS_FTREE_ROUTINES
                     issues.append({'source':name,'target':'FTREE.'+m[2].upper(),'kind':'remediation',
                         'title':'Oracle Forms built-in needs APEX mapping' if known else 'Oracle Forms built-in member needs confirmation',

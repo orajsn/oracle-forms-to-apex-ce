@@ -54,6 +54,9 @@ Thirteen FTREE routine names were verified against the installed Oracle Forms
 specification/body for these calls. An unknown FTREE member gets an explicit
 version/member-confirmation action instead of a fictitious file request.
 Tree behavior remains unconverted remediation, not an automatic APEX mapping.
+Explicitly supplied package source named FTREE is not silently ignored as a
+built-in. Valid whitespace/newlines in PACKAGE BODY headers are normalized for
+source classification, not misreported as a missing body.
 
 The catalog is deliberately limited, not a claim to classify every Oracle
 built-in or customer package. The installed help remains an Oracle prerequisite;

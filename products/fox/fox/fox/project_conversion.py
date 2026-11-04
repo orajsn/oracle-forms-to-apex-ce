@@ -341,7 +341,7 @@ def _definitions(files, roots):
                                  attrs["name"].upper())].add(name)
         else:
             for match in intake.CREATE_DEFINITION.finditer(intake._code_masks(source["text"])[1]):
-                kind = match[1].lower().replace(" ", "_")
+                kind = re.sub(r'\s+', '_', match[1].lower())
                 target = re.sub(r"\s+", "", match[2]).upper()
                 definitions[(kind, target)].add(name)
             if name.lower().endswith(".pld"):
