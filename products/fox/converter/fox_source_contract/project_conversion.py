@@ -33,7 +33,12 @@ _SHA = re.compile(r"[a-f0-9]{64}\Z")
 _PROJECT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
 _APEX_SUBSTITUTION = re.compile(r"&[A-Za-z0-9_$#]+\.")
 _NAMESPACES = {"", "http://xmlns.oracle.com/Forms"}
-_DISPLAY_ONLY_OBJECTS = {"formmodule", "block", "item", "formitem", "canvas", "window"}
+# Oracle Forms2XML emits Coordinate even for a minimal real binary. Its screen
+# units/font metrics are presentation metadata, not a missing business mapping.
+# Preserve the original bytes in the source binding; native APEX recomposes the
+# layout rather than reproducing desktop measurements. This does not exempt
+# nested objects, code attributes or foreign namespaces from the normal audits.
+_DISPLAY_ONLY_OBJECTS = {"formmodule", "block", "item", "formitem", "canvas", "window", "coordinate"}
 _HUMAN_CODES = {"BUSINESS_CODE_REVIEW_REQUIRED", "AMBIGUOUS_ITEM_PROMPT",
                 "FORM_SELECTION_REQUIRED", "UNNAMED_FORM_MODULE", "LABEL_REVIEW_REQUIRED"}
 _MISSING_CODES = {"DDL_REQUIRED", "EXPLICIT_KEY_REQUIRED", "ITEM_COLUMN_MISSING",
@@ -111,11 +116,17 @@ def _xml_property_issues(root, source):
                     "Multiple XML properties normalize to the same name. No last-value selection is allowed.",
                     source, location + ".@" + local, owner="SOURCE_OWNER",
                     action="Resolve the conflicting property definitions in the authoritative source, then re-export.")))
+        if _tag(element) == "coordinate" and (len(element) or (element.text or "").strip()):
+            issues.append((element, _finding("UNMAPPED_COORDINATE_CONTENT", "UNSUPPORTED",
+                "Coordinate screen measurements are supported, but nested objects or text are not layout properties and cannot be discarded.",
+                source, location, owner="SOURCE_OWNER",
+                action="Re-export the authoritative Forms XML or provide an explicit mapping for the additional content.")))
     return issues
 
 
-def _finding(code, category, message, source=None, evidence=None, *, owner=None, action=None):
-    return {"code": code, "category": category, "message": message,
+def _finding(code, category, message, source=None, evidence=None, *, owner=None, action=None,
+             location=None, impact=None):
+    result = {"code": code, "category": category, "message": message,
             "source": source, "evidence": evidence,
             "owner": owner or {"NEEDS_HUMAN": "BUSINESS_OWNER", "MISSING_INPUT": "SOURCE_OWNER",
                                "UNSUPPORTED": "OPERATOR"}[category],
@@ -124,6 +135,9 @@ def _finding(code, category, message, source=None, evidence=None, *, owner=None,
                 "MISSING_INPUT": "Supply the authoritative source or definition, then reassess this source version.",
                 "UNSUPPORTED": "Ask the technical owner to implement and validate this mapping; no behavior will be silently discarded.",
             }[category]}
+    if location: result['source_location'] = deepcopy(location)
+    if impact: result['impact'] = impact
+    return result
 
 
 def _native_finding(value, *, requiredness_conflicts=()):
@@ -326,8 +340,8 @@ def _definitions(files, roots):
                     definitions[("package" if attrs["programunittype"] == "3" else "package_body",
                                  attrs["name"].upper())].add(name)
         else:
-            for match in intake.CREATE_DEFINITION.finditer(source["text"]):
-                kind = match[1].lower().replace(" ", "_")
+            for match in intake.CREATE_DEFINITION.finditer(intake._code_masks(source["text"])[1]):
+                kind = re.sub(r'\s+', '_', match[1].lower())
                 target = re.sub(r"\s+", "", match[2]).upper()
                 definitions[(kind, target)].add(name)
             if name.lower().endswith(".pld"):
@@ -335,7 +349,7 @@ def _definitions(files, roots):
     return definitions
 
 
-def _dependencies(fragment, source_name, definitions, module):
+def _dependencies(fragment, source_name, definitions, module, files):
     checked = intake.checked_source(source_name, fragment.encode("utf-8"))
     result = intake.inventory([checked])["dependencies"]
     scoped = defaultdict(set, {key: set(value) for key, value in definitions.items()})
@@ -357,8 +371,16 @@ def _dependencies(fragment, source_name, definitions, module):
         item["action"] = ("Review supplied source for behavioral coverage." if complete else
                           "Upload both package specification and body." if item["kind"] == "package" else
                           "Upload the referenced " + item["kind"] + " source.")
-        if complete and item["kind"] == "package" and item["target"] in local_packages:
-            item["action"] = "Review the supplied module-local program; it is not proof of a shared database package."
+        if item['kind'] == 'package':
+            # Use only this module's local code and its linked providers. A
+            # sibling module cannot satisfy a local package's declarations.
+            candidates = [{'name': source_name, 'text': fragment}] + [
+                source for source in files if source['name'] in providers and source['name'] != source_name]
+            routine_index = intake._package_routine_index(candidates)
+            present = {kind for kind in kinds if scoped.get((kind, item['target']))}
+            intake._package_guidance(item, present, routine_index)
+            if complete and item['target'] in local_packages:
+                item['action'] += ' This supplied program is module-local, not proof of a shared database package.'
     return result, providers
 
 
@@ -579,16 +601,27 @@ def assess_project_conversion(files: list[dict], *, project_id: str, project_nam
         fragment_node = deepcopy(module)
         fragment_node.tail = None  # The original tail was audited above.
         fragment = XML.tostring(fragment_node, encoding="unicode")
-        dependencies, providers = _dependencies(fragment, name, definitions, module)
+        dependencies, providers = _dependencies(fragment, name, definitions, module, checked)
         form["dependencies"] = dependencies
         for provider in providers:
             if module_id not in source_views[provider]["module_ids"]:
                 source_views[provider]["module_ids"].append(module_id)
         for dependency in dependencies:
             if dependency["status"] == "MISSING":
+                impact = ("FOX cannot reproduce the called action from incomplete package source. "
+                          "Adding source resolves availability only; the behavior still needs a supported conversion mapping."
+                          if dependency['kind'] == 'package' else None)
                 form["findings"].append(_finding("MISSING_DEPENDENCY", "MISSING_INPUT",
                     "A referenced " + dependency["kind"] + " source is missing: " + dependency["target"] + ".", name,
-                    dependency["evidence"], action=dependency["action"]))
+                    dependency["evidence"], action=dependency["action"],
+                    location=dependency.get('source_location'), impact=impact))
+            elif dependency.get('routine_check') == 'NOT_CONFIRMED':
+                form['findings'].append(_finding('ROUTINE_DECLARATION_UNCONFIRMED', 'UNSUPPORTED',
+                    'The required routine is not confirmed in both supplied package parts: ' +
+                    dependency['target'] + '.' + dependency['routine'] + '.', name,
+                    dependency['evidence'], owner='SOURCE_OWNER', action=dependency['action'],
+                    location=dependency.get('source_location'),
+                    impact='Package files are present, but FOX has not established the required callable routine.'))
         blocks = [element for element in module.iter() if _tag(element) == "block"]
         matches = []
         table_ambiguous = len(blocks) != 1

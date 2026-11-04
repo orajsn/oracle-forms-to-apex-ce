@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 17732,
+      "bytes": 25261,
       "path": "intake.py",
-      "sha256": "79b31c157d9946342fb8ee1850a258b4aa216f7095bacbb4f16b4f3bd6ecee66",
+      "sha256": "5f40cd2e2fdf3da4efba35ae6a145f86b45e5dee60508dc454308abc3b9bf994",
       "source_path": "fox/fox/intake.py"
     },
     {
@@ -13,9 +13,9 @@
       "source_path": "fox/fox/native_source.py"
     },
     {
-      "bytes": 46454,
+      "bytes": 49143,
       "path": "project_conversion.py",
-      "sha256": "f699250058866d6af7315cd19a1e5313cc2a3fb319eb6f547210d2ed75ff3ff1",
+      "sha256": "c3c4e1b1e651a472da35defff474c68e14eff1b3c045507cff1a2955226b9491",
       "source_path": "fox/fox/project_conversion.py"
     }
   ],

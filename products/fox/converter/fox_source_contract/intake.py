@@ -173,17 +173,135 @@ def checked_source(name: str, raw: bytes) -> dict:
         raise ValueError(_DML_REJECTION)
     return {'name':name,'sha256':hashlib.sha256(raw).hexdigest(),'bytes':len(raw),'text':text}
 
+# Verified against Oracle Forms 14.1.2 installed f1_help.jar topic titles.
+# Recognition avoids requesting fictitious source; it does not port tree UI.
+FORMS_FTREE_ROUTINES = frozenset({
+    'ADD_TREE_DATA', 'ADD_TREE_NODE', 'DELETE_TREE_NODE', 'FIND_TREE_NODE',
+    'GET_TREE_NODE_PARENT', 'GET_TREE_NODE_PROPERTY', 'GET_TREE_PROPERTY',
+    'GET_TREE_SELECTION', 'POPULATE_GROUP_FROM_TREE', 'POPULATE_TREE',
+    'SET_TREE_NODE_PROPERTY', 'SET_TREE_PROPERTY', 'SET_TREE_SELECTION',
+})
+
+
+def _code_masks(text):
+    """Same-length comment/string masks, not a PL/SQL compiler or resolver."""
+    comments, code = list(text), list(text)
+    size, i = len(text), 0
+    def blank(target, start, end):
+        target[start:end] = [c if c in '\r\n' else ' ' for c in text[start:end]]
+    while i < size:
+        start = i
+        if text.startswith('--', i):
+            end = text.find('\n', i + 2)
+            i = size if end < 0 else end
+            blank(comments, start, i); blank(code, start, i)
+        elif text.startswith('/*', i):
+            end = text.find('*/', i + 2)
+            i = size if end < 0 else end + 2
+            blank(comments, start, i); blank(code, start, i)
+        elif (text[i] in 'qQ' and i + 2 < size and text[i + 1] == "'"
+              and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] in '_$#'))):
+            delimiter = {'[': ']', '{': '}', '(': ')', '<': '>'}.get(text[i + 2], text[i + 2])
+            end = text.find(delimiter + "'", i + 3)
+            i = size if end < 0 else end + 2
+            blank(code, start, i)
+        elif text[i] in "'\"":
+            quote = text[i]; i += 1
+            while i < size:
+                if text[i] == quote:
+                    i += 1
+                    if i < size and text[i] == quote:
+                        i += 1; continue
+                    break
+                i += 1
+            blank(code, start, i)
+        else:
+            i += 1
+    return ''.join(comments), ''.join(code)
+
+
+def _xml_contexts(root):
+    """Walk original XML iteratively; retain object ancestry, never infer it."""
+    pending = [(root, {})]
+    fields = {'formmodule': 'form', 'menumodule': 'form', 'block': 'block',
+              'item': 'item', 'formitem': 'item', 'trigger': 'trigger', 'programunit': 'program_unit'}
+    while pending:
+        element, inherited = pending.pop()
+        attrs = {key.lower(): value for key, value in element.attrib.items()}
+        tag = element.tag.rsplit('}', 1)[-1].lower()
+        context = dict(inherited)
+        if tag in fields and attrs.get('name'):
+            value = attrs['name'].strip()
+            context[fields[tag]] = value[:159] + '…' if len(value) > 160 else value
+        if tag in {'item', 'formitem'} and attrs.get('itemtype', '').replace(' ', '').lower() == 'pushbutton':
+            value = attrs.get('label') or attrs.get('prompt') or attrs.get('name', '')
+            if value.strip(): context['button'] = value[:159] + '…' if len(value) > 160 else value
+        yield element, context
+        pending.extend((child, context) for child in reversed(list(element)))
+
+
+def _routine_declarations(text):
+    masked = _code_masks(text)[1]
+    return {m[1].upper() for m in re.finditer(r'(?i)\b(?:PROCEDURE|FUNCTION)\s+([A-Z][\w$#]*)\b', masked)}
+
+
+def _package_routine_index(files):
+    """Declaration candidates only; no signature, compilation or parity claim."""
+    result = {}
+    for source in files:
+        text = source['text']
+        if source['name'].lower().endswith('.xml'):
+            root = ET.fromstring(text)
+            for element in root.iter():
+                attrs = {key.lower(): value for key, value in element.attrib.items()}
+                if element.tag.rsplit('}', 1)[-1].lower() != 'programunit': continue
+                kind = {'3': 'package', '4': 'package_body'}.get(attrs.get('programunittype'))
+                if kind and attrs.get('name'):
+                    code = attrs.get('programunittext', '') + '\n' + ''.join(element.itertext())
+                    result.setdefault((attrs['name'].upper(), kind), set()).update(_routine_declarations(code))
+        else:
+            masked = _code_masks(text)[1]
+            headers = list(CREATE_DEFINITION.finditer(masked))
+            for index, header in enumerate(headers):
+                kind = re.sub(r'\s+', '_', header[1].lower())
+                if kind not in {'package', 'package_body'}: continue
+                target = re.sub(r'\s+', '', header[2]).upper()
+                end = headers[index + 1].start() if index + 1 < len(headers) else len(masked)
+                result.setdefault((target, kind), set()).update(_routine_declarations(masked[header.end():end]))
+    return result
+
+
+def _package_guidance(item, present, routines):
+    """Refresh facts after project-local source resolution, never grant execution."""
+    missing = [kind for kind in ('package', 'package_body') if kind not in present]
+    item['missing_parts'] = missing
+    member = item.get('routine')
+    confirmed = bool(member) and all(member in routines.get((item['target'], kind), set())
+                                    for kind in ('package', 'package_body'))
+    item['routine_check'] = 'MISSING_SOURCE' if missing else 'DECLARATIONS_FOUND' if confirmed else 'NOT_CONFIRMED'
+    if missing:
+        needed = ' and '.join({'package': 'package specification (.pks or readable SQL)',
+                               'package_body': 'package body (.pkb or readable SQL)'}[kind] for kind in missing)
+        item['action'] = 'Provide the ' + needed + ' for ' + item['target'] + ', then reassess this project.'
+    elif not confirmed:
+        item['action'] = ('The package sources are present, but declarations for ' + item['target'] + '.' +
+                          (member or 'the required routine') + ' are not confirmed in both parts. Ask the source owner to check the exact routine; do not assume it is implemented.')
+    else:
+        item['action'] = 'Routine declarations were found in both package parts. Behavior still needs a supported mapping and technical verification.'
+
+
 def inventory(files: list[dict]) -> dict:
     definitions: dict[str,set] = {}
     refs: list[dict] = []
     modules, issues, forms_source_files, dml_sources = [], [], [], []
+    routine_index = _package_routine_index(files)
     builtin = {'SYSTEM','GLOBAL','PARAMETER','DBMS_OUTPUT','SQL','TEXT_IO','WEB','OLE2','UTL_HTTP','STANDARD'}
     def define(name,kind):
         definitions.setdefault(re.sub(r'\s+', '', name).upper(),set()).add(kind)
     for f in files:
         text,name = f['text'],f['name']
         objects,blocks = {},[]
-        code_parts = [(text,1)]
+        code_parts = [(text,1,{})]
         root = None
         if name.lower().endswith('.xml'):
             root=ET.fromstring(text)
@@ -191,7 +309,7 @@ def inventory(files: list[dict]) -> dict:
             oracle_envelope = root_tag in {'module', 'formmodule', 'menumodule', 'objectlibrary'}
             recognized_forms = False
             code_parts=[]
-            for e in root.iter():
+            for e, context in _xml_contexts(root):
                 tag=e.tag.rsplit('}',1)[-1]
                 objects[tag]=objects.get(tag,0)+1
                 attrs={k.lower():v for k,v in e.attrib.items()}
@@ -219,13 +337,13 @@ def inventory(files: list[dict]) -> dict:
                         if kind: define(attrs['name'],kind)
                 for key,value in attrs.items():
                     if key in {'triggertext','programunittext','plsqlcode','code','querytext'}:
-                        code_parts.append((value,None))
-                if e.text and e.text.strip(): code_parts.append((e.text,None))
+                        code_parts.append((value,None,{**context, 'code_property': key}))
+                if e.text and e.text.strip(): code_parts.append((e.text,None,context))
             if recognized_forms:
                 forms_source_files.append(name)
         else:
-            for m in CREATE_DEFINITION.finditer(text):
-                define(m[2],m[1].lower().replace(' ','_'))
+            for m in CREATE_DEFINITION.finditer(_code_masks(text)[1]):
+                define(m[2],re.sub(r'\s+', '_', m[1].lower()))
             if name.lower().endswith('.pld'): define(PurePosixPath(name).stem,'library')
         dml_kind, dml_locations = _dml_classification(text, root)
         if dml_kind != 'NONE':
@@ -235,26 +353,35 @@ def inventory(files: list[dict]) -> dict:
                 'status':'UNCONVERTED_REVIEW_REQUIRED','action':'Review transaction semantics and supply a supported, approved mapping. Model submission and conversion remain blocked.',
                 'classification':dml_kind,'evidence':dml_locations,
                 'scope_note':'Recognized structure is classification evidence, not proof of Oracle provenance or complete customer redaction.'})
-        for code,offset in code_parts:
+        for code,offset,context in code_parts:
             # Retain line numbers where the source provides them; XML attributes have no exact line guarantee.
-            clean=re.sub(r'/\*.*?\*/|--[^\n]*',lambda m:'\n'*m[0].count('\n'),code,flags=re.S)
+            clean, without_strings = _code_masks(code)
             for m in re.finditer(r'(?i)\b(CALL_FORM|OPEN_FORM|NEW_FORM)\s*\(\s*\x27([\w$#]+)\x27',clean):
-                refs.append({'source':name,'line':None if offset is None else clean[:m.start()].count('\n')+offset,'target':m[2].upper(),'kind':'module','evidence':m[1]})
-            without_strings=re.sub(r"'(?:''|[^'])*'", "''", clean)
+                if without_strings[m.start():m.start()+len(m[1])].upper() != m[1].upper(): continue
+                refs.append({'source':name,'line':None if offset is None else clean[:m.start()].count('\n')+offset,'target':m[2].upper(),'kind':'module','evidence':m[1],
+                             **({'source_location': {**context, 'code_line': clean[:m.start()].count('\n') + 1}} if context else {})})
             # A qualified CREATE TABLE name followed by '(' is a declaration,
             # not a package call. Blank only declaration headers so code in a
             # package body remains available to the candidate scanner.
             call_candidates = CREATE_DEFINITION.sub(lambda m: ' ' * len(m[0]), without_strings)
-            for m in re.finditer(r'(?i)\b([A-Z][\w$#]*)\.([A-Z][\w$#]*)\s*\(',call_candidates):
-                if m[1].upper() not in builtin:
-                    refs.append({'source':name,'line':None if offset is None else clean[:m.start()].count('\n')+offset,'target':m[1].upper(),'kind':'package','evidence':m[1]+'.'+m[2]+'(...)'})
+            for m in re.finditer(r'(?i)(?<![\w$#.:])((?:[A-Z][\w$#]*\s*\.\s*)?[A-Z][\w$#]*)\s*\.\s*([A-Z][\w$#]*)\s*\(',call_candidates):
+                target = re.sub(r'\s+', '', m[1]).upper()
+                if target == 'FTREE' and not any((target, kind) in routine_index for kind in ('package', 'package_body')):
+                    known = m[2].upper() in FORMS_FTREE_ROUTINES
+                    issues.append({'source':name,'target':'FTREE.'+m[2].upper(),'kind':'remediation',
+                        'title':'Oracle Forms built-in needs APEX mapping' if known else 'Oracle Forms built-in member needs confirmation',
+                        'status':'UNCONVERTED_REVIEW_REQUIRED',
+                        'action':'Do not upload a custom FTREE package. Review the tree behavior and its supported APEX mapping.' if known else 'Ask the technical owner to confirm this FTREE member against the source Forms version. No custom package file is being requested.'})
+                elif target not in builtin:
+                    refs.append({'source':name,'line':None if offset is None else clean[:m.start()].count('\n')+offset,'target':target,'kind':'package','evidence':target+'.'+m[2]+'(...)',
+                                 'routine':m[2].upper(), **({'source_location': {**context, 'code_line': clean[:m.start()].count('\n') + 1}} if context else {})})
             for token,(title,action) in UNSUPPORTED.items():
                 if re.search(r'\b'+re.escape(token)+r'\b',without_strings,re.I):
                     issues.append({'source':name,'target':token,'kind':'remediation','title':title,'status':'REVIEW','action':action})
         modules.append({'file':name,'sha256':f['sha256'],'bytes':f['bytes'],'objects':objects,'blocks':blocks})
     seen=set(); dependencies=[]
     for r in refs:
-        key=(r['source'],r['target'],r['kind'])
+        key=(r['source'],r['target'],r['kind'],r.get('routine'),tuple(sorted(r.get('source_location',{}).items())))
         if key in seen: continue
         seen.add(key)
         present=definitions.get(r['target'],set())
@@ -262,6 +389,7 @@ def inventory(files: list[dict]) -> dict:
         complete=required.issubset(present)
         r['status']='SOURCE_PRESENT' if complete else 'MISSING'
         r['action']='Review supplied source for behavioral coverage.' if complete else ('Upload both package specification and body.' if r['kind']=='package' else 'Upload the referenced '+r['kind']+' source.')
+        if r['kind'] == 'package': _package_guidance(r, present, routine_index)
         dependencies.append(r)
     manifest='\n'.join(f['name']+':'+f['sha256'] for f in sorted(files,key=lambda f:f['name']))
     missing_count = sum(r['status']=='MISSING' for r in dependencies)
