@@ -348,6 +348,7 @@ class HostCutover:
              and sha(Path(__file__).read_bytes()) == packet['helper_sha256'], 'REVIEWED_CUTOVER_REQUIRED')
         self.p = packet; self.A = A = _candidate_module(packet['plan'])
         self.plan = A.plan_document(canonical(packet['plan']),packet['plan_sha256'])
+        need(self.plan['schema_version'] == 1, 'LEGACY_G_CUTOVER_CANNOT_UPGRADE_CURRENT_PAIR')
         self.provider, self.release = A.load_bindings(self.plan)
         self.R = self.plan['release']['sha256'];self.stage = A.PARENT/self.R
         A.private_dir(self.stage)

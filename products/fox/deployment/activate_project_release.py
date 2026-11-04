@@ -23,6 +23,7 @@ import urllib.request
 sys.dont_write_bytecode = True
 
 SCOPE = 'fox-paired-project-activation-plan-v1'
+UPGRADE_SCOPE = 'fox-paired-project-upgrade-plan-v1'
 PARENT = Path('/home/opc/.local/share/fox-project-activation')
 G_RELEASE = 'acc3bf901d6f221cc5b887afe88a5cd53b9b4a8153e820b1f078b10d679004ba'
 TARGET_HASH = '7170d60927b7e5b7aed5d56174f97efbeff3052be247b244911deff768701ed3'
@@ -159,19 +160,28 @@ def inspect_container(name):
     return values[0]
 
 
-def baseline():
+def baseline(current=None):
     host_identity()
     for path, expected in UNITS.values():
         need(sha(read(Path(path))) == expected, 'RETAINED_UNIT_CHANGED')
+    if current is not None:
+        need(type(current) is CurrentBaseline, 'CURRENT_INSTALLATION_AUTHORITY_REQUIRED')
+        current.recheck()
+    pins = BASE if current is None else {name:(pin['id'],pin['image'][7:]) for name,pin in current.infrastructure.items()}
     result = {}
-    for name, (identity, image) in BASE.items():
+    for name, (identity, image) in pins.items():
         value = inspect_container(name)
         need(value['Id'] == identity and value['Image'].split(':')[-1] == image
              and value['State']['Running'] is True and value['HostConfig']['AutoRemove'] is False,
-             'G_BASELINE_CHANGED')
+             'G_BASELINE_CHANGED' if current is None else 'CURRENT_BASELINE_CHANGED')
+        if current is not None:
+            need(value.get('Name','').lstrip('/') == name and type(value['State'].get('Pid')) is int
+                 and value['State']['Pid'] > 0, 'CURRENT_RUNTIME_PROCESS_IDENTITY_CHANGED')
         result[name] = value
-    need(environment(result['fox']).get('FOX_VERIFIER_RELEASE_SHA256') == G_RELEASE
-         and environment(result['fox']).get('FOX_CONVERSION_PROFILE') == 'native-table-form-v1', 'G_PROFILE_CHANGED')
+    need(environment(result['fox']).get('FOX_VERIFIER_RELEASE_SHA256') == (G_RELEASE if current is None else current.release_sha256)
+         and environment(result['fox']).get('FOX_CONVERSION_PROFILE') ==
+         ('native-table-form-v1' if current is None else 'native-project-v1'),
+         'G_PROFILE_CHANGED' if current is None else 'CURRENT_PROFILE_CHANGED')
     return result
 
 
@@ -209,27 +219,128 @@ def validate_bound_sources(items):
 def plan_document(raw, expected_sha256):
     need(type(raw) is bytes and SHA.fullmatch(expected_sha256 or '') and sha(raw) == expected_sha256, 'EXACT_PLAN_REQUIRED')
     value = parse(raw)
-    need(type(value) is dict and set(value) == {'schema_version', 'scope', 'source_bundle_sha256',
-         'bundle_root', 'provider', 'release', 'helper_sha256'} and type(value['schema_version']) is int and value['schema_version'] == 1
-         and value['scope'] == SCOPE and canonical(value) == raw, 'PLAN_FIELDS_INVALID')
+    need(type(value) is dict and type(value.get('schema_version')) is int
+         and value['schema_version'] in (1,2), 'PLAN_FIELDS_INVALID')
+    upgrade = value['schema_version'] == 2
+    need(set(value) == {'schema_version', 'scope', 'source_bundle_sha256',
+         'bundle_root', 'provider', 'release', 'helper_sha256'} | ({'current_installation'} if upgrade else set())
+         and value['scope'] == (UPGRADE_SCOPE if upgrade else SCOPE)
+         and canonical(value) == raw, 'PLAN_FIELDS_INVALID')
     need(SHA.fullmatch(value['source_bundle_sha256']) and SHA.fullmatch(value['helper_sha256']), 'PLAN_DIGEST_INVALID')
     root = absolute(value['bundle_root'])
     need(root.as_posix() == '/home/opc/.local/share/fox-project-builds/' + value['source_bundle_sha256'] + '/bundle',
          'EXACT_STAGED_SOURCE_ROOT_REQUIRED')
-    for name in ('provider', 'release'):
+    for name in ('provider', 'release', *(('current_installation',) if upgrade else ())):
         ref = value[name]
         need(type(ref) is dict and set(ref) == {'path', 'sha256'} and SHA.fullmatch(ref['sha256']), 'PLAN_REFERENCE_INVALID')
         path = absolute(ref['path'])
         need(path != root and root not in path.parents, 'CONFIGURATION_MUST_REMAIN_OUTSIDE_BUNDLE')
     need(value['provider']['path'] != value['release']['path'], 'CONFIGURATION_REFERENCES_COLLIDE')
+    if upgrade:
+        need(value['current_installation']['path'] not in (value['provider']['path'],value['release']['path']),
+             'CURRENT_INSTALLATION_REFERENCE_COLLIDES')
     return value
 
 
-def load_bindings(plan):
-    """Measure B before importing its pure validators; select no runtime here."""
-    root = absolute(plan['bundle_root'])
+class CurrentBaseline:
+    """Pinned existing I/C/R/D/source, never an implicit legacy fallback.
+
+    Construction and recheck are read-only. This authority permits preparing
+    STOPPED candidates only; it cannot close history or authorize a cutover.
+    """
+    def __init__(self, plan):
+        need(plan.get('schema_version') == 2, 'EXPLICIT_CURRENT_INSTALLATION_REQUIRED')
+        from qa.operator import hosted_service as service, runtime_provider as runtime
+        from qa.operator import product_queue_transport as bridge, retirement_remote as remote
+        self.reference = dict(plan['current_installation'])
+        self._reference_raw = canonical(self.reference)
+        self.raw = read(absolute(self.reference['path']),private=True)
+        self.document = service.installation_document(self.raw,expected_sha256=self.reference['sha256'])
+        self.root = absolute(self.document['layout']['release_root'])
+        self.references = {name:self.document[name] for name in ('provider','release','admission')}
+        self.references['inventory'] = self.document['layout']['inventory']
+        self.content = {}
+        for name, reference in self.references.items():
+            raw = read(absolute(reference['path']),private=True)
+            need(sha(raw) == reference['sha256'], 'CURRENT_INSTALLATION_REFERENCE_CHANGED')
+            self.content[name] = raw
+        self.configuration = runtime.configuration_document(self.content['provider'],
+            expected_sha256=self.references['provider']['sha256'])
+        self.manifest = bridge.validate_release(parse(self.content['release']))
+        self.release_sha256 = self.references['release']['sha256']
+        need(self.configuration['schema_version'] == 2 and self.manifest['schema_version'] == 3
+             and self.manifest['enabled'] is True
+             and self.manifest['hosted_runtime_configuration_sha256'] == self.references['provider']['sha256']
+             and canonical(self.manifest) == self.content['release']
+             and self.configuration['images'] == self.manifest['images']
+             and self.configuration['converter_root'] == str(self.root/'converter'),
+             'CURRENT_INSTALLATION_BINDING_CHANGED')
+        admission = parse(self.content['admission'])
+        self.infrastructure = remote._infrastructure(admission.get('infrastructure'),self.manifest['images'])
+        need(self.content['admission'] == canonical(remote.admission_configuration(self.release_sha256,
+             self.references['provider']['sha256'],self.infrastructure)), 'CURRENT_ADMISSION_CHANGED')
+        opaf = BASE['oracle-applied-ai-label']
+        need(self.infrastructure['oracle-applied-ai-label'] == {'id':opaf[0],'image':'sha256:'+opaf[1]},
+             'EXISTING_OPAF_IDENTITY_CHANGED')
+        self.profile_paths = {'fox':self.manifest['opaf_profile']['host_path'],
+            'converter':str(self.root/'deployment/target-profile.jsn-project-v2.json')}
+        need(self.profile_paths['fox'] == str(self.root/'deployment/project-opaf-profile-v2.json'),
+             'CURRENT_PROFILE_LAYOUT_CHANGED')
+        self.inventory = self.content['inventory']
+        self.provider = runtime.HostedProvider(self.content['provider'],self.references['provider']['sha256'])
+        self.recheck()
+
+    def recheck(self):
+        from qa.operator import hosted_service as service,runtime_provider as runtime
+        from qa.operator import product_queue_transport as bridge,retirement_remote as remote
+        need(canonical(self.reference) == self._reference_raw
+             and service.installation_document(self.raw,expected_sha256=self.reference['sha256']) == self.document
+             and self.root == absolute(self.document['layout']['release_root']), 'CURRENT_AUTHORITY_CHANGED')
+        expected_references = {name:self.document[name] for name in ('provider','release','admission')}
+        expected_references['inventory'] = self.document['layout']['inventory']
+        need(self.references == expected_references, 'CURRENT_AUTHORITY_CHANGED')
+        need(read(absolute(self.reference['path']),private=True) == self.raw,'CURRENT_INSTALLATION_CHANGED')
+        for name, reference in self.references.items():
+            need(read(absolute(reference['path']),private=True) == self.content[name],
+                 'CURRENT_INSTALLATION_REFERENCE_CHANGED')
+        need(self.configuration == runtime.configuration_document(self.content['provider'],
+                 expected_sha256=self.references['provider']['sha256'])
+             and self.manifest == bridge.validate_release(parse(self.content['release']))
+             and self.release_sha256 == self.references['release']['sha256']
+             and self.infrastructure == remote._infrastructure(parse(self.content['admission'])['infrastructure'],
+                 self.manifest['images']) and self.inventory == self.content['inventory']
+             and self.profile_paths == {'fox':self.manifest['opaf_profile']['host_path'],
+                 'converter':str(self.root/'deployment/target-profile.jsn-project-v2.json')}
+             and type(self.provider) is runtime.HostedProvider
+             and self.provider.raw == self.content['provider']
+             and self.provider.sha256 == self.references['provider']['sha256'], 'CURRENT_AUTHORITY_CHANGED')
+        service.verify_inventory(self.root,self.inventory)
+        files = parse(self.inventory)['files']
+        required = {**{'qa/operator/'+name:digest for name,digest in self.manifest['code'].items()},
+            **{'fox/fox/'+name:digest for name,digest in self.manifest['modules'].items()},
+            **{'converter/'+name:digest for name,digest in self.configuration['converter_sources'].items()},
+            'qa/operator/runtime_provider.py':self.configuration['provider_sha256']}
+        need(all(files.get(name) == digest for name,digest in required.items()),
+             'CURRENT_RELEASE_SOURCE_CLOSURE_CHANGED')
+        need(sha(read(absolute(self.profile_paths['fox']))) == self.manifest['native_profile_sha256'],
+             'CURRENT_OPAF_PROFILE_CHANGED')
+        need(parse(read(absolute(self.profile_paths['converter']))) == self.configuration['target_profile'],
+             'CURRENT_TARGET_PROFILE_CHANGED')
+
+    def scope(self):
+        self.recheck()
+        return self.provider.oci_scope(require_database_available=True)
+
+
+def current_baseline(plan):
+    return CurrentBaseline(plan) if plan['schema_version'] == 2 else None
+
+
+def source_namespace(bundle_root, bundle_sha256):
+    """Measure B before imports; shared by declaration and candidate preparation."""
+    root = absolute(str(bundle_root))
     inventory_raw = read(root.parent / 'source-inventory.json', private=True)
-    need(sha(inventory_raw) == plan['source_bundle_sha256'], 'SOURCE_INVENTORY_CHANGED')
+    need(sha(inventory_raw) == bundle_sha256, 'SOURCE_INVENTORY_CHANGED')
     inventory = parse(inventory_raw)
     need(inventory.get('scope') == 'fox-hosted-source-inventory-v1' and inventory.get('schema_version') == 1
          and type(inventory.get('files')) is dict and 0 < len(inventory['files']) <= 2000, 'SOURCE_INVENTORY_INVALID')
@@ -245,6 +356,12 @@ def load_bindings(plan):
     runtime = importlib.import_module('qa.operator.runtime_provider')
     bridge = importlib.import_module('qa.operator.product_queue_transport')
     verifier = importlib.import_module('qa.operator.product_verifier')
+    return root,runtime,bridge,verifier
+
+
+def load_bindings(plan):
+    """Measure B before importing its pure validators; select no runtime here."""
+    root,runtime,bridge,verifier = source_namespace(plan['bundle_root'],plan['source_bundle_sha256'])
     provider_raw = read(absolute(plan['provider']['path']), private=True)
     release_raw = read(absolute(plan['release']['path']), private=True)
     provider = runtime.configuration_document(provider_raw, expected_sha256=plan['provider']['sha256'])
@@ -253,7 +370,8 @@ def load_bindings(plan):
          and sha(release_raw) == plan['release']['sha256'] and canonical(release) == release_raw
          and release['schema_version'] == 3 and release['enabled'] is True
          and release['hosted_runtime_configuration_sha256'] == plan['provider']['sha256']
-         and provider['images'] == release['images'] and release['opaf_profile']['target_profile_sha256'] == TARGET_HASH,
+         and provider['images'] == release['images'] and release['opaf_profile']['target_profile_sha256'] ==
+         (TARGET_HASH if plan['schema_version'] == 1 else provider['target_profile_sha256']),
          'PAIRED_CONFIGURATION_CHANGED')
     reconstructed = verifier.build_manifest({'schema_version':3, 'scope':'fox-product-verifier-operator-config-v3',
         'enabled':True, 'images':release['images'], 'hosted_runtime_configuration_sha256':plan['provider']['sha256'],
@@ -312,7 +430,7 @@ def ulimits(item):
     return result
 
 
-def candidate_argv(role, old, plan, release, stage):
+def candidate_argv(role, old, plan, release, stage, *, baseline_profiles=None):
     root, label = PurePosixPath(plan['bundle_root']), plan['release']['sha256']
     stage = PurePosixPath(stage.as_posix())
     config = old['HostConfig']
@@ -327,9 +445,11 @@ def candidate_argv(role, old, plan, release, stage):
             '--env-file', str(stage / (role + '.env'))]
     for name, (soft, hard) in sorted(ulimits(old).items()):
         args += ['--ulimit', f'{name}={soft}:{hard}']
+    profiles = BASE_PROFILES if baseline_profiles is None else baseline_profiles
+    need(type(profiles) is dict and set(profiles) == {'fox','converter'},'EXACT_BASELINE_PROFILES_REQUIRED')
     if role == 'fox':
         expected = {'/data': ('/home/opc/fox/data', True), '/run/fox-opaf': ('/home/opc/fox/secure/opaf-client', False),
-                    '/run/fox-native/profile.json': (BASE_PROFILES['fox'], False)}
+                    '/run/fox-native/profile.json': (profiles['fox'], False)}
         need(mount_map(old) == expected and old['Config']['User'] == '1000:1000'
              and config['NetworkMode'] == 'host' and not config.get('UsernsMode') and config['ReadonlyRootfs'] is True
              and config['PortBindings'] == {}, 'FOX_BASELINE_CONFIGURATION_CHANGED')
@@ -341,7 +461,7 @@ def candidate_argv(role, old, plan, release, stage):
                     '/home/converter/.dbtools': ('/home/opc/forms2apex/sqlcl-user', True),
                     '/opt/forms2apex/wallet': ('/home/opc/opaf-secure/JSNF2APEX_wallet_single', False),
                     '/opt/sqlcl': ('/home/opc/sqlcl', False),
-                    '/run/fox-target/profile.json': (BASE_PROFILES['converter'], False)}
+                    '/run/fox-target/profile.json': (profiles['converter'], False)}
         need(mount_map(old) == expected and old['Config']['User'] == '10001'
              and config['NetworkMode'] == 'bridge' and config['UsernsMode'] == 'private'
              and config['ReadonlyRootfs'] is False and config['PortBindings'] == {'8090/tcp': [{'HostIp':'127.0.0.1','HostPort':'8091'}]}
@@ -366,6 +486,8 @@ def check_candidate(item, role, plan, release, env, mounts, *, baseline_item):
          and config['Privileged'] is False and environment(item) == env and mount_map(item) == mounts
          and item['Config'].get('Labels', {}).get('com.oracle.jsn.fox.release') == plan['release']['sha256'],
          'STOPPED_CANDIDATE_CONFIGURATION_CHANGED')
+    need(item['Config'].get('Labels',{}).get('com.oracle.jsn.fox.source-bundle') == plan['source_bundle_sha256'],
+         'STOPPED_CANDIDATE_SOURCE_BUNDLE_CHANGED')
     need(config['ReadonlyRootfs'] is (role == 'fox')
          and item['Config']['User'] == ('1000:1000' if role == 'fox' else '10001'), 'CANDIDATE_USER_OR_FILESYSTEM_CHANGED')
     old = baseline_item['HostConfig']
@@ -431,8 +553,15 @@ def held_stage(stage, *, create=False):
 def create_candidates(plan, *, expected_plan_sha256, apply=False):
     need(apply is True and sha(canonical(plan)) == expected_plan_sha256
          and sha(read(Path(__file__).resolve())) == plan['helper_sha256'], 'EXPLICIT_REVIEWED_CREATE_REQUIRED')
+    plan = plan_document(canonical(plan),expected_plan_sha256)
     provider, release = load_bindings(plan)
-    before = baseline()
+    current = current_baseline(plan)
+    if current is not None:
+        current.scope()
+        need(plan['release']['sha256'] != current.release_sha256
+             and all(release['images'][role] != current.manifest['images'][role] for role in ('fox','converter')),
+             'DISTINCT_CURRENT_PAIRED_RELEASE_REQUIRED')
+    before = baseline() if current is None else baseline(current)
     validate_bound_sources(before)
     signature = baseline_signature(before)
     stage = PARENT / plan['release']['sha256']
@@ -448,20 +577,23 @@ def create_candidates(plan, *, expected_plan_sha256, apply=False):
             old = before[old_name]
             env = new_environment(role, old, plan['release']['sha256'], profile)
             create_file(stage / (role + '.env'), ('\n'.join(k+'='+v for k,v in sorted(env.items()))+'\n').encode())
-            args, mounts = candidate_argv(role, old, plan, release, stage)
-            need(baseline_signature(baseline()) == signature, 'BASELINE_CHANGED_BEFORE_CREATE')
+            args, mounts = (candidate_argv(role,old,plan,release,stage) if current is None else
+                candidate_argv(role,old,plan,release,stage,baseline_profiles=current.profile_paths))
+            if current is not None:current.scope()
+            need(baseline_signature(baseline() if current is None else baseline(current)) == signature, 'BASELINE_CHANGED_BEFORE_CREATE')
             cid = create_once(stage, role, args, expected_plan_sha256).decode().strip()
             need(SHA.fullmatch(cid), 'CANDIDATE_ID_UNCONFIRMED')
             item = inspect_container(cid)
             check_candidate(item, role, plan, release, env, mounts, baseline_item=old)
             result[role] = {'id':cid, 'image':release['images'][role], 'name':names(plan['release']['sha256'])[role]}
             create_file(stage / (role + '-created.json'), canonical(result[role]))
-        need(baseline_signature(baseline()) == signature, 'BASELINE_CHANGED_DURING_CREATE')
+        need(baseline_signature(baseline() if current is None else baseline(current)) == signature, 'BASELINE_CHANGED_DURING_CREATE')
         admission = {'schema_version':1,'scope':'fox-hosted-admission-v1',
             'provider_configuration_sha256':plan['provider']['sha256'],'current_release_sha256':plan['release']['sha256'],
             'infrastructure':{'fox':{k:result['fox'][k] for k in ('id','image')},
                 'forms2apex-mcp':{k:result['converter'][k] for k in ('id','image')},
-                'oracle-applied-ai-label':{'id':BASE['oracle-applied-ai-label'][0], 'image':'sha256:'+BASE['oracle-applied-ai-label'][1]}}}
+                'oracle-applied-ai-label':({'id':BASE['oracle-applied-ai-label'][0], 'image':'sha256:'+BASE['oracle-applied-ai-label'][1]}
+                    if current is None else current.infrastructure['oracle-applied-ai-label'])}}
         create_file(stage / 'admission.json', canonical(admission))
         report = {'status':'STOPPED_CANDIDATES_CREATED_NOT_ACTIVATED','plan_sha256':expected_plan_sha256,
             'release_sha256':plan['release']['sha256'],'candidates':result,'admission_sha256':sha(canonical(admission)),
@@ -511,7 +643,10 @@ def main():
         result = stage_status(plan, args.plan_sha256)
     else:
         need(not args.apply, 'READ_ONLY_INSPECTION_REQUIRED')
-        load_bindings(plan); items = baseline(); validate_bound_sources(items)
+        load_bindings(plan); current = current_baseline(plan)
+        if current is not None:current.scope()
+        items = baseline() if current is None else baseline(current)
+        validate_bound_sources(items)
         result = {'status':'PRECREATE_BASELINE_OBSERVED','plan_sha256':args.plan_sha256,
             'containers':{name:{'id':v['Id'],'image':'sha256:'+v['Image'].split(':')[-1]} for name,v in items.items()},
             'services_changed':False,'containers_started':False}
