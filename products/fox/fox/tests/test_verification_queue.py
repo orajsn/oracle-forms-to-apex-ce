@@ -47,6 +47,7 @@ class FakeBackend:
 
 class VerificationQueueTests(unittest.TestCase):
     def setUp(self):
+        (ROOT / 'work').mkdir(exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix='verification-queue-', dir=ROOT / 'work')
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
@@ -116,6 +117,32 @@ class VerificationQueueTests(unittest.TestCase):
                 action()
         self.assertFalse(path.exists())
         self.assertEqual(backend.claims, [])
+
+    def test_retained_artifact_paths_are_logical_not_host_separator_dependent(self):
+        binding=self.binding()
+        for artifact in ('jobs/'+binding.job_id+'/apex-package.zip',
+                         'jobs\\'+binding.job_id+'\\apex-package.zip'):
+            with closing(sqlite3.connect(self.database)) as db,db:
+                db.execute('UPDATE runs SET artifact=? WHERE id=?',(artifact,binding.job_id))
+            before=self.product_rows()
+            with closing(sqlite3.connect(self.database)) as db:
+                db.row_factory=sqlite3.Row
+                self.assertEqual(q.VerificationQueue._run(db,binding,states={'QA_REQUIRED'})['artifact'],artifact)
+            self.assertEqual(self.product_rows(),before)
+
+    def test_path_normalization_never_accepts_traversal_absolute_or_other_outputs(self):
+        binding=self.binding()
+        for artifact in (None,99,'/data/jobs/'+binding.job_id+'/apex-package.zip',
+            'C:\\data\\jobs\\'+binding.job_id+'\\apex-package.zip',
+            'jobs/../'+binding.job_id+'/apex-package.zip',
+            'jobs//'+binding.job_id+'/apex-package.zip',
+            'jobs/'+binding.job_id+'/other.zip','jobs/fox-'+'0'*20+'/apex-package.zip'):
+            with closing(sqlite3.connect(self.database)) as db,db:
+                db.execute('UPDATE runs SET artifact=? WHERE id=?',(artifact,binding.job_id))
+            with closing(sqlite3.connect(self.database)) as db:
+                db.row_factory=sqlite3.Row
+                with self.subTest(artifact=artifact),self.assertRaises(q.QueueError):
+                    q.VerificationQueue._run(db,binding,states={'QA_REQUIRED'})
 
     def test_enable_flag_and_release_are_explicit(self):
         for kwargs in ({'enabled': 'true'}, {'enabled': True}, {'enabled': True, 'verifier_release_sha256': 'not-hash'}):

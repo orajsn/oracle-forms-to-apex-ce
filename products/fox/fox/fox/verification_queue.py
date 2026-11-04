@@ -226,7 +226,8 @@ class VerificationQueue:
     def _run(db, binding, *, states):
         run = db.execute('SELECT * FROM runs WHERE id=?', (binding.job_id,)).fetchone()
         _require(run is not None and run['source_hash'] == binding.source_manifest_sha256
-                 and run['artifact'] == str(Path('jobs') / binding.job_id / 'apex-package.zip')
+                 and type(run['artifact']) is str
+                 and run['artifact'].replace('\\','/') == 'jobs/'+binding.job_id+'/apex-package.zip'
                  and run['state'] in states, 'QUEUE_RUN_BINDING_OR_STATE_CHANGED')
         return dict(run)
 
