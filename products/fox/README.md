@@ -63,6 +63,10 @@ the current object-level call path, missing-package-part actions and declaration
 checks. It includes the tested boundaries and remaining conversion/deployment
 work; source presence must not be confused with translated business behavior.
 
+The [precheck recovery component](docs/precheck-recovery.md) distinguishes a
+stopped pre-QA attempt from successful verification. Its source and isolated
+rehearsal do not constitute an installed live recovery command or release.
+
 - `fox/`: React/TypeScript UI and Python API, preparation and persistent jobs.
 - `converter/`: internal MCP tools, deterministic native generation, validation
   and guarded import/export.

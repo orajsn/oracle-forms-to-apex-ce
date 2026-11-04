@@ -254,6 +254,7 @@ def public_status(root, run, config=None):
                              'VERIFICATION_RECOVERY_RELEASE_CHANGED')
                     recovery_state = 'retry_' + attempt['state']
                 recovery_messages = {
+                    'precheck_failed_closed': 'Verification stopped before QA because an environment prerequisite was missing. This failed attempt is closed; its original output is preserved. No technical success or automatic retry is implied.',
                     'failed_closed': 'This verification attempt failed and is closed. No successful technical proof or automatic retry is implied.',
                     'retry_reserved': 'A separate verification retry is reserved. The original failed attempt is preserved.',
                     'retry_running': 'A separate verification retry has started. Its result has not yet been recorded.',

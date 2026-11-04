@@ -136,6 +136,14 @@ test('source snapshot is not mutated or interpreted as permission',()=>{
  presentVerificationStatus('QA_REQUIRED',value);assert.equal(JSON.stringify(value),before);
  assert.doesNotMatch(helper,/fetch\(|\.claim_token|\.message\b|JSON\.stringify/);
 });
+test('a closed precheck is explained without success, liveness or retry authority',()=>{
+ const value=view({configured:true,state:'precheck_failed_closed',operator_contact:'stale',message:'PRIVATE_DIAGNOSTIC'});
+ assert.equal(value.state,'precheck_failed_closed');assert.equal(value.label,'Verification precheck failed');
+ assert.equal(value.contactOperator,true);assert.match(value.message,/stopped before QA/);
+ assert.match(value.message,/original output is preserved/);assert.match(value.message,/no technical success or automatic retry/);
+ assert.match(value.action,/do not restart this closed attempt/);
+ assert.doesNotMatch(JSON.stringify(value),/PRIVATE_DIAGNOSTIC/);
+});
 test('existing product rendering and consent proof acceptance download gates remain intact',()=>{
  assert.match(ui,/import \{presentSourceFindings,presentReviewer\} from '\.\/productPresentation'/);
  assert.match(ui,/\{r\.state==='QA_REQUIRED'&&<ManagedVerificationStatus run=\{r\}\/>\}/);

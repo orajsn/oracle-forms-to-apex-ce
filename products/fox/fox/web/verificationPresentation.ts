@@ -1,5 +1,5 @@
 // Read-only presentation of the owner-checked public status. Never a gate.
-type VerificationState='queued'|'running'|'attention'|'not_queued'|'unavailable'|'disabled';
+type VerificationState='queued'|'running'|'attention'|'not_queued'|'unavailable'|'disabled'|'precheck_failed_closed';
 type OperatorContact='recent'|'stale'|'not_reported'|'unknown';
 type SeenAt={value:string;label:string};
 export type VerificationPresentation={
@@ -7,10 +7,11 @@ export type VerificationPresentation={
  operatorContact:OperatorContact;contactMessage:string;lastSeen:SeenAt|null;
  contactOperator:boolean;action:string|null;
 };
-const activeStates=new Set(['queued','running','attention','not_queued','unavailable']);
+const activeStates=new Set(['queued','running','attention','not_queued','unavailable','precheck_failed_closed']);
 const contacts=new Set(['recent','stale','not_reported','unknown']);
 const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const descriptions:Record<VerificationState,{label:string;message:string}>={
+ precheck_failed_closed:{label:'Verification precheck failed',message:'Verification stopped before QA and this failed attempt is closed. The original output is preserved; no technical success or automatic retry is implied.'},
  queued:{label:'Queued for verification',message:'This package is queued for the FOX verification operator. A result has not yet been recorded.'},
  running:{label:'Verification attempt started',message:'A verification attempt has started, but its result has not yet been recorded. This does not confirm that the attempt is still running.'},
  attention:{label:'Operator attention required',message:'Verification needs operator reconciliation. It will not be retried automatically.'},
@@ -55,5 +56,5 @@ export function presentVerificationStatus(runState:unknown,value:unknown):Verifi
  }
  const contactOperator=!['queued','running'].includes(state)||operatorContact!=='recent';
  return {state,...descriptions[state],operatorContact,contactMessage:contactMessages[operatorContact],lastSeen,
-  contactOperator,action:contactOperator?'Contact the FOX operator to check and reconcile verification for this package.':null};
+  contactOperator,action:state==='precheck_failed_closed'?'Contact the FOX operator to complete environment repair; do not restart this closed attempt.':contactOperator?'Contact the FOX operator to check and reconcile verification for this package.':null};
 }

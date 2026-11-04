@@ -900,6 +900,189 @@ class VerificationRecovery:
             self.validate_schema(db)
             return {'status': 'OBSERVATION_LEDGER_READY', 'migrated': True}
 
+    # A precheck failed before a QA producer existed. It must never be forged
+    # into the completed-QA receipt family above. This separate append-only
+    # ledger retains the original queue/run/claim unchanged and grants no retry.
+    _PRECHECK_TABLE = 'verification_precheck_failures'
+    _PRECHECK_COLUMNS = ('job_id', 'assessment_sha256', 'assessment_raw',
+        'legacy_record_sha256', 'closed_at_utc', 'record_sha256')
+
+    @classmethod
+    def _precheck_definitions(cls):
+        table = cls._PRECHECK_TABLE
+        result = {('table', table): 'CREATE TABLE IF NOT EXISTS ' + table + '''(
+            job_id TEXT PRIMARY KEY REFERENCES verification_queue(job_id),
+            assessment_sha256 TEXT NOT NULL UNIQUE,assessment_raw BLOB NOT NULL,
+            legacy_record_sha256 TEXT NOT NULL,closed_at_utc TEXT NOT NULL,record_sha256 TEXT NOT NULL)'''}
+        for action in ('UPDATE', 'DELETE'):
+            name = table + '_no_' + action.lower()
+            result[('trigger', name)] = ('CREATE TRIGGER IF NOT EXISTS ' + name + ' BEFORE ' +
+                action + ' ON ' + table + " BEGIN SELECT RAISE(ABORT,'precheck history is append-only'); END")
+        return result
+
+    @classmethod
+    def _precheck_schema(cls, db, *, create=False):
+        expected = cls._precheck_definitions()
+        rows = [tuple(row) for row in db.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','trigger')")
+            if row[2] == cls._PRECHECK_TABLE or (row[0], row[1]) in expected]
+        if not rows:
+            if not create:
+                return False
+            _need(db.in_transaction, 'PRECHECK_SCHEMA_TRANSACTION_REQUIRED')
+            for sql in expected.values(): db.execute(sql)
+            return cls._precheck_schema(db)
+        actual = {(row[0], row[1]): row[3] for row in rows}
+        _need(set(actual) == set(expected) and all(
+            cls.normalized_schema_sql(actual[key]) == cls.normalized_schema_sql(sql)
+            for key, sql in expected.items()), 'PRECHECK_SCHEMA_OR_FENCES_CHANGED')
+        _need(tuple(row[1] for row in db.execute('PRAGMA table_info(' + cls._PRECHECK_TABLE + ')'))
+              == cls._PRECHECK_COLUMNS, 'PRECHECK_SCHEMA_COLUMNS_CHANGED')
+        return True
+
+    def initialize_precheck_ledger(self, *, apply=False):
+        _need(apply is True, 'PRECHECK_EXPLICIT_INITIALIZATION_REQUIRED')
+        with self._db(True) as db:
+            db.execute('SELECT job_id,record_sha256 FROM verification_queue LIMIT 0')
+            existed = self._precheck_schema(db)
+            self._precheck_schema(db, create=True)
+            return {'status': 'PRECHECK_LEDGER_READY', 'created': not existed,
+                    'technical_success': False, 'automatic_retry_permitted': False}
+
+    @staticmethod
+    def _precheck_assessment(value):
+        fields = {'schema_version', 'scope', 'status', 'binding', 'session', 'legacy_record_sha256',
+            'claim_sha256', 'retained_sha256', 'package_sha256', 'source_snapshot_sha256',
+            'release_evidence_sha256', 'plan_sha256', 'operator_code_sha256', 'failed_phase',
+            'missing_dependency', 'current_admission_blocks', 'closure_performed',
+            'technical_success', 'human_acceptance_recorded', 'automatic_replay_permitted', 'scope_note'}
+        _need(type(value) is dict and set(value) == fields, 'PRECHECK_ASSESSMENT_FIELDS')
+        _need(type(value['schema_version']) is int and value['schema_version'] == 1
+              and value['scope'] == 'fox-read-only-precheck-assessment-v1'
+              and value['status'] == 'CLASSIFIED_PRECHECK_FAILURE_REQUIRES_PROTECTED_RECOVERY'
+              and value['failed_phase'] == 'clean_check'
+              and value['missing_dependency'] == 'fox.project_qa_plan'
+              and value['current_admission_blocks'] is True
+              and all(value[key] is False for key in ('closure_performed', 'technical_success',
+                  'human_acceptance_recorded', 'automatic_replay_permitted')),
+              'PRECHECK_ASSESSMENT_NOT_FAILURE')
+        binding = VerificationBinding.from_payload(value['binding'])
+        _need(type(value['session']) is str and _SESSION.fullmatch(value['session'])
+              and all(_sha(value[key]) for key in ('legacy_record_sha256', 'claim_sha256',
+                  'package_sha256', 'source_snapshot_sha256', 'release_evidence_sha256',
+                  'plan_sha256', 'operator_code_sha256'))
+              and value['package_sha256'] == binding.package_sha256, 'PRECHECK_ASSESSMENT_BINDING')
+        retained = value['retained_sha256']
+        _need(type(retained) is dict and len(retained) == 7
+              and all(type(name) is str and _sha(raw) for name, raw in retained.items()),
+              'PRECHECK_RETAINED_MANIFEST')
+        labels = [name for name in retained if re.fullmatch(r'p[0-9]{4}-clean-check\.intent\.json', name)]
+        _need(len(labels) == 1, 'PRECHECK_PHASE_MANIFEST')
+        prefix = labels[0].split('-', 1)[0]
+        _need(set(retained) == {'session.json', 'attention.json', *(prefix + '-' + name for name in
+              ('claim.intent.json', 'claim.complete.json', 'prepare.intent.json',
+               'prepare.complete.json', 'clean-check.intent.json'))}, 'PRECHECK_PHASE_MANIFEST')
+        _need(value['scope_note'] == 'Retained evidence classification only. No host authority, closure, import, retry or readiness is granted.',
+              'PRECHECK_ASSESSMENT_SCOPE_NOTE')
+        return binding
+
+    def _precheck_current(self, db, assessment):
+        binding = self._precheck_assessment(assessment)
+        legacy = VerificationQueue._record(db.execute('SELECT * FROM verification_queue WHERE job_id=?',
+                                                       (binding.job_id,)).fetchone())
+        _need(legacy is not None and legacy['state'] == 'attention' and legacy['proof_sha256'] is None
+              and legacy['record_sha256'] == assessment['legacy_record_sha256']
+              and all(legacy[key] == item for key, item in binding.payload().items())
+              and claim_sha256(Claim(binding, legacy['claim_token'])) == assessment['claim_sha256'],
+              'PRECHECK_ORIGINAL_QUEUE_CHANGED')
+        self._server_run(db, binding, unverified=True)
+        job = self.database.parent / 'jobs' / binding.job_id
+        _need(digest((job / 'source-snapshot.json').read_bytes()) == assessment['source_snapshot_sha256']
+              and digest((job / 'release-evidence.json').read_bytes()) == assessment['release_evidence_sha256'],
+              'PRECHECK_RETAINED_JOB_CHANGED')
+        return binding
+
+    def _closed_precheck(self, db, job_id):
+        if not self._precheck_schema(db):
+            return None
+        row = db.execute('SELECT * FROM ' + self._PRECHECK_TABLE + ' WHERE job_id=?', (job_id,)).fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        _need(set(value) == set(self._PRECHECK_COLUMNS) and type(value['assessment_raw']) is bytes
+              and value['record_sha256'] == self._record_hash(value)
+              and digest(value['assessment_raw']) == value['assessment_sha256'], 'PRECHECK_LEDGER_ROW_CHANGED')
+        assessment = _load(value['assessment_raw'])
+        self._precheck_assessment(assessment)
+        _need(canonical_bytes(assessment) == value['assessment_raw']
+              and assessment['binding']['job_id'] == value['job_id']
+              and assessment['legacy_record_sha256'] == value['legacy_record_sha256'],
+              'PRECHECK_LEDGER_DOCUMENT_CHANGED')
+        _time(value['closed_at_utc'])
+        self._precheck_current(db, assessment)
+        return {'status': 'FAILED_PRECHECK_CLOSED', 'job_id': job_id,
+                'assessment_sha256': value['assessment_sha256'], 'technical_success': False,
+                'human_acceptance_recorded': False, 'automatic_retry_permitted': False}
+
+    @staticmethod
+    def _precheck_original_rows(db):
+        # Checked inside the same reserved write transaction as the append.
+        # Auth/session activity need not be frozen; these are the protected
+        # product outcomes and original attempt records, never a full DR claim.
+        present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        result = {}
+        for table in ('runs', 'verification_queue', 'technical_verifications', 'acceptances', 'events'):
+            if table not in present: continue
+            rows = [[{'blob_sha256': digest(value)} if type(value) is bytes else value for value in row]
+                    for row in db.execute('SELECT * FROM ' + table)]
+            result[table] = digest(canonical_bytes(rows))
+        return result
+
+    def close_precheck_failure(self, assessment_raw, *, expected_sha256, observer=None, apply=False, now=None):
+        """Append a failure only; the protected caller owns exclusion/observation.
+
+        observer(binding, session) must freshly re-run the measured classifier
+        against the actual stopped producer under the caller's held host lock.
+        Browser JSON, cached files and boolean passed=True are not observers.
+        This method cannot install that transport or grant its authority.
+        """
+        _need(apply is True and callable(observer), 'PRECHECK_PROTECTED_OBSERVER_REQUIRED')
+        _need(type(assessment_raw) is bytes and len(assessment_raw) <= 65_536
+              and _sha(expected_sha256) and digest(assessment_raw) == expected_sha256,
+              'PRECHECK_EXACT_REVIEWED_ASSESSMENT_REQUIRED')
+        assessment = _load(assessment_raw)
+        binding = self._precheck_assessment(assessment)
+        _need(canonical_bytes(assessment) == assessment_raw, 'PRECHECK_CANONICAL_ASSESSMENT_REQUIRED')
+        with self._db(True) as db:
+            _need(self._precheck_schema(db), 'PRECHECK_EXPLICIT_LEDGER_INITIALIZATION_REQUIRED')
+            existing = self._closed_precheck(db, binding.job_id)
+            if existing:
+                _need(existing['assessment_sha256'] == expected_sha256, 'PRECHECK_DIFFERENT_CLOSURE_EXISTS')
+                return {**existing, 'action': 'ALREADY_RECORDED_NO_REPLAY'}
+            if self._recovery_available(db):
+                _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',
+                                 (binding.job_id,)).fetchone() is None
+                      and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?',
+                                     (binding.job_id,)).fetchone() is None, 'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
+            self._precheck_current(db, assessment)
+            original_rows = self._precheck_original_rows(db)
+            try:
+                observed = observer(binding, assessment['session'])
+            except Exception:
+                raise RecoveryError('PRECHECK_FRESH_OBSERVATION_UNCONFIRMED') from None
+            _need(type(observed) is dict and canonical_bytes(observed) == assessment_raw,
+                  'PRECHECK_FRESH_OBSERVATION_CHANGED')
+            self._precheck_current(db, assessment)
+            value = {'job_id': binding.job_id, 'assessment_sha256': expected_sha256,
+                'assessment_raw': assessment_raw, 'legacy_record_sha256': assessment['legacy_record_sha256'],
+                'closed_at_utc': _clock(now).isoformat()}
+            value['record_sha256'] = self._record_hash(value)
+            db.execute('INSERT INTO ' + self._PRECHECK_TABLE + ' VALUES(' +
+                       ','.join('?' for _ in value) + ')', tuple(value[key] for key in self._PRECHECK_COLUMNS))
+            closed = self._closed_precheck(db, binding.job_id)
+            _need(self._precheck_original_rows(db) == original_rows, 'PRECHECK_ORIGINAL_ROWS_CHANGED')
+            return {**closed, 'action': 'RECORDED_ONCE', 'original_rows_unchanged': True}
+
     @staticmethod
     def _record_hash(row):
         return digest(canonical_bytes({key: (digest(value) if type(value) is bytes else value)
@@ -1301,6 +1484,10 @@ class VerificationRecovery:
         row = db.execute('SELECT attempt_id FROM verification_retry_attempts WHERE job_id=?', (job_id,)).fetchone() if available else None
         retry = self._attempt(db, row['attempt_id']) if row else None
         result = admission_status(dict(run), dict(legacy) if legacy else None, closed, retry)
+        precheck = self._closed_precheck(db, job_id)
+        if precheck is not None:
+            _need(closed is None and retry is None, 'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
+            return {'blocks_admission': False, 'recovery_state': 'precheck_failed_closed', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256
