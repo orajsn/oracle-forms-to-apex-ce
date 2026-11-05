@@ -2,7 +2,7 @@
 // No live server/Oracle/model call and no human acceptance is performed.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync,readdirSync,mkdtempSync} from 'node:fs';
+import {readFileSync,readdirSync,mkdtempSync,existsSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,8 +10,8 @@ import {runBrowser,sha,SOURCE_SHA,APEX_ORIGIN,JourneyError} from '../live.mjs';
 import {ROOT,fixture,reseal} from './fixtures.mjs';
 
 const PROJECT='a'.repeat(32),SOURCE_ID='ss-'+'c'.repeat(32),RUN='fox-'+'b'.repeat(20);
-const B=path.join(ROOT,'work/b27a/bundle');
-const PYTHON=path.join(ROOT,'fox/.venv/Scripts/python.exe');
+const B=process.env.FOX_PROJECT_JOURNEY_TEST_BUNDLE?path.resolve(process.env.FOX_PROJECT_JOURNEY_TEST_BUNDLE):path.join(ROOT,'work/b27a/bundle');
+const PYTHON=process.env.FOX_PROJECT_JOURNEY_TEST_PYTHON??path.join(ROOT,'fox/.venv/Scripts/python.exe');
 const PLAYWRIGHT='C:/Users/Jason/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
 
 function files(root,prefix=''){
@@ -46,6 +46,7 @@ for(const attention of [false,true])test('actual frozen project workbench: '+(at
  skip:process.env.FOX_PROJECT_JOURNEY_BROWSER_TEST!=='1',timeout:180000,
 },async t=>{
  const input=fixture(),assets=files(path.join(B,'fox/dist'));
+ const releasePath=path.join(B,'fox/fox/release.json'),release=existsSync(releasePath)?JSON.parse(readFileSync(releasePath,'utf8')):null;
  input.output_dir=path.join(mkdtempSync(path.join(os.tmpdir(),'fox-project-live-ui-')),'browser');
  input.ui_assets=Object.fromEntries(Object.entries(assets).map(([name,raw])=>[name,sha(raw)]));
  input.browser={playwright_module:PLAYWRIGHT,index_sha256:sha(readFileSync(PLAYWRIGHT)),
@@ -88,7 +89,8 @@ for(const attention of [false,true])test('actual frozen project workbench: '+(at
   if(url.pathname==='/api/login'&&method==='POST'){assert.deepEqual(request.postDataJSON(),input.credentials);state.login=true;return json({username:input.credentials.username});}
   if(url.pathname==='/api/session')return state.login?json({username:input.credentials.username,conversion_profile:'native-project-v1',conversion_configured:true,
    configured_project_schema_versions:[1,2],configuration_checks:[],mode:'Synthetic backend'}):json({detail:'Sign in'},401);
-  if(url.pathname==='/api/health')return json({status:'ok',product:'FOX',version:'0.1.0',worker:{healthy:true,enabled:true}});
+  if(url.pathname==='/api/release'&&method==='GET'&&release)return json(release);
+  if(url.pathname==='/api/health')return json({status:'ok',product:'FOX',version:release?.version??'0.1.0',worker:{healthy:true,enabled:true}});
   if(url.pathname==='/api/local-preparation/capabilities')return json({enabled:false});
   if(url.pathname==='/api/projects'&&method==='GET')return json(state.created?[{id:PROJECT,...input.project,file_count:state.uploaded?4:0,run_count:state.processed?1:0}]:[]);
   if(url.pathname==='/api/projects'&&method==='POST'){assert.equal(state.created,false);state.created=true;return json({id:PROJECT},201);}

@@ -1,5 +1,14 @@
 # FOX project proof harness
 
+Developer observer component **0.1.1**, independently tagged `fox-qa-v0.1.1`.
+See [component changes](CHANGELOG.md). This is not a new FOX application version
+and requires no runtime/image change. The current compatibility check uses the
+measured FOX0.4.1 UI, including its read-only software-version endpoint.
+
+Offline browser tests accept `FOX_PROJECT_JOURNEY_TEST_BUNDLE` and
+`FOX_PROJECT_JOURNEY_TEST_PYTHON` to select existing local test inputs. They do
+not override the live origin, deployment plan, credentials or safety gates.
+
 These are developer-only tests for the existing JSN deployment. They are not
 part of the business-user UI or the conversion runtime.
 

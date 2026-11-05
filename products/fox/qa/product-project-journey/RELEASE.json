@@ -1,0 +1,8 @@
+{
+  "component": "fox-project-journey",
+  "version": "0.1.1",
+  "released_on": "2026-11-05",
+  "tag": "fox-qa-v0.1.1",
+  "scope": "Developer-only observer; not the FOX runtime version",
+  "tested_runtime": "0.4.1"
+}

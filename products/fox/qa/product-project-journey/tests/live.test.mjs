@@ -149,6 +149,12 @@ test('acceptance, downloads, other project reads and redirects cannot be armed',
  assert.equal(gate.allowedGet(ORIGIN+'/api/projects?other=1'),false);
  assert.equal(gate.allowedGet(ORIGIN+'/api/projects/'+ID+'/runs/'+RUN+'/evidence'),true);
 });
+test('version metadata is an exact same-origin read, never a mutation exemption',()=>{
+ const gate=normalGate();assert.equal(gate.allowedGet(ORIGIN+'/api/release'),true);
+ for(const url of ['https://outside.invalid/api/release',ORIGIN+'/api/release?x=1',ORIGIN+'/api/release#x',ORIGIN+'/api/release/',ORIGIN+'/api/release/download'])assert.equal(gate.allowedGet(url),false);
+ assert.throws(()=>gate.dispatch(request('/api/release',{})),/UNARMED_MUTATION_FORBIDDEN/);
+ assert.equal(gate.dispatched.size,0);
+});
 test('complete plan yields only strict six-field process approval',()=>{
  const gate=normalGate();uploaded(gate);const body=validatePlan(gate.plan,gate);
  assert.deepEqual(Object.keys(body).sort(),['approved_external_ai','approved_prototype_scope','approved_redacted_source','expected_current_source_set_id','plan_sha256','source_hash'].sort());

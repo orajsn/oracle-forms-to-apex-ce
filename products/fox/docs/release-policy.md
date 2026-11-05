@@ -37,6 +37,12 @@ release, without treating that comparison as technical or business acceptance.
 
 ## Next product increments
 
+Developer-only QA tooling can be released independently. The project observer
+uses `qa/product-project-journey/RELEASE.json`, its own changelog and
+`fox-qa-vX.Y.Z` tags. Such a release must report the tested runtime separately
+and must not bump/relabel the hosted FOX version or imply a live conversion
+pass. Product/runtime changes still use the full product checklist above.
+
 Prioritize guided intake/file requirements; actionable form/button/routine
 dependencies and same-project reassessment; safe progress/recovery; and clear
 native APEX output/target requirements. Validate each with positive, missing-input

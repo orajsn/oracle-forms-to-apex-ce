@@ -205,7 +205,7 @@ export class MutationGate {
  }
  allowedGet(raw){
   const url=new URL(raw);if(url.origin!==this.input.origin||url.username||url.password||url.hash||url.search)return false;
-  if(['/', '/favicon.ico','/api/health','/api/session','/api/projects','/api/local-preparation/capabilities'].includes(url.pathname))return true;
+  if(['/', '/favicon.ico','/api/health','/api/release','/api/session','/api/projects','/api/local-preparation/capabilities'].includes(url.pathname))return true;
   if(Object.hasOwn(this.input.ui_assets,url.pathname.slice(1)))return true;
   if(!this.projectId)return false;const base='/api/projects/'+this.projectId;
   if([base,base+'/conversion-plan',base+'/assessment',base+'/source-sets'].includes(url.pathname))return true;
