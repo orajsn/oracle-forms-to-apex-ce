@@ -18,7 +18,7 @@ def plan():
     value={'schema_version':1,'scope':M.SCOPE,'controller_sha256':'a'*64}
     for number,name in enumerate(M.REFS):
         value[name]={'path':'/home/opc/private/'+name+'.json','sha256':format(number+1,'x')*64}
-    value['old_unit']['path']=str(M.UNIT)
+    value['old_unit']['path']=M.UNIT.as_posix()
     return value
 
 
@@ -26,6 +26,42 @@ def test_plan_is_exact_and_returns_no_implicit_authority():
     value=plan();raw=M.cb(value)
     assert M.plan_document(raw,M.sha(raw))==value
     assert 'apply' not in value and 'approved' not in value
+
+
+def v2_plan():
+    value=plan();value.update(schema_version=2,scope=M.SCOPE_V2)
+    value['snapshot_adapter']={'path':'/home/opc/new-bundle/qa/operator/hosted_snapshot.py','sha256':'b'*64}
+    return value
+
+
+def test_v2_plan_requires_an_explicit_hash_bound_adapter():
+    value=v2_plan();raw=M.cb(value)
+    assert M.plan_document(raw,M.sha(raw))==value
+    old=plan();old['snapshot_adapter']=value['snapshot_adapter'];raw=M.cb(old)
+    with pytest.raises(M.TransitionError):M.plan_document(raw,M.sha(raw))
+    del value['snapshot_adapter'];raw=M.cb(value)
+    with pytest.raises(M.TransitionError):M.plan_document(raw,M.sha(raw))
+
+
+@pytest.mark.parametrize('fault',['path','sha','no-measured-file'])
+def test_v2_adapter_cannot_import_outside_the_verified_new_bundle(fault,monkeypatch):
+    value=v2_plan();inventory={'files':{'qa/operator/hosted_snapshot.py':'b'*64}}
+    if fault=='path':value['snapshot_adapter']['path']='/home/opc/old-bundle/qa/operator/hosted_snapshot.py'
+    elif fault=='sha':value['snapshot_adapter']['sha256']='c'*64
+    else:inventory['files'].clear()
+    monkeypatch.setattr(M,'load',lambda *_:pytest.fail('Unbound adapter reached import'))
+    with pytest.raises(M.TransitionError,match='SNAPSHOT_ADAPTER_OUTSIDE_NEW_BUNDLE'):
+        M.snapshot_adapter(value,object(),{'layout':{'release_root':'/home/opc/new-bundle'}},inventory)
+
+
+def test_v1_uses_original_reader_v2_loads_a_distinct_measured_module(monkeypatch):
+    baseline=object();adapter=object();calls=[]
+    monkeypatch.setattr(M,'load',lambda name,ref:(calls.append((name,ref)) or adapter))
+    assert M.snapshot_adapter(plan(),baseline,{}, {}) is baseline and not calls
+    value=v2_plan()
+    assert M.snapshot_adapter(value,baseline,{'layout':{'release_root':'/home/opc/new-bundle'}},
+        {'files':{'qa/operator/hosted_snapshot.py':'b'*64}}) is adapter
+    assert calls==[('qa.operator._current_transition_snapshot',value['snapshot_adapter'])]
 
 
 @pytest.mark.parametrize('fault',['sha','extra','bool','scope','missing','path','traversal','drive','ref-extra','same-I','same-unit'])
@@ -40,7 +76,7 @@ def test_invalid_plan_cannot_reach_host_or_effects(fault,monkeypatch):
     elif fault=='drive':value['snapshot']['path']='C:/private/file'
     elif fault=='ref-extra':value['helper']['ready']=True
     elif fault=='same-I':value['new_installation']=deepcopy(value['old_installation'])
-    elif fault=='same-unit':value['new_unit']['path']=str(M.UNIT)
+    elif fault=='same-unit':value['new_unit']['path']=M.UNIT.as_posix()
     raw=M.cb(value)
     monkeypatch.setattr(M,'load',lambda *_:pytest.fail('Invalid plan reached an import'))
     with pytest.raises(M.TransitionError):M.plan_document(raw,'0'*64 if fault=='sha' else M.sha(raw))

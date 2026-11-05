@@ -23,10 +23,15 @@ import time
 
 sys.dont_write_bytecode=True
 SCOPE='fox-current-pair-transition-v1'
+SCOPE_V2='fox-current-pair-transition-v2'
 SHA=re.compile(r'[a-f0-9]{64}\Z')
 PARENT=Path('/home/opc/.local/share/fox-project-transitions')
 UNIT=Path('/home/opc/.config/systemd/user/fox-product-verifier.service')
 REFS=('old_installation','new_installation','old_unit','new_unit','helper','support','readiness','recovery','snapshot')
+
+
+def references(p):
+    return REFS + (('snapshot_adapter',) if p['schema_version'] == 2 else ())
 
 
 class TransitionError(RuntimeError):pass
@@ -61,14 +66,15 @@ def absolute(value):
 def plan_document(raw,expected):
     need(type(raw)is bytes and len(raw)<=1_000_000 and type(expected)is str and SHA.fullmatch(expected) and sha(raw)==expected,'EXACT_TRANSITION_PLAN_REQUIRED')
     p=document(raw)
-    need(type(p)is dict and set(p)=={'schema_version','scope','controller_sha256',*REFS}
-        and type(p['schema_version'])is int and p['schema_version']==1 and p['scope']==SCOPE
+    need(type(p)is dict and type(p.get('schema_version'))is int and p['schema_version'] in (1,2), 'TRANSITION_PLAN_INVALID')
+    need(set(p)=={'schema_version','scope','controller_sha256',*references(p)}
+        and p['scope']==(SCOPE if p['schema_version']==1 else SCOPE_V2)
         and cb(p)==raw and type(p['controller_sha256'])is str and SHA.fullmatch(p['controller_sha256']), 'TRANSITION_PLAN_INVALID')
-    for key in REFS:
+    for key in references(p):
         ref=p[key];need(type(ref)is dict and set(ref)=={'path','sha256'} and type(ref['sha256'])is str and SHA.fullmatch(ref['sha256']),'REFERENCE_INVALID')
         absolute(ref['path'])
-    need(p['old_installation']!=p['new_installation'] and p['old_unit']['path']==str(UNIT)
-        and p['new_unit']['path']!=str(UNIT),'DISTINCT_INSTALLATION_AND_UNIT_REQUIRED')
+    need(p['old_installation']!=p['new_installation'] and p['old_unit']['path']==UNIT.as_posix()
+        and p['new_unit']['path']!=UNIT.as_posix(),'DISTINCT_INSTALLATION_AND_UNIT_REQUIRED')
     return p
 
 
@@ -90,6 +96,16 @@ def load(name,ref):
     path=absolute(ref['path']);raw=initial_read(path);need(sha(raw)==ref['sha256'],'HELPER_SOURCE_CHANGED')
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec)
     sys.modules[name]=m;exec(compile(raw,str(path),'exec'),m.__dict__);return m
+
+
+def snapshot_adapter(p,baseline,installation,inventory):
+    """Explicit v2 adapter from the new measured bundle, never patch old source."""
+    if p['schema_version']==1:
+        return baseline
+    ref=p['snapshot_adapter'];relative='qa/operator/hosted_snapshot.py'
+    need(ref['path']==str(PurePosixPath(installation['layout']['release_root'])/relative)
+        and inventory['files'].get(relative)==ref['sha256'], 'SNAPSHOT_ADAPTER_OUTSIDE_NEW_BUNDLE')
+    return load('qa.operator._current_transition_snapshot',ref)
 
 
 def validate_profile_access_labels(old_label,new_label,old_process,new_process):
@@ -206,7 +222,7 @@ class Transition:
         self.p=p;self.digest=sha(cb(p));self.A=A=load('current_transition_helpers',p['helper'])
         self.M=M=load('current_transition_support',p['support']);A.host_identity()
         need(sha(initial_read(Path(__file__).resolve()))==p['controller_sha256'],'TRANSITION_SOURCE_CHANGED')
-        for key in REFS:
+        for key in references(p):
             observed=sha(A.read(absolute(p[key]['path']),private=key not in ('helper','support','readiness','recovery')))
             need(observed in (p['old_unit']['sha256'],p['new_unit']['sha256']) if status and key=='old_unit'
                  else observed==p[key]['sha256'],'PINNED_INPUT_CHANGED')
@@ -221,23 +237,28 @@ class Transition:
         self.service=service=importlib.import_module('qa.operator.hosted_service')
         self.old=service.HostedAdmission(p['old_installation']['path'],expected_sha256=p['old_installation']['sha256'])
         self.old.archive.read();self.scope()
-        self.S=importlib.import_module('qa.operator.hosted_snapshot')
         self.snapshot_raw=A.read(absolute(p['snapshot']['path']),private=True)
-        self.snapshot=self.S.configuration_document(self.snapshot_raw,p['snapshot']['sha256'])
         self.new_raw=A.read(absolute(p['new_installation']['path']),private=True)
         self.new_i=service.installation_document(self.new_raw,expected_sha256=p['new_installation']['sha256'])
         self.new_refs={key:A.read(absolute(self.new_i[key]['path']),private=True) for key in ('provider','release','admission')}
         for key,data in self.new_refs.items():need(sha(data)==self.new_i[key]['sha256'],'NEW_REFERENCE_CHANGED')
         self.cfg=document(self.new_refs['provider']);self.release=document(self.new_refs['release']);self.R=self.new_i['release']['sha256']
         self.pins=document(self.new_refs['admission'])['infrastructure'];self.old_pins=document(self.old.reference_raw['admission'])['infrastructure']
-        need(self.snapshot['mode']=='hosted' and self.snapshot['operator_release_sha256']==self.old.release
-            and self.snapshot['provider_configuration_sha256']==self.old.document['provider']['sha256']
-            and self.snapshot['runtime']['fox']==self.old_pins['fox']
-            and self.snapshot['runtime']['converter']==self.old_pins['forms2apex-mcp'], 'CURRENT_SNAPSHOT_BINDING_CHANGED')
         need(self.R!=self.old.release and all(self.pins[n]['image']!=self.old_pins[n]['image'] for n in ('fox','forms2apex-mcp')),'DISTINCT_CURRENT_RELEASE_REQUIRED')
         inventory=A.read(absolute(self.new_i['layout']['inventory']['path']),private=True)
         need(sha(inventory)==self.new_i['layout']['inventory']['sha256'],'NEW_SOURCE_INVENTORY_CHANGED')
         service.verify_inventory(absolute(self.new_i['layout']['release_root']),inventory)
+        measured=document(inventory)
+        self.S=snapshot_adapter(p,importlib.import_module('qa.operator.hosted_snapshot'),self.new_i,measured)
+        self.snapshot=self.S.configuration_document(self.snapshot_raw,p['snapshot']['sha256'])
+        if p['schema_version']==2:
+            need(self.snapshot['schema_version']==2 and self.snapshot['source_sha256']['hosted_snapshot.py']==p['snapshot_adapter']['sha256']
+                and self.snapshot['source_sha256']['snapshot.py']==measured['files'].get('qa/operator/snapshot.py'),
+                'SNAPSHOT_ADAPTER_SOURCE_BINDING_CHANGED')
+        need(self.snapshot['mode']=='hosted' and self.snapshot['operator_release_sha256']==self.old.release
+            and self.snapshot['provider_configuration_sha256']==self.old.document['provider']['sha256']
+            and self.snapshot['runtime']['fox']==self.old_pins['fox']
+            and self.snapshot['runtime']['converter']==self.old_pins['forms2apex-mcp'], 'CURRENT_SNAPSHOT_BINDING_CHANGED')
         need(p['recovery']['path']==str(absolute(self.new_i['layout']['release_root'])/'fox/fox/verification_recovery.py')
             and document(inventory)['files']['fox/fox/verification_recovery.py']==p['recovery']['sha256'],'UNBOUND_RECOVERY_READER')
         self.candidate_path=absolute(self.new_i['provider']['path']).parent/'activation-plan.json'

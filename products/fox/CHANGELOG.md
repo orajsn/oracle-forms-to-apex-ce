@@ -4,6 +4,41 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.4.1] - 2026-11-05
+
+### Fixed
+
+- Version-two hosted recovery plans include exact, hash-pinned admission and
+  source-inventory files when they sit outside normal protected directories.
+  Their parent directories are not implicitly added to the capture.
+- Version-two current-pair transitions can use an explicitly pinned recovery
+  helper from the new measured bundle without modifying the older installed
+  source or replacing its normal module namespace. Version-one plans retain
+  their original reader and field contract.
+- Pure transition path contracts now remain POSIX-shaped during Windows checks.
+  Offline rollback tests no longer depend on ignored private operator history.
+
+### Limits
+
+- This is deployment-tooling support, not a completed backup or permission to
+  switch a running release. A real held operator lock, exact installation,
+  stopped-writer checks, capture and isolated restore proof are still required.
+- No replay, conversion, import, human-review or download gate changes. A new
+  measured build is required; older images are never relabelled.
+- See [recovery plan versioning](docs/deployment-recovery.md).
+
+### Verification
+
+- Windows deployment contracts: 64 passed, 36 platform/namespace skips;
+  release API: three passed. Two dependency deprecation warnings remain.
+- Linux contracts, pinned import, adapter and lease checks: 106 passed, with
+  17 namespace checks separately exercised under rootless Podman: all 17 passed.
+  Exact-file capture/isolated restore excludes an unapproved neighboring file.
+- Frontend regression: 301 passed, including real local API/browser source and
+  saved-history flows. TypeScript/Vite and release consistency checks passed.
+- Local namespace fixtures do not establish a live JSN backup, database import,
+  model invocation or human acceptance.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added

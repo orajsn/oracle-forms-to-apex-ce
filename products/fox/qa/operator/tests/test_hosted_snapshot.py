@@ -59,6 +59,13 @@ def document(value):
     return h.configuration_document(raw, h.sha(raw))
 
 
+def config_v2():
+    value=config();value.update(schema_version=2,scope=h.SCOPE_V2)
+    for label in h.INSTALLATION_FILES:
+        value['protected_sources'][label]={'path':'/synthetic-only/outside/'+label+'.json','kind':'file','sha256':'b'*64}
+    return value
+
+
 def packet(value, action='capture', operation='synthetic-capture'):
     raw = h.canonical(value)
     return {'action': action, 'operation': operation,
@@ -68,6 +75,39 @@ def packet(value, action='capture', operation='synthetic-capture'):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_v2_pins_exact_outside_installation_files_without_broader_roots(self):
+        value=config_v2();self.assertEqual(document(value),value)
+        for label in h.INSTALLATION_FILES:
+            entry=value['protected_sources'][label]
+            self.assertTrue(h._covered(entry['path'],value))
+            self.assertFalse(h._covered(str(Path(entry['path']).with_name('unapproved.json')).replace('\\','/'),value))
+
+    def test_v2_files_are_required_pinned_and_cannot_be_parent_directories(self):
+        for label in h.INSTALLATION_FILES:
+            for fault in ('missing','unpinned','directory','bad-sha'):
+                value=config_v2()
+                if fault=='missing':del value['protected_sources'][label]
+                elif fault=='unpinned':value['protected_sources'][label]['sha256']=None
+                elif fault=='directory':value['protected_sources'][label].update(kind='directory',sha256=None)
+                else:value['protected_sources'][label]['sha256']='x'
+                with self.subTest(label=label,fault=fault),self.assertRaises(h.SnapshotOperationError):document(value)
+
+    def test_v1_cannot_silently_accept_v2_files_and_v2_is_hosted_only(self):
+        value=config_v2();value.update(schema_version=1,scope=h.SCOPE)
+        with self.assertRaises(h.SnapshotOperationError):document(value)
+        value=config_v2();value['mode']='pre-hosted-g'
+        with self.assertRaisesRegex(h.SnapshotOperationError,'SNAPSHOT_V2_HOSTED_ONLY'):document(value)
+
+    def test_actual_installation_file_binding_cannot_be_substituted(self):
+        value=config_v2();installation={'admission':{'path':value['protected_sources']['installation-admission']['path'],'sha256':'b'*64},
+            'layout':{'inventory':{'path':value['protected_sources']['installation-inventory']['path'],'sha256':'b'*64}}}
+        h.installation_file_references(value,installation)
+        for label in h.INSTALLATION_FILES:
+            for field,replacement in (('path','/synthetic-only/other.json'),('sha256','c'*64)):
+                changed=deepcopy(value);changed['protected_sources'][label][field]=replacement
+                with self.subTest(label=label,field=field),self.assertRaisesRegex(h.SnapshotOperationError,'SNAPSHOT_INSTALLATION_FILE_BINDING_CHANGED'):
+                    h.installation_file_references(changed,installation)
+
     def test_both_explicit_modes(self):
         for mode in ('hosted', 'pre-hosted-g'):
             with self.subTest(mode=mode):
@@ -439,6 +479,27 @@ class NamespaceAssemblyTests(unittest.TestCase):
         self.assertEqual((restore / 'restored-copy/restored/converter-jobs/.native-schema-index.json').read_bytes(), b'original-registry')
         self.assertFalse(restored['result']['live_data_restored'])
 
+    def test_v2_copies_and_restores_only_the_two_exact_installation_files(self):
+        outside=self.root/'outside-existing-roots';outside.mkdir(mode=0o700)
+        self.config.update(schema_version=2,scope=h.SCOPE_V2)
+        expected={}
+        for label in h.INSTALLATION_FILES:
+            destination=outside/(label+'.json');raw=('synthetic-exact:'+label).encode()
+            destination.write_bytes(raw);destination.chmod(0o600);expected[label]=raw
+            self.config['protected_sources'][label]={'path':str(destination),'kind':'file','sha256':h.sha(raw)}
+        sibling=outside/'unapproved-neighbor.json';sibling.write_bytes(b'must-not-copy-neighbor');sibling.chmod(0o600)
+        self.packet=dict(packet(self.config,operation=self.stage.name),stage=str(self.stage))
+        captured=h._worker(self.packet,s);self.assertEqual(captured['status'],'BACKUP_VERIFIED')
+        restore=Path(self.config['output_root'])/'v2-restore';restore.mkdir(mode=0o700)
+        result=h._worker(dict(self.packet,action='restore',operation=restore.name,stage=str(restore),backup=str(self.stage/'snapshot')),s)
+        self.assertEqual(result['status'],'RESTORE_TEST_PASSED')
+        restored=restore/'restored-copy/restored/protected-config'
+        for label,raw in expected.items():
+            self.assertEqual((restored/label).read_bytes(),raw)
+            self.assertEqual(Path(self.config['protected_sources'][label]['path']).read_bytes(),raw)
+        self.assertFalse((restored/'unapproved-neighbor.json').exists())
+        self.assertFalse(result['result']['live_data_restored'])
+
     def test_same_capture_never_replays_or_replaces(self):
         h._worker(self.packet, s)
         before = {p.relative_to(self.stage).as_posix(): p.read_bytes() for p in self.stage.rglob('*') if p.is_file()}
@@ -567,8 +628,14 @@ class NamespaceAssemblyTests(unittest.TestCase):
 
 
 class RollbackTests(unittest.TestCase):
+    def setUp(self):
+        # Synthetic legacy bytes test exact-hash recognition without reading
+        # private/ignored operator history. Never represent this as actual G.
+        self.legacy_raw=h.canonical({'schema_version':1,'scope':'synthetic-legacy-rollback-test'})
+        legacy=patch.object(h,'G_RELEASE',h.sha(self.legacy_raw));legacy.start();self.addCleanup(legacy.stop)
+
     def test_unknown_duplicate_or_malformed_source_identity_blocks_rollback(self):
-        raw = (ROOT / 'work/product-history-transport-bind-20261019a/operator-release/current-release-manifest.json').read_bytes()
+        raw = self.legacy_raw
         for source in (b'{"conversion_profile":"native-project-v2"}',
                        b'{"conversion_profile":"native-project-v1","conversion_profile":"native-table-form-v1"}',
                        b'[]', b'null', b'{broken'):
@@ -580,7 +647,7 @@ class RollbackTests(unittest.TestCase):
                     h.require_project_aware_rollback(root, raw)
 
     def test_retained_g_refuses_project_history(self):
-        raw = (ROOT / 'work/product-history-transport-bind-20261019a/operator-release/current-release-manifest.json').read_bytes()
+        raw = self.legacy_raw
         with tempfile.TemporaryDirectory(prefix='fox-rollback-') as temporary:
             root = Path(temporary)
             job = root / 'jobs/fox-synthetic'; job.mkdir(parents=True)
@@ -589,7 +656,7 @@ class RollbackTests(unittest.TestCase):
                 h.require_project_aware_rollback(root, raw)
 
     def test_project_cache_marker_cannot_be_hidden_by_legacy_snapshot(self):
-        raw = (ROOT / 'work/product-history-transport-bind-20261019a/operator-release/current-release-manifest.json').read_bytes()
+        raw = self.legacy_raw
         with tempfile.TemporaryDirectory(prefix='fox-rollback-') as temporary:
             root = Path(temporary)
             job = root / 'jobs/fox-synthetic'; job.mkdir(parents=True)
@@ -599,12 +666,18 @@ class RollbackTests(unittest.TestCase):
                 h.require_project_aware_rollback(root, raw)
 
     def test_empty_history_is_not_activation_permission(self):
-        raw = (ROOT / 'work/product-history-transport-bind-20261019a/operator-release/current-release-manifest.json').read_bytes()
+        raw = self.legacy_raw
         with tempfile.TemporaryDirectory(prefix='fox-rollback-') as temporary:
             root = Path(temporary); (root / 'jobs').mkdir()
             result = h.require_project_aware_rollback(root, raw)
             self.assertFalse(result['activation_authorized'])
             self.assertFalse(result['data_restore_authorized'])
+
+    def test_different_legacy_bytes_never_gain_historical_identity(self):
+        with tempfile.TemporaryDirectory(prefix='fox-rollback-') as temporary:
+            root=Path(temporary);(root/'jobs').mkdir()
+            with self.assertRaisesRegex(h.SnapshotOperationError,'SNAPSHOT_CANDIDATE_RELEASE_UNSUPPORTED'):
+                h.require_project_aware_rollback(root,h.canonical({'schema_version':1,'scope':'different-synthetic-legacy'}))
 
 
 @unittest.skipUnless(os.name == 'posix', 'Actual Linux proc identity required.')

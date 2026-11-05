@@ -22,6 +22,7 @@ import types
 import urllib.request
 
 SCOPE = 'fox-hosted-snapshot-plan-v1'
+SCOPE_V2 = 'fox-hosted-snapshot-plan-v2'
 G_RELEASE = 'acc3bf901d6f221cc5b887afe88a5cd53b9b4a8153e820b1f078b10d679004ba'
 TARGET = {'instance_id': 'ocid1.instance.oc1.iad.anuwcljtc7x6gxic5w37qsyp3rst64betkt4uk2pdcrtmy3okspcpbv77qea',
           'compartment_id': 'ocid1.compartment.oc1..aaaaaaaa2q5aelkapmt5mhumvxadcynq5chez2faeucy5plefhy3ylmahtba',
@@ -35,6 +36,7 @@ PROTECTED_REQUIRED = {'opaf-client', 'sqlcl-connections', 'wallet', 'converter-c
                       'baseline-target-profile', 'release-metadata', 'opaf-definitions'}
 PROTECTED_OPTIONAL = {'admin-secret', 'verifier-unit', 'operator-installation', 'operator-configuration', 'retirement-archive'}
 HOSTED_REQUIRED = {'admin-secret', 'verifier-unit', 'operator-installation', 'operator-configuration'}
+INSTALLATION_FILES = {'installation-admission': 'admission', 'installation-inventory': 'inventory'}
 DIRECTORY_SOURCES = {'opaf-client', 'sqlcl-connections', 'wallet', 'converter-config',
                      'release-metadata', 'operator-configuration', 'retirement-archive'}
 _KEY = object()
@@ -92,9 +94,10 @@ def configuration_document(raw, expected_sha256):
     need(set(value) == {'schema_version', 'scope', 'mode', 'target', 'operator_release_sha256',
          'provider_configuration_sha256', 'authority_source_sha256', 'python', 'runtime',
          'role_paths', 'protected_sources', 'output_root', 'source_sha256'}
-         and type(value['schema_version']) is int and value['schema_version'] == 1
-         and value['scope'] == SCOPE and value['target'] == TARGET
+         and type(value['schema_version']) is int and value['schema_version'] in (1, 2)
+         and value['scope'] == (SCOPE if value['schema_version'] == 1 else SCOPE_V2) and value['target'] == TARGET
          and value['mode'] in ('pre-hosted-g', 'hosted'), 'SNAPSHOT_PLAN_FIELDS_INVALID')
+    need(value['schema_version'] == 1 or value['mode'] == 'hosted', 'SNAPSHOT_V2_HOSTED_ONLY')
     need(type(value['operator_release_sha256']) is str and SHA.fullmatch(value['operator_release_sha256']),
          'SNAPSHOT_RELEASE_INVALID')
     if value['mode'] == 'pre-hosted-g':
@@ -121,8 +124,9 @@ def configuration_document(raw, expected_sha256):
     need(type(roles) is dict and set(roles) == required, 'SNAPSHOT_ROLE_COVERAGE_REQUIRED')
     roots = [path(item) for item in roles.values()]
     protected = value['protected_sources']
-    need(type(protected) is dict and PROTECTED_REQUIRED <= set(protected)
-         and set(protected) <= PROTECTED_REQUIRED | PROTECTED_OPTIONAL, 'SNAPSHOT_PROTECTED_COVERAGE_REQUIRED')
+    extra = set(INSTALLATION_FILES) if value['schema_version'] == 2 else set()
+    need(type(protected) is dict and PROTECTED_REQUIRED | extra <= set(protected)
+         and set(protected) <= PROTECTED_REQUIRED | PROTECTED_OPTIONAL | extra, 'SNAPSHOT_PROTECTED_COVERAGE_REQUIRED')
     if value['mode'] == 'hosted':
         need(HOSTED_REQUIRED <= set(protected), 'SNAPSHOT_HOSTED_PROTECTED_COVERAGE_REQUIRED')
     else:
@@ -139,6 +143,9 @@ def configuration_document(raw, expected_sha256):
         path(item['path'])
     if value['mode'] == 'hosted':
         need(protected['operator-installation']['sha256'] is not None, 'SNAPSHOT_PINNED_INSTALLATION_REQUIRED')
+    if value['schema_version'] == 2:
+        need(all(protected[label]['sha256'] is not None for label in INSTALLATION_FILES),
+             'SNAPSHOT_PINNED_INSTALLATION_FILES_REQUIRED')
     output = path(value['output_root'])
     need(all(not overlap(a, b) for index, a in enumerate(roots) for b in roots[index + 1:])
          and all(not overlap(output, item) for item in roots)
@@ -208,6 +215,16 @@ def _covered(filename, config):
                    for root in config['role_paths'].values())
 
 
+def installation_file_references(config, installation):
+    """V2 captures exact pinned files; never authorize a broader parent root."""
+    if config['schema_version'] == 1:
+        return
+    for label, role in INSTALLATION_FILES.items():
+        ref = installation['layout']['inventory'] if role == 'inventory' else installation[role]
+        need(config['protected_sources'][label] == {'path': ref['path'], 'kind': 'file', 'sha256': ref['sha256']},
+             'SNAPSHOT_INSTALLATION_FILE_BINDING_CHANGED')
+
+
 def hosted_authority(lease, configuration_raw, *, expected_sha256, release_raw):
     """Requires a genuine current OS lease; does not initialize or recover one."""
     from qa.operator import runtime_provider, product_queue_transport, hosted_service, retirement_handoff
@@ -238,6 +255,7 @@ def hosted_authority(lease, configuration_raw, *, expected_sha256, release_raw):
          'SNAPSHOT_INSTALLED_RELEASE_CHANGED')
     references = [installation[name] for name in ('provider', 'release', 'admission')]
     references.append(installation['layout']['inventory'])
+    installation_file_references(config, installation)
     for reference in references:
         need(_covered(reference['path'], config), 'SNAPSHOT_INSTALLATION_REFERENCE_NOT_COVERED')
         content = runtime_provider._read(path(reference['path']), 2_000_000, private=True)
