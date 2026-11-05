@@ -183,11 +183,13 @@ test('actual React components escape source messages reviewer verdicts and notes
 });
 test('conversion consent technical acceptance and download gates remain unchanged',()=>{
  assert.match(ui,/const ready=inventory\.conversion_eligible&&\(!native\|\|native\.state==='READY'\)/);
- assert.match(ui,/disabled=\{busy\|\|!session\.conversion_configured\|\|!consent\.every\(Boolean\)\|\|!detail\.inventory\.conversion_eligible\|\|\(session\.conversion_profile==='native-table-form-v1'&&detail\.inventory\.native_assessment\?\.state!=='READY'\)\}/);
+ assert.match(ui,/disabled=\{!consentIsCurrent\|\|busy\|\|!session\.conversion_configured\|\|!consent\.every\(Boolean\)\|\|!detail\.inventory\.conversion_eligible\|\|\(session\.conversion_profile==='native-table-form-v1'&&detail\.inventory\.native_assessment\?\.state!=='READY'\)\}/);
+ assert.match(ui,/if\(!consentIsCurrent\|\|consentVersion!==consentRevision\.current\|\|sourceActionInFlight\.current\|\|!sourceUiIsCurrent\(\)\)return/);
  for(const field of ['approved_redacted_source:consent[0]','approved_external_ai:consent[1]','approved_prototype_scope:consent[2]'])assert.ok(ui.includes(field));
- assert.match(ui,/\['REVIEW_REQUIRED','VERIFIED'\]\.includes\(r\.state\)&&r\.source_hash===detail\.inventory\.source_hash&&<Acceptance/);
+ assert.match(ui,/\['REVIEW_REQUIRED','VERIFIED'\]\.includes\(r\.state\)&&r\.source_hash===detail\.inventory\.source_hash&&<Acceptance key=\{sourceUiKey\+'-'\+r\.id\}/);
  assert.match(ui,/r\.state==='ACCEPTED'&&r\.downloadable/);
- assert.match(ui,/disabled=\{busy\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\}/);
+ assert.match(ui,/disabled=\{sourceBusy\|\|busy\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\}/);
+ assert.match(ui,/if\(sourceBusy\|\|busy\|\|!isCurrent\(\)\|\|reviewVersion!==reviewRevision\.current\|\|!tested\|\|!reviewed\|\|!notes\.trim\(\)\)return/);
  assert.doesNotMatch(ui,/JSON\.stringify\(evidence\.reviewer/);
  assert.doesNotMatch(ui,/dangerouslySetInnerHTML/);
 });

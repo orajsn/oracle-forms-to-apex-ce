@@ -4,6 +4,50 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.5.0] - 2026-11-05
+
+### Added
+
+- Complete-conversion / partial-demo scope selection. A read-only preview lists
+  included forms, omitted forms, skipped behavior and corrective actions. An
+  explicit confirmation creates a separate derived source version; originals
+  and their blocking findings remain available.
+- Partial drafts recompose only proven table-backed fields and supplied DDL.
+  Known code/library/report/control-item omissions are recorded, not executed
+  or presented as translated. Missing keys, conflicting definitions, restricted
+  operations and uncertain field mappings do not become invented working forms.
+- Draft scope remains visible on saved project/run views, has an owner-scoped
+  report download and is included as comments in packaged source evidence.
+  Draft source branches are frozen: return to the original version to correct
+  dependencies. Lost creation responses reconcile against the exact saved
+  scope without replaying the operation.
+- A separate development-draft download rechecks the existing complete native
+  technical proof and returns the unchanged package bytes. It records no human
+  acceptance. The accepted-package download and its human gate are unchanged.
+- Contextual next actions, responsive scope cards, a configuration/service
+  readiness view and APEX handoff instructions using recorded test versions.
+
+### Fixed
+
+- Derived draft sources fail closed if their saved scope receipt is missing,
+  corrupt or belongs to a different owner. Assessment, queueing, acceptance and
+  development download cannot silently reinterpret such a branch as complete.
+- Clean-checkout browser regressions build the current UI in memory instead of
+  depending on ignored build assets. Legacy consent checks require the actual
+  stronger source-revision/current-consent and busy guards.
+
+### Verification and limits
+
+- Local API/storage, source-planning, normal queue-submission, exact-byte native
+  release and UI regression scenarios are covered. The canonical browser path
+  uses a real isolated local API and SQLite with synthetic sources and no worker.
+- These checks do not establish a live OPAF conversion, real FMB/PLL extraction,
+  SQLcl/Oracle execution or business acceptance. Hosted deployment and its
+  retained verifier failure remain separate work; this is a source increment.
+- Omitted actions are absent, not newly implemented disabled-placeholder APEX
+  components. Wider native component mapping and fresh-host installation remain
+  tracked in the product roadmap. No new OCI resources or dependencies added.
+
 ## [0.4.2] - 2026-11-05
 
 ### Fixed

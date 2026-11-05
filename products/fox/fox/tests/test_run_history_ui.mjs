@@ -15,6 +15,10 @@ test('saved output survives reopen and renamed sources, with read-only status an
 },async()=>{
  const packages=process.env.FOX_TEST_NODE_MODULES;assert.ok(packages);
  const {chromium}=createRequire(path.join(packages,'../package.json'))('playwright');
+ const {build}=createRequire(import.meta.url)('esbuild');
+ const built=await build({entryPoints:[path.join(root,'web/main.tsx')],absWorkingDir:root,bundle:true,write:false,
+  outfile:'preview.js',format:'iife',platform:'browser',define:{'process.env.NODE_ENV':'"production"'},logLevel:'silent'});
+ const js=built.outputFiles.find(file=>file.path.endsWith('.js')).text,css=built.outputFiles.find(file=>file.path.endsWith('.css')).text;
  const python=process.env.FOX_TEST_PYTHON??path.join(root,'.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python');
  const out=path.join(product,'work',process.env.FOX_RUN_HISTORY_ARTIFACT??`run-history-${Date.now()}`);
  assert.ok(out.startsWith(path.join(product,'work')+path.sep));await mkdir(path.dirname(out),{recursive:true});await mkdir(out);
@@ -27,6 +31,14 @@ test('saved output survives reopen and renamed sources, with read-only status an
   const fixture=JSON.parse(first),{origin}=fixture;assert.match(origin,/^http:\/\/127\.0\.0\.1:\d+$/);
   for(let n=0;n<100;n++){try{if((await fetch(origin+'/api/health')).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   browser=await chromium.launch({channel:'msedge',headless:true});context=await browser.newContext({viewport:{width:1440,height:1100}});page=await context.newPage();page.setDefaultTimeout(12000);
+  // Test the current source, not an optional/stale ignored dist build. Keeping
+  // assets on routes also exercises a true reload against the same real API.
+  await context.route('**/*',route=>{const url=route.request().url();
+   if(url===origin+'/')return route.fulfill({status:200,contentType:'text/html',body:'<div id="root"></div><link rel="stylesheet" href="/__test-ui.css"><script src="/__test-ui.js"></script>'});
+   if(url===origin+'/__test-ui.js')return route.fulfill({status:200,contentType:'text/javascript',body:js});
+   if(url===origin+'/__test-ui.css')return route.fulfill({status:200,contentType:'text/css',body:css});
+   return url.startsWith(origin+'/api/')?route.continue():route.abort();
+  });
   page.on('pageerror',e=>pageErrors.push(e.message));page.on('request',request=>{if(request.method()!=='GET')writes.push({method:request.method(),url:request.url()});});
   await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('synthetic-owner');await page.getByLabel('Password',{exact:true}).fill('synthetic-history-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   const openOutput=async()=>{await page.getByRole('button',{name:'5 Output',exact:true}).click();const card=page.getByRole('article',{name:'Output for run '+fixture.run_id,exact:true});await card.getByText('Saved progress and form responses',{exact:true}).click();return card;};
@@ -54,9 +66,12 @@ test('saved output survives reopen and renamed sources, with read-only status an
   await writeFile(path.join(out,'result.json'),JSON.stringify({passed:true,actual_local_api:true,actual_local_sqlite:true,
    real_package_and_status_readers:true,synthetic_oracle_opaf_transports:true,oracle_executed:false,model_executed:false,
    human_acceptance_recorded:false,reopened_history:true,original_labels_retained:true,conversion_or_import_replayed:false},null,2));
+ }catch(error){await page?.screenshot({path:path.join(out,'failure.png'),fullPage:true}).catch(()=>{});
+  await writeFile(path.join(out,'failure.json'),JSON.stringify({passed:false,error:String(error.message),pageErrors}));throw error;
  }finally{
   await context?.close();await browser?.close();if(!child.stdin.destroyed)child.stdin.end('STOP\n');
   if(child.exitCode===null)await Promise.race([once(child,'exit'),new Promise(resolve=>setTimeout(()=>{child.kill();resolve();},15000).unref())]);
+  await writeFile(path.join(out,'server.log'),errors);
  }
  assert.equal(child.exitCode,0,errors);const saved=JSON.parse(await readFile(path.join(out,'server-result.json'),'utf8'));assert.equal(saved.retained_run_preserved,true);
 });

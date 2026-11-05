@@ -65,6 +65,10 @@ test('actual UI and local API: add one missing body, retain both forms and rejec
 },async()=>{
  const packageRoot=process.env.FOX_TEST_NODE_MODULES;assert.ok(packageRoot);
  const {chromium}=createRequire(path.join(packageRoot,'../package.json'))('playwright');
+ const {build}=require('esbuild');
+ const built=await build({entryPoints:[path.join(root,'web/main.tsx')],absWorkingDir:root,bundle:true,write:false,
+  outfile:'preview.js',format:'iife',platform:'browser',define:{'process.env.NODE_ENV':'"production"'},logLevel:'silent'});
+ const js=built.outputFiles.find(file=>file.path.endsWith('.js')).text,css=built.outputFiles.find(file=>file.path.endsWith('.css')).text;
  const out=path.join(product,'work',process.env.FOX_SOURCE_REQUEST_ARTIFACT??`source-request-flow-${Date.now()}`);
  assert.ok(out.startsWith(path.join(product,'work')+path.sep));await mkdir(path.dirname(out),{recursive:true});await mkdir(out);
  const child=spawn(python,['-B','tests/serve_source_requests_test.py','--root',out],{cwd:root,stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -75,6 +79,14 @@ test('actual UI and local API: add one missing body, retain both forms and rejec
  try{
   for(let n=0;n<100;n++){try{const response=await fetch(origin+'/api/health');if(response.ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   browser=await chromium.launch({channel:'msedge',headless:true});context=await browser.newContext({viewport:{width:1440,height:1100}});page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));
+  // The Python fixture is an API, not a frontend builder. Serve the canonical
+  // source bundle explicitly so a clean checkout never depends on ignored dist.
+  await context.route('**/*',route=>{const url=route.request().url();
+   if(url===origin+'/')return route.fulfill({status:200,contentType:'text/html',body:'<div id="root"></div><link rel="stylesheet" href="/__test-ui.css"><script src="/__test-ui.js"></script>'});
+   if(url===origin+'/__test-ui.js')return route.fulfill({status:200,contentType:'text/javascript',body:js});
+   if(url===origin+'/__test-ui.css')return route.fulfill({status:200,contentType:'text/css',body:css});
+   return url.startsWith(origin+'/api/')?route.continue():route.abort();
+  });
   await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('source-flow-test');await page.getByLabel('Password',{exact:true}).fill('synthetic-source-flow-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('button',{name:'New project',exact:true}).click();await page.getByLabel('Customer / organization',{exact:true}).fill('Synthetic source QA');await page.getByLabel('Project name',{exact:true}).fill('Shared dependency flow');await page.getByRole('button',{name:'Create project',exact:true}).click();
   await page.getByRole('heading',{name:'Add all the forms for this application',exact:true}).waitFor();

@@ -414,6 +414,20 @@ def _audit(c: sqlite3.Connection, owner: str, action: str, sid: str, now: float)
 
 def publish_upload(c: sqlite3.Connection, pid: str, checked: list[dict], now: float, owner: str) -> dict:
     """Merge exact-name replacements into the selected set, retaining all rows."""
+    return _publish_sources(c, pid, checked, now, owner, replace=False)
+
+
+def publish_source_branch(c: sqlite3.Connection, pid: str, checked: list[dict], now: float, owner: str) -> dict:
+    """Select a complete explicitly derived branch; retain all original rows.
+
+    Unlike uploads this does not merge original modules into the branch. The
+    caller must validate the derivation and record its receipt in this same
+    transaction. This grants no execution, review or download authority.
+    """
+    return _publish_sources(c, pid, checked, now, owner, replace=True)
+
+
+def _publish_sources(c, pid, checked, now, owner, *, replace):
     _transaction(c)
     _project(c, pid, owner)
     now = _now(now)
@@ -449,7 +463,7 @@ def publish_upload(c: sqlite3.Connection, pid: str, checked: list[dict], now: fl
     for row in insertions:
         c.execute('INSERT INTO sources(id,project,name,sha256,bytes,text,created) VALUES(?,?,?,?,?,?,?)',
                   tuple(row[key] for key in ('id', 'project', 'name', 'sha256', 'bytes', 'text', 'created')))
-    merged = {item['name']: item for item in current}
+    merged = {} if replace else {item['name']: item for item in current}
     merged.update(chosen)
     sid, reused = _new_set(c, pid, list(merged.values()), now, 'upload')
     changed = previous != sid

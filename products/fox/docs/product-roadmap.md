@@ -8,6 +8,32 @@ A business user manages multiple projects. Each project contains the Forms modul
 
 "APEX generated", "technically verified" and "business behavior accepted" remain separate facts. The outcome is a declared supported conversion, not universal behavioral equivalence or an import guarantee for unspecified targets.
 
+## Visible increment: 0.5.0, 5 November 2026
+
+The user approved the broader UI/conversion enhancements plus an explicit
+partial-draft route. This is incremental implementation, not completion of all
+G1–G8. Version 0.5.0 adds the connected local preview/branch/omission-report UX,
+next-action guidance, setup status, recorded import-version handoff and a
+technically verified development download separate from business acceptance.
+See [partial drafts](partial-drafts.md) for its exact boundaries.
+
+| Visible improvement | Current increment | Remaining acceptance |
+| --- | --- | --- |
+| Project next action | Contextual action strip and existing project workspace | Whole live multi-project journey |
+| Guided upload / per-form assessment | Existing intake, source-linked findings and original/draft distinction | Genuine binary-preparation UX and broader module coverage |
+| Missing-file correction | Existing grouped requests; originals retained for correction | Real missing-source → mapped business behavior proof |
+| Complete / partial choice | Preview, confirmation, frozen source branch and omission report | Installed OPAF/SQLcl/APEX partial-draft rehearsal |
+| Progress / continuation | Existing checkpoints; lost branch responses reconcile without replay | Wider transient-failure recovery and live verifier recovery |
+| APEX output centre | Separate development download and recorded-version handoff | Live exact-package/manual-import/runtime proof |
+| Source history | Original/derived branches, saved runs and return-to-original action | Wider revision/large-project usability |
+| Setup / operations | Configuration-only and service-health view | Fresh connected install/upgrade/restore acceptance |
+
+The old complete-conversion contract still forbids silent omissions. A user may
+now explicitly approve a separately labelled subset; an original blocked form
+does not become converted because its demo branch is generated. Human business
+acceptance is unchanged. A development export can precede it only after the
+normal complete native technical proof passes.
+
 ## Business-user UI journey
 
 ```text

@@ -14,7 +14,7 @@ import ts from 'typescript';
 const foxRoot=fileURLToPath(new URL('../',import.meta.url));
 const workspace=path.dirname(foxRoot),require=createRequire(import.meta.url);
 const sources={};
-for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','preparedUpload.ts','projectWorkbench.css','verificationPresentation.ts','SourceRequestPanel.tsx','sourceRequests.ts'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
+for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','PartialDraftPanel.tsx','preparedUpload.ts','projectWorkbench.css','verificationPresentation.ts','SourceRequestPanel.tsx','sourceRequests.ts'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 function load(source,fileName,imports={}){
  const compiled=ts.transpileModule(source,{fileName,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
@@ -27,7 +27,8 @@ const api=load(sources['projectConversion.ts'],'projectConversion.ts',{'./verifi
 const upload=load(sources['preparedUpload.ts'],'preparedUpload.ts');
 const requestApi=load(sources['sourceRequests.ts'],'sourceRequests.ts');
 const requestPanel=load(sources['SourceRequestPanel.tsx'],'SourceRequestPanel.tsx',{'./sourceRequests':requestApi});
-const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel});
+const draftPanel=load(sources['PartialDraftPanel.tsx'],'PartialDraftPanel.tsx');
+const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel,'./PartialDraftPanel':draftPanel});
 const render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
 const clone=value=>JSON.parse(JSON.stringify(value));
 
@@ -406,6 +407,18 @@ test('human review participates in the workbench mutation boundary',()=>{
  }
  const missing=render(components.OutputRun,{...props,busy:false});
  assert.doesNotMatch(missing,/Review mutation/);assert.match(missing,/Human review has not been connected/);
+});
+
+test('development draft download requires verified project run and server permission',()=>{
+ const props={binding:binding(),plan:api.readProjectPlan(fixtures.ready,binding()),busy:false,onDraftDownload:()=>{}};
+ const verified=baseRun({state:'VERIFIED',artifact_generated:true,technical_verified:true,human_accepted:false,draft_downloadable:true});
+ const html=render(components.OutputRun,{...props,run:verified});
+ assert.match(html,/<button[^>]*>[^<]*<svg[^>]*>[\s\S]*?<\/svg> Download development draft<\/button>/);
+ assert.match(html,/does not record business acceptance/);
+ for(const run of [{...verified,draft_downloadable:false},{...verified,state:'QA_REQUIRED',technical_verified:false},
+  {...verified,project_id:'another-project'}]){
+  assert.doesNotMatch(render(components.OutputRun,{...props,run}),/Download development draft/);
+ }
 });
 
 test('isolated browser: guided flow, source reset, unknown writes and historical output',{skip:process.env.FOX_UI_BROWSER!=='1',timeout:120000},async()=>{

@@ -31,6 +31,7 @@ from .prepared_source import (UPLOAD_MANIFEST_NAME, MAX_MANIFEST_BYTES,
 from . import source_history
 from .release_info import public_release
 from .source_requests import build_source_requests, request_text
+from .partial_draft import prepare_partial_draft, saved_draft_scope
 from .storage import initialize_schema as initialize_storage_schema
 
 LEGACY_PROFILE = 'legacy-html-prototype-v1'
@@ -264,6 +265,13 @@ class SourceExclusionInput(BaseModel):
     expected_current_source_set_id: str = Field(pattern=r'^ss-[a-f0-9]{32}$')
     excluded_file_ids: list[str] = Field(min_length=1, max_length=50)
 
+class PartialDraftInput(BaseModel):
+    model_config = {'extra': 'forbid', 'strict': True}
+    source_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
+    expected_current_source_set_id: str = Field(pattern=r'^ss-[a-f0-9]{32}$')
+    draft_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    accepted_omissions: bool
+
 def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                enable_local_preparation: bool = False, local_preparation_backend=None) -> FastAPI:
     if type(enable_local_preparation) is not bool or (enable_local_preparation and enable_worker):
@@ -404,6 +412,10 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
     async def unavailable_source_history(request, exc):
         return JSONResponse({'detail': 'Saved source history could not be verified. Ask the operator to reconcile it; no source version was changed.',
                              'code': 'SOURCE_HISTORY_UNAVAILABLE'}, status_code=409)
+    @app.exception_handler(ProjectConversionInputError)
+    async def unavailable_project_metadata(request,exc):
+        return JSONResponse({'detail':'Saved conversion or draft-scope metadata could not be verified. Ask FOX support to check this project; no operation was repeated.',
+                             'code':exc.code},status_code=409)
     def owner(request:Request):
         token=hashlib.sha256(request.cookies.get('fox_session','').encode()).hexdigest()
         with db() as c: row=c.execute('SELECT owner FROM sessions WHERE token=? AND expires>?',(token,time.time())).fetchone()
@@ -450,9 +462,11 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         if include_preparation:
             result['source_preparation'] = source_preparation(pid, result['source_hash'])
         if connection is not None:
+            saved_draft_scope(connection, pid, result['source_hash'])
             result['selected_source_set_id'] = source_history.selected_source_set_id(connection, pid)
         else:
             with db() as c:
+                saved_draft_scope(c, pid, result['source_hash'])
                 result['selected_source_set_id'] = source_history.selected_source_set_id(c, pid)
         result['conversion_profile'] = os.getenv('FOX_CONVERSION_PROFILE', LEGACY_PROFILE).strip()
         if result['conversion_profile'] == NATIVE_PROFILE:
@@ -464,6 +478,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
     def selected_project_plan(c, p):
         sources = current_sources(p['id'], c)
         source_hash = inventory(sources)['source_hash']
+        saved_draft_scope(c, p['id'], source_hash)
         plan = assess_project_conversion(sources, project_id=p['id'],
                                          project_name=p['name'], source_hash=source_hash)
         return {**public_project_plan(plan),
@@ -583,6 +598,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 p['project_plan'] = None
                 p['project_plan_error'] = {'code': error.code, 'message': str(error)}
             p['source_requests'] = build_source_requests(p['project_plan']) if p['project_plan'] else None
+            p['draft_scope'] = saved_draft_scope(c, pid, p['inventory']['source_hash'])
             configuration = configured_conversion()
             configured = configuration['conversion_configured']
             plan_ready = bool(p['project_plan'] and p['project_plan']['can_generate'])
@@ -626,6 +642,9 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                     run.update(native_progress(root, run))
                     run['downloadable'] = bool(run['artifact'] and run['state'] == 'ACCEPTED')
                 run['project_id'] = pid
+                run['draft_downloadable'] = bool(presentation and presentation.get('technical_verified')
+                    and is_project_run(root, run) and run['state'] in {'VERIFIED','ACCEPTED'})
+                run['draft_scope'] = saved_draft_scope(c, pid, run['source_hash'])
                 run['verification_status'] = verification_status(root, run, verifier_config)
                 run.pop('artifact', None)
                 run.pop('project', None)
@@ -654,6 +673,69 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             except (ProjectConversionInputError,ValueError):
                 raise HTTPException(422,'A grouped request list is unavailable. Review individual form findings.') from None
             return Response(text,media_type='text/plain',headers={'Content-Disposition':'attachment; filename="fox-source-requests.txt"'})
+
+    @app.get('/api/projects/{pid}/partial-draft')
+    def preview_partial_draft(pid:str,request:Request):
+        p=project(request,pid)
+        if os.getenv('FOX_CONVERSION_PROFILE')!=PROJECT_PROFILE:
+            raise HTTPException(409,'Partial drafts require the native-project conversion profile.')
+        with db() as c:
+            c.execute('BEGIN')
+            sources=current_sources(pid,c)
+            try:
+                value,_=prepare_partial_draft(sources,project_id=pid,project_name=p['name'],
+                                             source_hash=inventory(sources)['source_hash'])
+            except (ProjectConversionInputError,ValueError) as error:
+                raise HTTPException(422,str(error)) from None
+            value['selected_source_set_id']=source_history.selected_source_set_id(c,pid)
+            return history_json_response(value)
+
+    @app.post('/api/projects/{pid}/partial-draft',status_code=201)
+    def create_partial_draft(pid:str,body:PartialDraftInput,request:Request):
+        p=project(request,pid)
+        if os.getenv('FOX_CONVERSION_PROFILE')!=PROJECT_PROFILE:
+            raise HTTPException(409,'Partial drafts require the native-project conversion profile.')
+        if not body.accepted_omissions:
+            raise HTTPException(422,'Confirm the listed omissions before creating a partial draft.')
+        with db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            sources=current_sources(pid,c)
+            if (source_history.selected_source_set_id(c,pid)!=body.expected_current_source_set_id
+                    or inventory(sources)['source_hash']!=body.source_hash):
+                raise HTTPException(409,'The source version changed. Review a fresh draft preview.')
+            if saved_draft_scope(c,pid,body.source_hash) is not None:
+                raise HTTPException(409,'These are already draft sources. Return to the original version to prepare another draft.')
+            try:
+                report,derived=prepare_partial_draft(sources,project_id=pid,
+                    project_name=p['name'],source_hash=body.source_hash)
+            except (ProjectConversionInputError,ValueError) as error:
+                raise HTTPException(422,str(error)) from None
+            if report['draft_sha256']!=body.draft_sha256:
+                raise HTTPException(409,'The draft scope changed. Review its omissions again.')
+            if not report['available']:
+                raise HTTPException(422,report['next_action'])
+            now=time.time()
+            report['parent_source_set_id']=body.expected_current_source_set_id
+            result=source_history.publish_source_branch(c,pid,derived,now,p['owner'])
+            sid=result['source_set']['id']
+            c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                (p['owner'],'partial_draft:'+sid,json.dumps(report,sort_keys=True),now))
+            response=history_json_response({'selected_source_set_id':sid,
+                'source_hash':report['derived_source_hash'],'draft_scope':report,
+                'message':'Draft sources saved. Review the scope and confirm normal processing to generate APEX.'})
+            response.status_code=201
+            return response
+
+    @app.get('/api/projects/{pid}/draft-scope')
+    def download_draft_scope(pid:str,request:Request,source_hash:str):
+        project(request,pid)
+        with db() as c:
+            c.execute('BEGIN')
+            value=saved_draft_scope(c,pid,source_hash)
+            if value is None: raise HTTPException(404,'No partial-draft report exists for this source version.')
+            response=history_json_response(value)
+            response.headers['Content-Disposition']='attachment; filename="fox-partial-draft-scope.json"'
+            return response
 
     @app.post('/api/projects/{pid}/sources')
     async def upload(pid:str,request:Request,files:list[UploadFile]=File(...),prepared_manifest:UploadFile|None=File(None),
@@ -685,6 +767,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 expected = None if expected_current_source_set_id == 'null' else expected_current_source_set_id
                 if source_history.selected_source_set_id(c, pid) != expected:
                     raise source_history.SourceHistoryConflict('Source selection changed.')
+            if saved_draft_scope(c,pid,inventory(current_sources(pid,c))['source_hash']) is not None:
+                raise HTTPException(409,'Return to the original source version before adding or correcting files. Partial-draft sources stay frozen with their omission report.')
             source_history.publish_upload(c, pid, checked, now, p['owner'])
             c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',(p['owner'],'sources_added',pid,now))
             if prepared is not None:
@@ -740,6 +824,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         p=project(request,pid)
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
+            if saved_draft_scope(c,pid,inventory(current_sources(pid,c))['source_hash']) is not None:
+                raise HTTPException(409,'Return to the original source version to change the selected files. Partial-draft scope cannot silently become a complete conversion.')
             result = source_history.exclude_sources(c, pid, sid, body.excluded_file_ids,
                                                     body.expected_current_source_set_id, time.time(), p['owner'])
             selected = source_history.selected_source_set_id(c, pid)
@@ -799,6 +885,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             locked_sources = current_sources(pid, c)
             if inventory(locked_sources)['source_hash'] != body.source_hash:
                 raise HTTPException(409,'Sources changed. Review the current assessment.')
+            saved_draft_scope(c, pid, body.source_hash)
             if project_plan is not None:
                 if source_history.selected_source_set_id(c, pid) != body.expected_current_source_set_id:
                     raise HTTPException(409,'The selected source version changed. Refresh the project before converting.')
@@ -856,6 +943,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 raise HTTPException(409,'Technical checks must pass before human acceptance.')
             if r['source_hash'] != body.source_hash or inventory(current_sources(pid, c))['source_hash'] != body.source_hash:
                 raise HTTPException(409,'Sources changed. Test and accept the current source version.')
+            saved_draft_scope(c, pid, body.source_hash)
             try:
                 technical = checked_release(c, root, dict(r))
             except VerificationError:
@@ -892,6 +980,33 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 if technical:
                     evidence={**evidence,'technical_verification':technical['proof']}
         return JSONResponse(evidence,headers={'Content-Disposition':'inline; filename="fox-release-evidence.json"'})
+    @app.get('/api/projects/{pid}/runs/{rid}/draft-download')
+    def download_development_draft(pid:str,rid:str,request:Request):
+        """Exact technically checked native output, without claiming acceptance.
+
+        The accepted-package route is intentionally unchanged. No proof/state
+        flag alone authorizes bytes, and no human acceptance record is written.
+        """
+        from .technical_release import checked_release, VerificationError
+        project(request,pid)
+        with db() as c:
+            c.execute('BEGIN')
+            row=c.execute('SELECT * FROM runs WHERE id=? AND project=?',(rid,pid)).fetchone()
+            if not row or not re.fullmatch(r'fox-[a-f0-9]{20}',rid):
+                raise HTTPException(404,'Run not found.')
+            if row['state'] not in {'VERIFIED','ACCEPTED'} or not row['artifact']:
+                raise HTTPException(409,'Technical verification must pass before downloading a development draft.')
+            saved_draft_scope(c, pid, row['source_hash'])
+            try:
+                technical=checked_release(c,root,dict(row))
+            except VerificationError:
+                raise HTTPException(409,'Native technical proof is missing or changed. Draft download is blocked.') from None
+            if not technical or technical['proof'].get('scope')!='fox-project-technical-verification-v1':
+                raise HTTPException(409,'A checked native-project package is required for draft download.')
+            return Response(technical['package'],media_type='application/zip',headers={
+                'Content-Disposition':'attachment; filename="'+rid+'-development-draft.zip"',
+                'Cache-Control':'no-store','X-FOX-Business-Acceptance':'not-asserted'})
+
     @app.get('/api/projects/{pid}/runs/{rid}/download')
     def download(pid:str,rid:str,request:Request):
         from .technical_release import checked_release, VerificationError

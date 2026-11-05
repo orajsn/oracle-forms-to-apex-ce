@@ -139,6 +139,70 @@ TAMPER_PATHS = ['source-snapshot.json', 'release-evidence.json', 'apex-package.z
                 'project-technical-verification/qa-result.json']
 
 
+def test_development_download_requires_real_technical_proof_but_not_business_acceptance(api):
+    client,case,url=api
+    assert client.get(url+'/draft-download').status_code==409
+    promote(case)
+    before_row,before_counts=row(case),counts(case)
+    result=client.get(url+'/draft-download')
+    assert result.status_code==200,result.text
+    assert result.content==case.built.package
+    assert 'development-draft.zip' in result.headers['content-disposition']
+    assert result.headers['x-fox-business-acceptance']=='not-asserted'
+    assert result.headers['cache-control']=='no-store'
+    assert row(case)==before_row and counts(case)==before_counts
+    assert counts(case)['acceptances']==0
+    assert client.get(url+'/download').status_code==409
+
+
+@pytest.mark.parametrize('state',['QUEUED','PROCESSING','QA_REQUIRED','REVIEW_REQUIRED','VERIFIED','ACCEPTED'])
+def test_development_download_never_trusts_a_run_state_without_proof(api,state):
+    client,case,url=api
+    with sqlite3.connect(case.root/'fox.sqlite3') as db:
+        db.execute('UPDATE runs SET state=? WHERE id=?',(state,case.run_id))
+    before_row,before_counts=row(case),counts(case)
+    assert client.get(url+'/draft-download').status_code==409
+    assert row(case)==before_row and counts(case)==before_counts
+
+
+def test_verified_historical_development_download_is_exact_and_not_a_current_source_acceptance(api):
+    client,case,url=api
+    promote(case)
+    change_sources(case)
+    before_row,before_counts=row(case),counts(case)
+    result=client.get(url+'/draft-download')
+    assert result.status_code==200,result.text
+    assert result.content==case.built.package
+    assert client.post(url+'/accept',json=acceptance(case)).status_code==409
+    assert client.get(url+'/download').status_code==409
+    assert row(case)==before_row and counts(case)==before_counts
+
+
+def test_development_download_is_authenticated_and_project_scoped(api):
+    client,case,url=api
+    promote(case)
+    other=client.post('/api/projects',json={'customer':'Synthetic','name':'Separate source project'})
+    assert other.status_code==201,other.text
+    other_url=f"/api/projects/{other.json()['id']}/runs/{case.run_id}/draft-download"
+    before_row,before_counts=row(case),counts(case)
+    assert client.get(other_url).status_code==404
+    assert client.get(url.replace(case.run_id,'fox-'+'0'*20)+'/draft-download').status_code==404
+    assert client.post('/api/logout').status_code==200
+    assert client.get(url+'/draft-download').status_code==401
+    assert row(case)==before_row and counts(case)==before_counts
+
+
+@pytest.mark.parametrize('relative',TAMPER_PATHS)
+def test_development_download_rechecks_the_exact_package_and_proof(api,relative):
+    client,case,url=api
+    promote(case)
+    before_row,before_counts=row(case),counts(case)
+    path=case.job/relative
+    path.write_bytes(path.read_bytes()+b'\n')
+    assert client.get(url+'/draft-download').status_code==409
+    assert row(case)==before_row and counts(case)==before_counts
+
+
 @pytest.mark.parametrize('relative', TAMPER_PATHS)
 def test_changed_exact_evidence_blocks_human_acceptance_without_mutation(api, relative):
     client, case, url = api

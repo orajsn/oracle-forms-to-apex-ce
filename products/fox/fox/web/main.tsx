@@ -10,6 +10,9 @@ import LocalPreparation from './LocalPreparation';
 import SourceVersionHistory from './SourceVersionHistory';
 import ReleaseInfo from './ReleaseInfo';
 import ProjectWorkbench,{ProjectDashboard,type HumanReviewControls,type WorkbenchActionResult} from './ProjectWorkbench';
+import {readDraftScope} from './PartialDraftPanel';
+import SetupReadiness from './SetupReadiness';
+import ApexHandoff from './ApexHandoff';
 import {presentProjectRun,runBelongsToProject,type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectRun} from './projectConversion';
 import {selectSourceSet,excludeSourceFile,assertRefreshedSourceProject,sourceHistoryErrorMessage,sourceHistoryRefreshRequired,type SourceSelectionAck} from './sourceVersionPresentation';
 
@@ -20,7 +23,7 @@ type NativeAssessment={state:string;profile_id:string;scope_note:string;blockers
 type Session={username:string;conversion_configured:boolean;conversion_profile:string;configuration_scope:string;configuration_checks:{code:string;ready:boolean;message:string}[]};
 type SourcePreparation={mode:string;matches_current_source:boolean;scope:string;receipt_id?:string;extraction_job_id?:string;canonical_manifest_sha256?:string;readable_source_hash?:string;files?:{name:string;sha256:string;bytes:number}[]};
 type Inventory={selected_source_set_id:string|null;files:{file:string;bytes:number;sha256:string;blocks:string[]}[];dependencies:Finding[];issues:Finding[];missing_count:number;source_hash:string;scope_note:string;source_bytes:number;conversion_source_bytes:number;max_conversion_bytes:number;forms_source_files:string[];conversion_eligible:boolean;conversion_blockers:{code:string;message:string}[];conversion_profile:string;native_assessment?:NativeAssessment;source_preparation?:SourcePreparation};
-type Detail=Project & {inventory:Inventory;runs:(Run&Partial<ProjectRun>)[];project_plan?:unknown;project_plan_error?:string;source_requests?:unknown;project_capabilities?:{upload?:ActionCapability;process?:ActionCapability};processing_notice?:string};
+type Detail=Project & {inventory:Inventory;runs:(Run&Partial<ProjectRun>)[];project_plan?:unknown;project_plan_error?:string;source_requests?:unknown;draft_scope?:unknown;project_capabilities?:{upload?:ActionCapability;process?:ActionCapability};processing_notice?:string};
 async function api(path:string,init?:RequestInit){
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),15000);
  try{const r=await fetch('/api'+path,{...init,signal:controller.signal});const data=await r.json();
@@ -122,14 +125,14 @@ function ProjectEvidence({pid,run}:{pid:string;run:ProjectRun}){
  const previewUrl=(run as ProjectRun&{application_url?:unknown}).application_url;
  const canPreview=presentProjectRun(run,run.source_hash,pid).canPreview&&typeof previewUrl==='string'&&/^https:\/\//i.test(previewUrl);
  useEffect(()=>{let current=true;setEvidence(null);setError('');api(`/projects/${pid}/runs/${run.id}/evidence`).then(value=>{if(current)setEvidence(value);}).catch(()=>{if(current)setError('Evidence could not be loaded. No result is being assumed.');});return()=>{current=false;};},[pid,run.id,run.state]);
- return <section className="panel" aria-label="Project conversion evidence"><h2>Mapping and remediation</h2><p>Run <code>{run.id}</code></p>{canPreview&&<a className="button secondary" href={previewUrl as string} target="_blank" rel="noopener noreferrer">Open APEX application <ArrowRight size={16}/></a>}{error?<p role="alert">{error}</p>:!evidence?<p role="status">Loading recorded evidence…</p>:<><p>{evidence.prototype_scope}</p><ReviewerFeedback reviewer={evidence.reviewer}/>{Array.isArray(evidence.remediation_items)&&evidence.remediation_items.map((item:any,index:number)=><div className="finding" key={index}><strong>{typeof item?.kind==='string'?item.kind:'Remediation item'}</strong><p>{[item?.file,item?.detail??item?.action].filter(value=>typeof value==='string').join(': ')}</p></div>)}<a href={`/api/projects/${pid}/runs/${run.id}/evidence`} target="_blank" rel="noopener noreferrer">View complete recorded evidence</a><p>Technical verification and genuine human acceptance are separate. No missing evidence is counted as passed.</p></>}</section>;
+ return <section className="panel" aria-label="Project conversion evidence"><h2>Mapping and remediation</h2><p>Run <code>{run.id}</code></p>{canPreview&&<a className="button secondary" href={previewUrl as string} target="_blank" rel="noopener noreferrer">Open APEX application <ArrowRight size={16}/></a>}{error?<p role="alert">{error}</p>:!evidence?<p role="status">Loading recorded evidence…</p>:<><p>{evidence.prototype_scope}</p><ReviewerFeedback reviewer={evidence.reviewer}/>{Array.isArray(evidence.remediation_items)&&evidence.remediation_items.map((item:any,index:number)=><div className="finding" key={index}><strong>{typeof item?.kind==='string'?item.kind:'Remediation item'}</strong><p>{[item?.file,item?.detail??item?.action].filter(value=>typeof value==='string').join(': ')}</p></div>)}<ApexHandoff evidence={evidence}/><a href={`/api/projects/${pid}/runs/${run.id}/evidence`} target="_blank" rel="noopener noreferrer">View complete recorded evidence</a><p>Technical verification and genuine human acceptance are separate. No missing evidence is counted as passed.</p></>}</section>;
 }
 function App(){
  const [startupError,setStartupError]=useState('');
  const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true),[projects,setProjects]=useState<Project[]>([]),[detail,setDetail]=useState<Detail|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[creating,setCreating]=useState(false),[tab,setTab]=useState('Sources'),[consent,setConsent]=useState([false,false,false]);
  const [sourceUiEpoch,setSourceUiEpoch]=useState(0),[consentSource,setConsentSource]=useState<string|null>(null);
  const [preparationOpen,setPreparationOpen]=useState(false),[evidenceRun,setEvidenceRun]=useState<string|null>(null);
- type PendingProjectAction={kind:'generate'|'accept'|'source';source_hash:string;run_id?:string;target_source_set_id?:string;ack?:{source_hash:string;selected_source_set_id:string|null}};
+ type PendingProjectAction={kind:'generate'|'accept'|'source'|'draft';source_hash:string;draft_sha256?:string;parent_source_set_id?:string;run_id?:string;target_source_set_id?:string;ack?:{source_hash:string;selected_source_set_id:string|null}};
  const pendingProjectActions=useRef<Record<string,PendingProjectAction>>({});
  const [uncertainProjects,setUncertainProjects]=useState<Record<string,boolean>>({});
  type PendingProjectCreation={name:string;customer:string;prior_ids:string[];id?:string};
@@ -160,7 +163,8 @@ function App(){
     const pid=(item:any)=>typeof item==='string'&&/^[a-f0-9]{32}$/.test(item),hash=(item:any)=>typeof item==='string'&&/^[a-f0-9]{64}$/.test(item),sid=(item:any)=>typeof item==='string'&&/^ss-[a-f0-9]{32}$/.test(item);
     let valid=exact(saved,['version','owner','projects','creation'])&&object(saved.projects)&&Object.keys(saved.projects).length<=100;
     if(valid)for(const [id,rawPending] of Object.entries(saved.projects)){
-     const item=rawPending as any;valid=pid(id)&&object(item)&&Object.keys(item).every(key=>['kind','source_hash','run_id','target_source_set_id','ack'].includes(key))&&['generate','accept','source'].includes(item.kind)&&hash(item.source_hash)
+     const item=rawPending as any;valid=pid(id)&&object(item)&&Object.keys(item).every(key=>['kind','source_hash','run_id','target_source_set_id','ack','draft_sha256','parent_source_set_id'].includes(key))&&['generate','accept','source','draft'].includes(item.kind)&&hash(item.source_hash)
+      &&(item.kind!=='draft'||hash(item.draft_sha256)&&sid(item.parent_source_set_id))
       &&(item.run_id===undefined||typeof item.run_id==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/.test(item.run_id))&&(item.kind!=='accept'||typeof item.run_id==='string')
       &&(item.target_source_set_id===undefined||sid(item.target_source_set_id))&&(item.ack===undefined||exact(item.ack,['source_hash','selected_source_set_id'])&&hash(item.ack.source_hash)&&(item.ack.selected_source_set_id===null||sid(item.ack.selected_source_set_id)));
      if(!valid)break;
@@ -272,6 +276,11 @@ function App(){
   pendingProjectActions.current=next;setUncertainProjects(current=>({...current,[pid]:Boolean(pending)}));return true;
  }
  function reconciledProjectAction(value:Detail,pending:PendingProjectAction){
+  if(pending.kind==='draft'){
+   const scope=readDraftScope(value.draft_scope,value.id,value.inventory.source_hash);
+   return Boolean(scope&&scope.parent_source_hash===pending.source_hash&&scope.draft_sha256===pending.draft_sha256
+    &&scope.parent_source_set_id===pending.parent_source_set_id);
+  }
   if(pending.kind==='source')return pending.ack?value.inventory.source_hash===pending.ack.source_hash&&value.inventory.selected_source_set_id===pending.ack.selected_source_set_id:Boolean(pending.target_source_set_id&&value.inventory.selected_source_set_id===pending.target_source_set_id);
   const run=value.runs.find(item=>runBelongsToProject(item,value.id)&&item.source_hash===pending.source_hash&&(!pending.run_id||item.id===pending.run_id));
   return Boolean(run&&(pending.kind==='generate'||presentProjectRun(run as ProjectRun,value.inventory.source_hash,value.id).humanAccepted));
@@ -319,6 +328,20 @@ function App(){
   const result=await projectMutation(context,pending,async()=>{const ack=await excludeSourceFile(context.project_id,id,fileId,expected);pending.ack={source_hash:ack.sourceHash,selected_source_set_id:ack.selectedSourceSetId};});
   return {ok:result.status==='confirmed',refreshRequired:result.status!=='confirmed'};
  }
+ async function previewProjectDraft(context:ProjectActionContext){
+  if(!currentProjectContext(context))throw new Error('The source version changed.');
+  return api(`/projects/${context.project_id}/partial-draft`);
+ }
+ async function createProjectDraft(context:ProjectActionContext,draftSha:string):Promise<WorkbenchActionResult>{
+  if(!context.expected_current_source_set_id)return {status:'rejected',message:'Select a source version first.'};
+  const pending:PendingProjectAction={kind:'draft',source_hash:context.source_hash,draft_sha256:draftSha,parent_source_set_id:context.expected_current_source_set_id};
+  return projectMutation(context,pending,async()=>{
+   const result=await api(`/projects/${context.project_id}/partial-draft`,json({source_hash:context.source_hash,
+    expected_current_source_set_id:context.expected_current_source_set_id,draft_sha256:draftSha,accepted_omissions:true}));
+   if(typeof result?.source_hash!=='string'||typeof result?.selected_source_set_id!=='string')throw new Error('Draft acknowledgement is incomplete.');
+   pending.ack={source_hash:result.source_hash,selected_source_set_id:result.selected_source_set_id};
+  });
+ }
  async function generateProject(context:ProjectActionContext,confirmations:ProcessConfirmations){
   if(!context.plan_sha256||!context.expected_current_source_set_id||!Object.values(confirmations).every(value=>value===true))return {status:'rejected' as const,message:'Review the current plan and confirm all three processing statements.'};
   const pending:PendingProjectAction={kind:'generate',source_hash:context.source_hash};
@@ -328,11 +351,12 @@ function App(){
   if(!context.run_id||context.run_source_hash!==context.source_hash||!values.business_flow_tested||!values.remediation_reviewed||!values.notes.trim())return {status:'rejected' as const,message:'Complete your review of the current source version first.'};
   return projectMutation(context,{kind:'accept',source_hash:context.run_source_hash,run_id:context.run_id},async()=>{await api(`/projects/${context.project_id}/runs/${context.run_id}/accept`,json({source_hash:context.run_source_hash,...values}));});
  }
- function projectOutput(context:ProjectActionContext,kind:'preview'|'download'|'evidence'){
+ function projectOutput(context:ProjectActionContext,kind:'preview'|'download'|'draft'|'evidence'){
   if(!detail||busy||pendingProjectActions.current[context.project_id]||!currentProjectContext(context))return;
   const run=detail.runs.find(item=>item.id===context.run_id&&item.source_hash===context.run_source_hash);if(!run||!runBelongsToProject(run,detail.id))return;
   const view=presentProjectRun(run,detail.inventory.source_hash,detail.id);
   if(kind==='download'&&view.canDownload)window.location.assign(`/api/projects/${detail.id}/runs/${run.id}/download`);
+  else if(kind==='draft'&&view.technicalVerified&&run.draft_downloadable===true)window.location.assign(`/api/projects/${detail.id}/runs/${run.id}/draft-download`);
   else if(kind==='evidence'||kind==='preview'&&view.canPreview)setEvidenceRun(run.id);
  }
  if(loading)return <main className="signin"><span className="brand">FOX<span> / </span>Opening your workspace…</span></main>;
@@ -344,14 +368,15 @@ function App(){
   return <div className="shell"><aside><a className="brand" href="#" onClick={event=>{event.preventDefault();closeProject();}}>FOX<span>●</span></a><p className="brand-sub">FORMS TO APEX</p><nav><button className="nav-active" disabled={busy} onClick={()=>{closeProject();setCreating(false);}}><FolderOpen size={18}/> Projects <span>{projects.length}</span></button></nav><div className="aside-foot"><ShieldCheck size={20}/><strong>Evidence before export</strong><p>One project. All its forms.<br/>One reviewed APEX application.</p><small>Internal preview</small></div></aside><div className="workspace"><header><span>Modernization workspace</span><div>{session.username}<button className="icon" disabled={busy} aria-label="Sign out" onClick={()=>act(signOutWorkbench)}><LogOut size={17}/></button></div></header><main>{error&&<div role="alert" className="error">{error}</div>}{safetyWarning&&<section className="panel" role="alert"><h2>Check saved project status</h2><p>{safetyWarning}</p><button type="button" disabled={busy} onClick={()=>void checkSavedProjectStatus()}>Check saved project status</button></section>}
    {!detail?<ProjectDashboard projects={projects} busy={busy} onNewProject={creationUnknown||!safetyStorageReady?undefined:()=>setCreating(value=>!value)} onOpenProject={id=>void act(async()=>{setPreparationOpen(false);setEvidenceRun(null);await open(id);})} createProjectContent={<>{creationUnknown&&<section className="panel" role="status"><h2>Check the saved project first</h2><p>The creation result is unconfirmed. No duplicate project request will be sent.</p><button type="button" disabled={busy} onClick={()=>void reconcileProjectCreation()}>Check project creation status</button></section>}{creating&&<form className="panel project-form" onSubmit={createWorkbenchProject}><h2>Start a project</h2><label>Customer / organization<input name="customer" defaultValue={creationPending.current?.customer??''} disabled={busy||creationUnknown||!safetyStorageReady} required maxLength={100}/></label><label>Project name<input name="name" defaultValue={creationPending.current?.name??''} disabled={busy||creationUnknown||!safetyStorageReady} required maxLength={80} pattern="[A-Za-z0-9][A-Za-z0-9 ._\-]*" title="Up to 80 plain letters, numbers, spaces, dots, hyphens or underscores"/></label><label>Business flow<textarea name="description" disabled={busy||creationUnknown||!safetyStorageReady} maxLength={1000} placeholder="What should this application help someone do?"/></label><button disabled={busy||creationUnknown||!safetyStorageReady}>Create project <ArrowRight size={16}/></button></form>}</>}/>:<>
     <ProjectWorkbench key={detail.id} project={detail} source={{project_id:detail.id,source_hash:detail.inventory.source_hash,selected_source_set_id:detail.inventory.selected_source_set_id}} plan={detail.project_plan} runs={detail.runs as ProjectRun[]} capabilities={{upload:detail.project_capabilities?.upload,generate:detail.project_capabilities?.process,local_preparation:{enabled:true}}} processingNotice={detail.processing_notice??''} busy={busy} unknownOutcome={paused} error={detail.project_plan_error} onBack={closeProject}
-     sourceRequests={detail.source_requests} onUpload={uploadProjectSources} onGenerate={generateProject} onSelectVersion={selectProjectVersion} onRefresh={value=>refreshProjectWorkbench(value.project_id)} onReloadProject={refreshProjectWorkbench}
+     sourceRequests={detail.source_requests} draftScope={detail.draft_scope} onPreviewDraft={previewProjectDraft} onCreateDraft={createProjectDraft} onUpload={uploadProjectSources} onGenerate={generateProject} onSelectVersion={selectProjectVersion} onRefresh={value=>refreshProjectWorkbench(value.project_id)} onReloadProject={refreshProjectWorkbench}
      onRecovery={(kind,value)=>kind==='check_status'?refreshProjectWorkbench(value.project_id):Promise.resolve({status:'rejected',message:'Only a read-only status check is available. No retry or import was started.'})}
-     onOpenPreparation={()=>setPreparationOpen(value=>!value)} onPreview={value=>projectOutput(value,'preview')} onDownload={value=>projectOutput(value,'download')} onEvidence={value=>projectOutput(value,'evidence')}
+     onOpenPreparation={()=>setPreparationOpen(value=>!value)} onPreview={value=>projectOutput(value,'preview')} onDownload={value=>projectOutput(value,'download')} onDraftDownload={value=>projectOutput(value,'draft')} onEvidence={value=>projectOutput(value,'evidence')}
      renderHumanReview={(run,value,controls)=><ProjectAcceptance key={`${run.id}:${value.source_hash}:${value.selected_source_set_id}`} controls={controls} onAccept={review=>acceptProject(value,review)}/>}/>
     {selectedEvidence&&<ProjectEvidence key={`${detail.id}:${selectedEvidence.id}`} pid={detail.id} run={selectedEvidence as ProjectRun}/>}
     {preparationOpen&&<section aria-label="Local source preparation"><button type="button" className="secondary" disabled={busy} onClick={()=>setPreparationOpen(false)}>Close local preparation</button><LocalPreparation key={'project-local-'+sourceUiKey} busy={busy||paused} onUseReviewed={async files=>Boolean(context&&(await uploadProjectSources(files,'prepared',context)).status==='confirmed')}/></section>}
     <details className="panel"><summary>Source history and preparation receipt</summary><p>Saved versions and earlier results remain available. Selecting a different version clears unsubmitted conversion consent.</p><SourceVersionHistory key={detail.id+'-'+detail.inventory.selected_source_set_id+'-'+detail.inventory.source_hash} projectId={detail.id} selectedSourceSetId={detail.inventory.selected_source_set_id} currentSourceHash={detail.inventory.source_hash} busy={busy||paused} onUseVersion={async(id,expected)=>{if(!context||expected!==context.expected_current_source_set_id)return {ok:false,refreshRequired:true};const result=await selectProjectVersion(id,context);return {ok:result.status==='confirmed',refreshRequired:result.status!=='confirmed'};}} onExcludeFile={excludeProjectFile} onRefreshProject={async()=>{const result=await refreshProjectWorkbench(detail.id);return result.status==='confirmed'&&result.safe_to_continue===true;}}/>{detail.inventory.source_preparation&&<section aria-label="Source preparation receipt"><h3>{detail.inventory.source_preparation.mode==='PREPARED_SET_MATCH'&&detail.inventory.source_preparation.matches_current_source?'Prepared set matches the current sources':'Preparation receipt'}</h3><p>{detail.inventory.source_preparation.scope}</p>{detail.inventory.source_preparation.extraction_job_id&&<p>Local preparation job: <code>{detail.inventory.source_preparation.extraction_job_id}</code></p>}</section>}<a href={`/api/projects/${detail.id}/assessment`}>Download source assessment</a><p className="manifest">Current manifest SHA-256 <code>{detail.inventory.source_hash}</code></p></details>
    </>}
+   <SetupReadiness configuration={session} onCheck={()=>api('/health')}/>
   </main><footer className="page-footer"><ReleaseInfo/><span>Internal preview · No production data</span></footer></div></div>;
  }
  return <div className="shell"><aside><a className="brand" href="#" onClick={closeProject}>FOX<span>●</span></a><p className="brand-sub">FORMS TO APEX</p><nav><button className="nav-active" onClick={()=>{closeProject();setCreating(false);}}><FolderOpen size={18}/> Projects <span>{projects.length}</span></button></nav><div className="aside-foot"><ShieldCheck size={20}/><strong>Evidence before export</strong><p>AI-assisted conversion.<br/>Deterministic release checks.</p><small>Internal preview</small></div></aside><div className="workspace"><header><span>Modernization workspace</span><div>{session.username}<button className="icon" aria-label="Sign out" onClick={()=>act(async()=>{await api('/logout',json({}));setSession(null);closeProject();})}><LogOut size={17}/></button></div></header><main>{error&&<div role="alert" className="error">{error}</div>}

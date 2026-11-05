@@ -20,6 +20,13 @@ separate. Complete source evidence does not guarantee equivalent business
 behavior. Missing definitions and unsupported constructs are explicit findings;
 FOX must not invent keys, omit selected forms silently or guess human meaning.
 
+For an early demo, **Partial draft / demo** previews the supported subset and
+requires explicit acceptance of omitted behavior. It saves a separate source
+version, retaining the originals. The ordinary technical checks still apply.
+After they pass, **Download development draft** lets users continue in native
+APEX without recording business acceptance. Read [partial drafts and their
+limits](docs/partial-drafts.md); a source release is not a hosted demo-readiness claim.
+
 The [product and UI roadmap](docs/product-roadmap.md) defines the feature goals,
 user journey and acceptance criteria. These are targets, not released features.
 

@@ -135,6 +135,32 @@ def test_same_ordinary_schema_in_independent_projects_has_independent_stubs(clie
     assert_not_queued(root)
 
 
+def test_confirmed_partial_branch_reaches_the_unchanged_normal_project_queue(client,monkeypatch):
+    from test_partial_draft import with_call
+    c,root,pid,original=prepare(client,monkeypatch,with_call())
+    mapped_profile(client)
+    assert original['can_generate'] is False
+    assert c.post(f'/api/projects/{pid}/runs',json=consent(original)).status_code==409
+    preview=c.get(f'/api/projects/{pid}/partial-draft').json()
+    branch=c.post(f'/api/projects/{pid}/partial-draft',json={
+        'source_hash':original['source_hash'],'expected_current_source_set_id':original['selected_source_set_id'],
+        'draft_sha256':preview['draft_sha256'],'accepted_omissions':True})
+    assert branch.status_code==201,branch.text
+    plan=c.get(f'/api/projects/{pid}/conversion-plan').json()
+    assert plan['can_generate']
+    response=c.post(f'/api/projects/{pid}/runs',json=consent(plan))
+    assert response.status_code==202,response.text
+    rid=response.json()['id']
+    snapshot=json.loads((root/'jobs'/rid/'source-snapshot.json').read_text())
+    assert snapshot['source_hash']==branch.json()['source_hash']!=original['source_hash']
+    assert snapshot['native_project']['forms'][0]['form_name']=='ORDERS - Draft'
+    assert 'MISSING_DEPENDENCY' in next(item['text'] for item in snapshot['files'] if item['name'].endswith('.sql'))
+    run=c.get(f'/api/projects/{pid}').json()['runs'][0]
+    assert run['draft_scope']['parent_source_hash']==original['source_hash']
+    assert run['draft_downloadable'] is False
+    assert c.get(f'/api/projects/{pid}/runs/{rid}/draft-download').status_code==409
+
+
 def test_one_source_bound_snapshot_contains_both_forms_and_one_run(client, monkeypatch):
     c, root, pid, plan = prepare(client, monkeypatch)
     result = c.post(f'/api/projects/{pid}/runs', json=consent(plan))

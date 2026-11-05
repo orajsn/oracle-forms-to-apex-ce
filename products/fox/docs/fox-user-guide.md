@@ -10,14 +10,19 @@ not one unrelated app per uploaded file.
    tooling. Upload redacted XML/text, library source and table/package definitions.
 3. **Resolve findings.** Review each module, missing object and unsupported
    construct. Supply missing files. When human interpretation is needed, the
-   affected conversion stops with a specific decision rather than inventing it.
+   complete conversion stops with a specific decision rather than inventing it.
+   For an early demo, use **Convert → Partial draft / demo** to preview and
+   explicitly omit unsupported behavior; see [partial drafts](partial-drafts.md).
 4. **Process.** In a connected installation, embedded OPAF mapping and independent
    review feed deterministic APEX generation and SQLcl validation. Local assessment
    mode does not offer this connected action.
 5. **Review results.** Inspect per-form traceability, exceptions and target
    requirements. Generated, technically verified and business accepted are
    separate states. An error is not an invitation to click Process repeatedly.
-6. **Download.** Obtain the exact eligible package, native APEX SQL/APEXlang,
+6. **Download.** After technical verification passes, **Download development
+   draft** allows further APEX development without recording business acceptance.
+   The existing accepted-package download still requires genuine human review.
+   Obtain the exact eligible package, native APEX SQL/APEXlang,
    schema requirements and remediation evidence according to the release gates.
    Import only into a compatible, approved non-production target.
 7. **Validate behavior.** A genuine business reviewer decides whether the
