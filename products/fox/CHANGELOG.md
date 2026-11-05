@@ -4,6 +4,29 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.4.2] - 2026-11-05
+
+### Fixed
+
+- Native-project runtime QA now reads the unique username entry emitted by the
+  generated APEX Navigation Bar, instead of requiring an account-button class
+  that this template does not render.
+- Account comparison remains mandatory and case-insensitive. Missing, wrong,
+  empty or duplicate labels still fail; no arbitrary page text is accepted.
+
+### Verification and limits
+
+- 168 focused browser-adapter/project-runtime/input/profile checks passed using
+  synthetic models. The real read-only APEX26.1.6 DOM observation confirmed one
+  matching username entry and zero matches for the old selector, without CRUD,
+  conversion or import. This is not a full runtime-QA pass.
+- TypeScript/Vite, three release-API checks and release consistency passed;
+  two dependency deprecation warnings remain.
+- Source patch only. Earlier failed attempts are retained and unverified; no
+  promotion, acceptance, replay or automatic retry is authorized by this fix.
+- A fresh measured deployment and a safe failed-attempt disposition are still
+  required before the corrected runtime checks can run normally.
+
 ## [0.4.1] - 2026-11-05
 
 ### Fixed

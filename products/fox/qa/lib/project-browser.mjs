@@ -82,10 +82,15 @@ export class ProjectBrowserDriver {
       await this.context(name,this.binding.plan.forms[0],'report');
       // Prove which supplied QA identity is actually shown after login. No
       // account text is serialized, captured or forwarded to the console.
-      const accountLabel=page.locator('.t-Button--account .t-Button-label');
-      check(await accountLabel.count()===1&&(await accountLabel.innerText()).trim().toLowerCase()===account.username.toLowerCase(),
-        'Authenticated runtime account differs or cannot be observed');
+      await this.assertAccountIdentity(page,account);
     }
+  }
+  async assertAccountIdentity(page,account) {
+    // The generated Navigation Bar's APP_USER entry has A02=has-username on
+    // its list item. Verify that exact, unique menu label, not arbitrary text.
+    const accountLabel=page.locator('.t-NavigationBar-item.has-username .t-Button-label');
+    check(await accountLabel.count()===1&&(await accountLabel.innerText()).trim().toLowerCase()===account.username.toLowerCase(),
+      'Authenticated runtime account differs or cannot be observed');
   }
   async ready(state) {
     await state.page.waitForLoadState('load');

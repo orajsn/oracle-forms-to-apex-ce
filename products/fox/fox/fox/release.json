@@ -1,11 +1,11 @@
 {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "released_on": "2026-11-05",
-  "title": "More complete recovery copies before upgrades",
+  "title": "Recognize signed-in accounts in generated APEX menus",
   "changes": [
-    "Include exact installation records that can sit outside normal recovery folders.",
-    "Keep old release files unchanged while using a separately checked upgrade helper.",
-    "Preserve saved work and existing conversion and review permissions during upgrades."
+    "Runtime checks use the account menu emitted by the native APEX template.",
+    "Wrong, missing or ambiguous account labels still stop verification.",
+    "Earlier failed checks stay retained; no conversion or import is replayed."
   ],
   "limitations": [
     "Experimental preview with bounded Forms-to-native-APEX conversion coverage.",

@@ -99,6 +99,22 @@ function adapter(options={}) {
   return {binding,form,native,page,driver};
 }
 
+function accountPage(labels) {
+  return {locator(selector){
+    assert.equal(selector,'.t-NavigationBar-item.has-username .t-Button-label');
+    return {count:async()=>labels.length,innerText:async()=>{assert.equal(labels.length,1);return labels[0];}};
+  }};
+}
+test('synthetic menu API: exact generated username menu retains case-insensitive identity proof',async()=>{
+  const {driver}=adapter();await driver.assertAccountIdentity(accountPage(['  fox_qa_a  ']),{username:'FOX_QA_A'});
+});
+for(const [name,labels] of [['missing',[]],['wrong identity',['FOX_QA_B']],['empty label',[' ']],
+  ['duplicate matching labels',['FOX_QA_A','FOX_QA_A']],['ambiguous labels',['FOX_QA_A','FOX_QA_B']]]){
+  test('synthetic menu API: reject '+name,async()=>{
+    const {driver}=adapter();await assert.rejects(driver.assertAccountIdentity(accountPage(labels),{username:'FOX_QA_A'}),/Authenticated runtime account differs or cannot be observed/);
+  });
+}
+
 test('synthetic API: real adapter observes P4 full surface in mapped order, never historical P2',async()=>{
   const {driver,page,form}=adapter();page.inputs.reverse();
   assert.deepEqual(await driver.context('primary',form,'form'),{application_id:99001,page_id:4,page_item_names:form.items.map(item=>item.item)});
