@@ -2,7 +2,7 @@ import React,{useEffect,useId,useMemo,useRef,useState,type ReactNode} from 'reac
 import {ArrowLeft,ArrowRight,Check,CheckCircle2,ChevronDown,Download,FileCode2,FolderOpen,HelpCircle,Layers,LoaderCircle,Plus,RefreshCw,Search,ShieldCheck,TriangleAlert,Upload} from 'lucide-react';
 import {checkSelectedSources,uploadManifestName,type UploadMode} from './preparedUpload';
 import {actionContext,available,findingOwnerLabels,formReadinessLabels,presentProjectPlan,presentProjectRun,processAvailability,recoveryAvailability,runBelongsToProject,validSourceBinding,workbenchSteps,
- type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectDependency,type ProjectFinding,type ProjectForm,type ProjectRun,type SourceBinding,type SourceLocation,type WorkbenchStep} from './projectConversion';
+ type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectDependency,type ProjectFinding,type ProjectForm,type ProjectRun,type RunPresentation,type SourceBinding,type SourceLocation,type WorkbenchStep} from './projectConversion';
 import './projectWorkbench.css';
 import SourceRequests from './SourceRequestPanel';
 
@@ -125,12 +125,12 @@ function ReviewForms({plan,onResolve,onContinue}:{plan:ProjectConversionPlan;onR
 
 type RunExecute=(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;
 
-function RunRecovery({run,binding,plan,busy,onRecovery,execute}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;onRecovery?:ProjectWorkbenchProps['onRecovery'];execute?:RunExecute}){
+function RunRecovery({run,binding,plan,busy,onRecovery,execute,showStatus=false}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;onRecovery?:ProjectWorkbenchProps['onRecovery'];execute?:RunExecute;showStatus?:boolean}){
  const view=presentProjectRun(run,binding.source_hash,binding.project_id);
  let context:ProjectActionContext|null=null;
  try{if(run.project_id===binding.project_id)context=actionContext(binding,plan,run.id,run.source_hash);}catch{/* No action for an incomplete binding. */}
  const recovery=recoveryAvailability(run,Boolean(onRecovery)&&Boolean(context)&&Boolean(execute),busy);
- if(!view.error&&!['ATTENTION','FAILED'].includes(run.state))return null;
+ if(!showStatus&&!view.error&&!['ATTENTION','FAILED'].includes(run.state))return null;
  return <>{view.error&&<div className="fw-notice" role="alert" aria-label="Run needs attention"><h3>{view.error.message}</h3><p><strong>Next action:</strong> {view.error.action}</p><p>Who can help: {findingOwnerLabels[view.error.owner]}</p></div>}
   <div className="fw-inline-action"><button type="button" className="fw-secondary" disabled={!recovery.enabled} onClick={()=>{const bound=context,kind=recovery.kind;if(bound&&kind&&execute&&onRecovery)void execute(()=>onRecovery(kind,bound),kind==='check_status');}}><RefreshCw size={15}/>{recovery.label}</button>{recovery.reason&&<p className="fw-small">{recovery.reason}</p>}<p className="fw-small">Completed work is retained. An uncertain database operation is checked before any repeat is allowed.</p></div>
  </>;
@@ -144,7 +144,8 @@ function OutputRun({run,binding,plan,busy,reviewControls,onPreview,onDownload,on
   <div className="fw-detail-heading"><div><p className="fw-eyebrow">ONE PROJECT · ONE APEX APPLICATION</p><h2>{view.generated?'APEX application generated':'APEX output is not ready yet'}</h2><p className="fw-small">Run <code>{run.id}</code>{view.earlierSource?' · Earlier source version':''}</p></div><span className={`fw-badge fw-${view.tone}`}>{view.label}</span></div>
   <div className="fw-output-facts"><div><CheckCircle2 size={19}/><strong>APEX generated</strong><span>{view.generated?'Reported as generated':'Not confirmed'}</span></div><div><ShieldCheck size={19}/><strong>Technical verification</strong><span>{view.technicalVerified?'Checks passed':'Not yet confirmed'}</span></div><div><HelpCircle size={19}/><strong>Business behavior</strong><span>{view.humanAccepted?'Human review recorded':'Human validation required'}</span></div></div>
   {!view.error&&<p>{view.message}</p>}
-  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute}/>
+  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute} showStatus/>
+  <details className="fw-run-history"><summary>Saved progress and form responses</summary><p className="fw-small">These are saved checkpoints for this run, not a live-process guarantee. Opening this history does not restart conversion or import.</p><p className="fw-small">Run source SHA-256: <code>{run.source_hash}</code></p><RunProgressDetails view={view} run={run} binding={binding} plan={plan}/></details>
   {view.earlierSource&&!view.humanAccepted&&<p className="fw-notice">This unaccepted output belongs to an earlier source version. Select that version before reviewing it. It cannot certify the current sources.</p>}
   {view.detailsIncomplete&&<p className="fw-notice" role="status">Some run details are unavailable. No missing check is being shown as passed.</p>}
   <div className="fw-actions"><button type="button" className="fw-secondary" disabled={busy||!context||!view.canPreview||!onPreview} onClick={()=>{if(context)onPreview?.(context);}}>Preview APEX <ArrowRight size={16}/></button><button type="button" disabled={busy||!context||!view.canDownload||!onDownload} onClick={()=>{if(context)onDownload?.(context);}}><Download size={17}/> Download APEX package</button>{onEvidence&&<button type="button" className="fw-text-button" disabled={busy||!context} onClick={()=>{if(context)onEvidence(context);}}>View mapping and remediation</button>}</div>
@@ -262,11 +263,22 @@ export default function ProjectWorkbench(props:ProjectWorkbenchProps){
 
 function RunProgress({run,binding,plan,busy,onRecovery,execute}:{run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null;busy:boolean;onRecovery?:ProjectWorkbenchProps['onRecovery'];execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>}){
  const view=presentProjectRun(run,binding.source_hash,binding.project_id);
- const stageLabels={queued:'Waiting',running:'Processing',generated:'Generated',blocked:'Needs input',failed:'Stopped'};
  return <section className="fw-surface" aria-label="Current conversion progress"><div className="fw-detail-heading"><div><p className="fw-eyebrow">SAVED RUN</p><h2>{view.label}</h2>{!view.error&&<p>{view.stageMessage||view.message}</p>}</div><code>{run.id}</code></div>
   {view.detailsIncomplete&&<p className="fw-notice" role="status">Some progress or error details could not be read. No missing result is being shown as successful.</p>}
-  {view.steps.length>0?<ol className="fw-run-steps">{view.steps.map(item=><li key={item.id} className={`fw-run-step-${item.state}`}><span aria-hidden="true">{item.state==='complete'?<Check size={15}/>:item.state==='running'?<LoaderCircle size={15} className="fw-spinner"/>:item.state==='blocked'?<TriangleAlert size={15}/>:<span className="fw-step-dot"/>}</span><div><strong>{item.label}</strong><small>{item.state==='complete'?'Completed':item.state==='running'?'Reported as in progress':item.state==='blocked'?'Blocked':'Not yet reported complete'}</small>{item.message&&<p>{item.message}</p>}</div></li>)}</ol>:<p className="fw-small">Detailed stage checkpoints have not been reported for this run. No progress percentage is assumed.</p>}
-  {view.forms.length>0?<div className="fw-form-progress"><h3>Per-form response</h3>{view.forms.map(item=><div key={item.module_id}><strong>{plan?.forms.find(form=>form.module_id===item.module_id)?.form_name??item.module_id}</strong><span>{stageLabels[item.state]}</span>{item.message&&<p>{item.message}</p>}</div>)}</div>:<p className="fw-small">Per-form processing results have not been reported yet.</p>}
-  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute}/>
+  <RunProgressDetails view={view} run={run} binding={binding} plan={plan}/>
+  <RunRecovery run={run} binding={binding} plan={plan} busy={busy} onRecovery={onRecovery} execute={execute} showStatus/>
  </section>;
+}
+
+function RunProgressDetails({view,run,binding,plan}:{view:RunPresentation;run:ProjectRun;binding:SourceBinding;plan:ProjectConversionPlan|null}){
+ const stageLabels={queued:'Waiting',running:'Reported as processing',generated:'Generated',blocked:'Needs input',failed:'Stopped'};
+ const currentPlan=plan?.project_id===run.project_id&&plan?.source_hash===run.source_hash&&binding.project_id===run.project_id?plan:null;
+ return <>
+  {view.steps.length>0?<ol className="fw-run-steps">{view.steps.map(item=><li key={item.id} className={`fw-run-step-${item.state}`}><span aria-hidden="true">{item.state==='complete'?<Check size={15}/>:item.state==='running'?<LoaderCircle size={15} className="fw-spinner"/>:item.state==='blocked'?<TriangleAlert size={15}/>:<span className="fw-step-dot"/>}</span><div><strong>{item.label}</strong><small>{item.state==='complete'?'Completed':item.state==='running'?'Reported as in progress':item.state==='blocked'?'Blocked':'Not yet reported complete'}</small>{item.message&&<p>{item.message}</p>}</div></li>)}</ol>:<p className="fw-small">Detailed stage checkpoints have not been reported for this run. No progress percentage is assumed.</p>}
+  {view.forms.length>0?<div className="fw-form-progress"><h3>Per-form response</h3><p className="fw-small">A generated form is included in the application. Technical checks and business acceptance apply to the complete project separately.</p>{view.forms.map(item=>{
+   const current=currentPlan?.forms.find(form=>form.module_id===item.module_id);
+   const name=item.form_name??current?.form_name,sourceName=item.source_name??current?.source_name;
+   return <div key={item.module_id}><strong>{name??item.module_id}</strong><span>{stageLabels[item.state]}</span>{sourceName?<p className="fw-small fw-run-source">Source: <code>{sourceName}</code></p>:<p className="fw-small">The original form label is unavailable; the retained module reference is shown. Current source labels are not substituted.</p>}{item.message&&<p>{item.message}</p>}</div>;
+  })}</div>:<p className="fw-small">Per-form processing results have not been reported yet.</p>}
+ </>;
 }

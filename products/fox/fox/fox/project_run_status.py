@@ -269,6 +269,7 @@ The caller must not use this DTO as a mutation or download authorization gate.
         _need(plan['state'] == 'READY' and plan['can_generate'] is True and plan['assessment_complete'] is True
               and plan['rendering_spec'] == snapshot.get('native_project') and plan['plan_sha256'] == snapshot.get('plan_sha256'))
         ids = sorted(form['module_id'] for form in plan['forms'])
+        run_forms = {form['module_id']: form for form in plan['forms']}
         milestones = _Milestones(ids)
         advisory = read_project_progress(job, job_id=run['id'], source_hash=run['source_hash'],
                                          plan_sha256=plan['plan_sha256'], module_ids=ids)
@@ -327,7 +328,11 @@ The caller must not use this DTO as a mutation or download authorization gate.
                        'Independent review completed; application generation is pending.' if milestone == 'reviewed' else
                        'Mapping completed; independent review is pending.' if milestone == 'mapped' else
                        'Processing this form.' if form_state == 'running' else 'Waiting for processing.')
-            result['forms'].append({'module_id': module, 'state': form_state, 'message': message})
+            # Names come from this validated retained snapshot, not the current
+            # project selection. Historical runs must never inherit new labels.
+            result['forms'].append({'module_id': module, 'form_name': run_forms[module]['form_name'],
+                                    'source_name': run_forms[module]['source_name'],
+                                    'state': form_state, 'message': message})
         result['steps'] = _steps(run['state'], result['artifact_generated'], result['technical_verified'], result['human_accepted'], error)
         if error:
             result['error'] = error

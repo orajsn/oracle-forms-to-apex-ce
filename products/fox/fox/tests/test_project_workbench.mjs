@@ -328,6 +328,37 @@ test('malformed or duplicate stage checkpoints are not rendered as progress',()=
  const view=api.presentProjectRun(run,binding().source_hash,project.id);
  assert.equal(view.detailsIncomplete,true);assert.deepEqual(view.steps,[]);assert.deepEqual(view.forms,[]);
 });
+test('saved output shows original form responses without substituting current labels',()=>{
+ const current=binding(fixtures.changed),plan=api.readProjectPlan(fixtures.changed,current);
+ plan.forms[0].form_name='RENAMED_CURRENT_ONLY';
+ const run=baseRun({forms:fixtures.ready.forms.map(f=>({module_id:f.module_id,form_name:f.form_name,source_name:f.source_name,state:'generated',message:'Saved synthetic response.'})),
+  steps:[{id:'generation',label:'Generate application',state:'complete'},{id:'technical',label:'Run technical checks',state:'pending'}],
+  recovery:{kind:'check_status',enabled:true,safety:'read_only'}});
+ const html=render(components.OutputRun,{run,binding:current,plan,busy:false,onRecovery:async()=>({status:'confirmed'}),execute:async()=>true});
+ assert.match(html,/Saved progress and form responses/);assert.match(html,/Per-form response/);
+ assert.match(html,/not a live-process guarantee/);assert.match(html,/ALPHA/);assert.match(html,/BETA/);
+ assert.doesNotMatch(html,/RENAMED_CURRENT_ONLY/);assert.match(html,/Run source SHA-256/);
+ assert.match(html,/Check run status/);assert.doesNotMatch(html,/Retry failed step|Continue from saved work/);
+});
+test('historical legacy rows without labels never borrow the current plan labels',()=>{
+ const current=binding(fixtures.changed),plan=api.readProjectPlan(fixtures.changed,current);
+ const run=baseRun({forms:[{module_id:plan.forms[0].module_id,state:'generated'}]});
+ const html=render(components.OutputRun,{run,binding:current,plan,busy:false});
+ assert.match(html,/original form label is unavailable/);assert.match(html,/Current source labels are not substituted/);
+ assert.doesNotMatch(html,new RegExp('>'+plan.forms[0].form_name+'<'));
+});
+for(const meta of [{form_name:'Only half'},{form_name:{unexpected:true},source_name:'alpha.xml'},
+ {form_name:'ALPHA',source_name:'../alpha.xml'},{form_name:'ALPHA\n',source_name:'alpha.xml'}]){
+ test('malformed saved form identity is omitted without inventing success: '+JSON.stringify(meta),()=>{
+  const run=baseRun({forms:[{module_id:'form-synthetic',state:'queued',...meta}]});
+  const view=api.presentProjectRun(run,binding().source_hash,project.id);
+  assert.equal(view.detailsIncomplete,true);assert.deepEqual(view.forms,[{module_id:'form-synthetic',state:'queued'}]);
+ });
+}
+test('unbound runs do not expose form identities or stage checkpoints',()=>{
+ const view=api.presentProjectRun(baseRun({project_id:'another-project',forms:[{module_id:'form-synthetic',form_name:'Private other project',source_name:'other.xml',state:'generated'}],steps:[{id:'generation',label:'Other stage',state:'complete'}]}),binding().source_hash,project.id);
+ assert.deepEqual(view.forms,[]);assert.deepEqual(view.steps,[]);assert.equal(view.generated,false);
+});
 test('retry is absent unless server confirms a safe failed-step action',()=>{
  for(const recovery of [undefined,{kind:'retry_step',enabled:true},{kind:'retry_step',enabled:true,safety:'read_only'},{kind:'start_over',enabled:true,safety:'server_confirmed_safe'},{kind:'resume',enabled:false,safety:'server_confirmed_safe'}]){
   assert.equal(api.recoveryAvailability(baseRun({state:'ATTENTION',recovery}),true).enabled,false);

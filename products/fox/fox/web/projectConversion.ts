@@ -186,7 +186,7 @@ export function processAvailability(plan:ProjectConversionPlan|null,capability:u
 }
 
 export type RunStep={id:string;label:string;state:'pending'|'running'|'complete'|'blocked';message?:string};
-export type FormRunStatus={module_id:string;state:'queued'|'running'|'generated'|'blocked'|'failed';message?:string};
+export type FormRunStatus={module_id:string;state:'queued'|'running'|'generated'|'blocked'|'failed';message?:string;form_name?:string;source_name?:string};
 export type RecoveryAction={kind:'check_status'|'retry_step'|'resume';enabled:boolean;reason?:string;safety:'read_only'|'server_confirmed_safe';label?:string};
 export type ProjectRun={id:string;project_id:string;source_hash:string;state:string;message:string;stage_message?:string;
  artifact_generated?:boolean;technical_verified?:boolean;human_accepted?:boolean;downloadable?:boolean;preview_available?:boolean;review_available?:boolean;
@@ -206,7 +206,13 @@ export function presentProjectRun(run:ProjectRun,sourceHash:string,projectId:str
  const technicalVerified=generated&&run.technical_verified===true&&['VERIFIED','ACCEPTED'].includes(run.state);
  const humanAccepted=technicalVerified&&run.human_accepted===true&&run.state==='ACCEPTED';
  const steps=Array.isArray(run.steps)?run.steps.filter(item=>record(item)&&opaque(item.id)&&text(item.label,200)&&oneOf(item.state,['pending','running','complete','blocked'])&&(item.message===undefined||text(item.message))):[];
- const forms=Array.isArray(run.forms)?run.forms.filter(item=>record(item)&&opaque(item.module_id)&&oneOf(item.state,['queued','running','generated','blocked','failed'])&&(item.message===undefined||text(item.message))):[];
+ let malformedFormIdentity=false;
+ const forms=valid&&Array.isArray(run.forms)?run.forms.filter(item=>record(item)&&opaque(item.module_id)&&oneOf(item.state,['queued','running','generated','blocked','failed'])&&(item.message===undefined||text(item.message))).map(item=>{
+  const base:FormRunStatus={module_id:item.module_id,state:item.state,...(item.message===undefined?{}:{message:item.message})};
+  if(item.form_name===undefined&&item.source_name===undefined)return base;
+  if(!text(item.form_name,512)||!text(item.source_name,255)||/[\u0000-\u001f]/.test(item.form_name+item.source_name)||/[\\/]/.test(item.source_name)){malformedFormIdentity=true;return base;}
+  return {...base,form_name:item.form_name,source_name:item.source_name};
+ }):[];
  const duplicateSteps=new Set(steps.map(item=>item.id)).size!==steps.length,duplicateForms=new Set(forms.map(item=>item.module_id)).size!==forms.length;
  const canDownload=humanAccepted&&run.downloadable===true;
  const message=text(run.message)?run.message:'No run summary has been reported.';
@@ -226,8 +232,8 @@ export function presentProjectRun(run:ProjectRun,sourceHash:string,projectId:str
  return {label:missingEvidence?'Verification evidence unavailable':technicalAttention?'Technical checks need attention':valid?states[run.state][0]:'Status unavailable',tone:missingEvidence||technicalAttention?'attention':valid?states[run.state][1]:'attention',earlierSource,generated,technicalVerified,humanAccepted,
   canPreview:generated&&run.preview_available===true,canReview:technicalVerified&&!humanAccepted&&!earlierSource&&run.review_available===true,
   canDownload,downloadReason,message:technicalAttention&&error?error.message:message,stageMessage:technicalAttention?null:stageMessage,error,
-  steps:duplicateSteps?[]:steps.map(item=>technicalAttention&&item.id==='technical'?{...item,state:'blocked' as const}:item),forms:duplicateForms?[]:forms,
-  detailsIncomplete:!valid||missingEvidence||malformedDetails||duplicateSteps||duplicateForms||(Array.isArray(run.steps)&&steps.length!==run.steps.length)||(Array.isArray(run.forms)&&forms.length!==run.forms.length)};
+  steps:!valid||duplicateSteps?[]:steps.map(item=>technicalAttention&&item.id==='technical'?{...item,state:'blocked' as const}:item),forms:duplicateForms?[]:forms,
+  detailsIncomplete:!valid||missingEvidence||malformedDetails||malformedFormIdentity||duplicateSteps||duplicateForms||(Array.isArray(run.steps)&&steps.length!==run.steps.length)||(Array.isArray(run.forms)&&forms.length!==run.forms.length)};
 }
 
 export function recoveryAvailability(run:ProjectRun,handlerPresent:boolean,busy=false):ActionCapability&{kind:RecoveryAction['kind']|null;label:string}{

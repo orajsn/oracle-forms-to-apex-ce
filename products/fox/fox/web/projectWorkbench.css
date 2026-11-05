@@ -154,6 +154,10 @@
 .fox-workbench .fw-form-progress>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;padding:11px 0;border-bottom:1px solid #e8ece3;font-size:13px}
 .fox-workbench .fw-form-progress>div>span{font-size:12px;color:var(--fw-muted)}
 .fox-workbench .fw-form-progress>div>p{grid-column:1/-1;font-size:12px;margin-bottom:0}
+.fox-workbench .fw-run-history{border-block:1px solid var(--fw-border);padding:16px 0;margin:20px 0}
+.fox-workbench .fw-run-history>summary{cursor:pointer;font-size:14px;font-weight:650}
+.fox-workbench .fw-run-history>p:first-of-type{margin-top:16px}
+.fox-workbench .fw-run-history code,.fox-workbench .fw-form-progress strong,.fox-workbench .fw-run-source{overflow-wrap:anywhere;min-width:0}
 .fox-workbench .fw-pagination{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-top:15px;font-size:12px;color:var(--fw-muted)}
 .fox-workbench .fw-pagination button{font-size:12px;padding-inline:11px}
 .fox-workbench .fw-empty{text-align:center;padding:42px 23px;color:var(--fw-muted)}

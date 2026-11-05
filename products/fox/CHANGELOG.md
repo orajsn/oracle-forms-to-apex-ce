@@ -4,6 +4,39 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.4.0] - 2026-11-05
+
+### Added
+
+- Saved progress and per-form responses on every project output, available after
+  reopening the project. Original form/source labels are derived from each
+  validated retained run, never borrowed from a newer source version.
+- Read-only status checking on normal saved-run views as well as attention
+  states. Viewing history does not replay conversion, import or human review.
+- Explicit unavailable original-label and malformed-detail handling. Saved
+  checkpoints are not presented as proof of a live process.
+- Real local API/browser coverage of reopening an output and renaming its source
+  without changing retained work or granting acceptance/download.
+
+### Limits
+
+- No new behavioral translation or import/verification/review permissions.
+  Generated per-form output remains separate from complete-project technical
+  checks and genuine human acceptance.
+- Source release only. Local tests use synthetic Oracle/OPAF transports, not a
+  live database import or runtime proof. See [saved history](docs/saved-run-history.md).
+
+### Verification
+
+- Clean-source Windows backend: 331 passed, two explicit POSIX-only skips.
+  Native Linux retained-history/package-reader checks: 138 passed.
+- Frontend: 301 checks passed, including a real local API/SQLite browser flow
+  that reopens output, renames selected source and preserves the original run.
+- TypeScript/Vite build and release consistency passed. Desktop/mobile renders
+  were inspected. Two dependency deprecation warnings remain.
+- External Oracle/OPAF transports in package fixtures are synthetic. No live
+  import, model invocation, runtime APEX proof or human acceptance is claimed.
+
 ## [0.3.0] - 2026-11-05
 
 ### Added

@@ -1,11 +1,11 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "released_on": "2026-11-05",
-  "title": "Ask once for shared Forms dependencies",
+  "title": "Keep each conversion's saved form responses",
   "changes": [
-    "Group shared source requests across forms without losing the known callers.",
-    "Copy or download a source-owner request tied to the current source version.",
-    "Add missing source to the same project and distinguish file availability from converted behavior."
+    "Open saved stage checkpoints and per-form responses directly from each output.",
+    "Keep original form and source labels when you update or rename project files.",
+    "Check an existing run's status without replaying conversion or import."
   ],
   "limitations": [
     "Experimental preview with bounded Forms-to-native-APEX conversion coverage.",
