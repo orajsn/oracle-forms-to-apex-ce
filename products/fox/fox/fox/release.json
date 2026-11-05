@@ -1,18 +1,17 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "released_on": "2026-11-05",
-  "title": "Assess multi-block Forms locally before AI design",
+  "title": "Conversion-engine preview checkpoint",
   "changes": [
-    "Extract and assess FMB or Forms XML locally, including multiple blocks and normal business SQL.",
-    "See all observed blocks/items, trigger counts, source identity/locations and review requirements.",
-    "Assessment stays local and cannot authorize AI submission, generation, import or source handoff.",
-    "Changed original, readable or assessment bytes revoke the displayed facts.",
-    "The UI distinguishes observed facts from OPAF understanding, which has not run in this assessment step."
+    "Derive effective metadata and conservatively redact a separate local source view.",
+    "Bind OPAF analysis sections, complete blueprint coverage and independent review receipts to exact sources.",
+    "Render native multi-block synthetic prototypes with explicit unsupported behavior and read-only boundaries.",
+    "Retain versioned model-role definitions and labelled benchmark tooling without automatic activation."
   ],
   "limitations": [
-    "This increment adds broad local assessment, not broad OPAF understanding or multi-block native generation.",
-    "Raw FMB extraction requires configured Oracle Forms tooling in the authenticated localhost application.",
-    "The existing hosted intake and narrow generation profiles are unchanged; no live model switch is implied.",
+    "Inactive engine preview: no new connected UI conversion route is enabled by this release.",
+    "Actual offline SQLcl candidate validation is not proof of OPAF conversion, import or runnable pages.",
+    "Real-file UI-to-export acceptance and guarded hosted deployment remain pending.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "Release notes describe software changes, not proof of a successful conversion."
   ]

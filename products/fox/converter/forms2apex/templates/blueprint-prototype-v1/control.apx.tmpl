@@ -1,0 +1,26 @@
+page $PAGE (
+    name: $NAME
+    alias: $ALIAS
+    title: $NAME
+    appearance {
+        pageTemplate: @/standard
+        templateOptions: #DEFAULT#
+    }
+    security {
+        authentication: required
+        pageAccessProtection: argumentsMustHaveChecksum
+    }
+    region controls (
+        name: Prototype Controls
+        type: staticContent
+        layout {
+            sequence: 10
+            slot: body
+        }
+        appearance {
+            template: @/standard
+            templateOptions: #DEFAULT#
+        }
+    )
+$ITEMS
+)

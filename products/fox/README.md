@@ -32,7 +32,13 @@ user journey and acceptance criteria. These are targets, not released features.
 
 ## Development status
 
-Source0.6.0 adds [broad local Forms assessment](docs/broad-local-assessment.md):
+Source **0.7.0 is an inactive conversion-engine preview**, not a completed
+hosted conversion release. It adds source-bound OPAF design/review contracts,
+effective-property derivation, conservative redaction, and native multi-block
+prototype rendering. These helpers do not enable a new end-to-end UI route.
+See the [checkpoint, verification and remaining work](docs/conversion-engine-checkpoint.md).
+
+Source 0.6.0 introduced [broad local Forms assessment](docs/broad-local-assessment.md):
 FMB/XML with multiple blocks and ordinary business SQL can receive a complete
 local object inventory without starting generation or AI submission. The UI
 keeps observed facts separate from OPAF understanding. The broader OPAF design

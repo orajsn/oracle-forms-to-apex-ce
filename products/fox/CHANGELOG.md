@@ -4,6 +4,49 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.7.0] - 2026-11-05
+
+### Inactive conversion-engine preview
+
+This source checkpoint preserves verified engine work at the user's request.
+It is an explicit checkpoint exception to the usual connected-feature release
+rhythm: no new end-to-end UI route, hosted activation or successful real Forms
+conversion is claimed. See [checkpoint limits](docs/conversion-engine-checkpoint.md).
+
+### Added
+
+- Paired Oracle XML effective-metadata derivation with exact identities,
+  default/override provenance and original/code preservation; inherited behavior
+  is not silently declared resolved.
+- Conservative local redaction with exact whitespace-escape normalization,
+  body-free hash receipts and fail-closed credential-command handling.
+- Source-bound evidence packets, bounded linked analysis sections, full-object
+  blueprint merging and separate independent-review receipt validation.
+- Versioned tool-free OPAF understanding/review definitions and additive,
+  guarded one-operation registration without replacing existing workflows.
+- Native multi-block synthetic prototype planning/rendering, including large
+  forms, source-free control display items and read-only report handling.
+  Interactive-grid editing falls back explicitly to a read-only report.
+- Labelled synthetic benchmark fixtures and scoring that separates valid
+  structure, proposed mappings and actual business behavior.
+
+### Verification and limits
+
+- Real local Oracle extraction/effective-metadata checks retained all 9 blocks,
+  222 items and 662 recognized objects in the primary acceptance file.
+- An authored engineering candidate planned 216 fields and explicitly retained
+  six unsupported buttons. Its complete APEXlang project passed actual offline
+  SQLcl validation. This was not an OPAF-produced, imported or browser-proven app.
+- The initial synthetic OPAF comparison recorded both model and reviewer calls;
+  it exposed over-refusal, unnecessary questions and a reviewer false approval
+  which deterministic validation rejected. Neither result proves universal quality.
+- Original customer source, model-response bodies, credentials and lab journals
+  are excluded from this release. Helper checks do not grant transfer or execution
+  permission, certify complete PII detection, or record human acceptance.
+- Real-file OPAF completion, connected FOX UI, unique import, runtime verification
+  and exact native export/download remain pending. Unrelated recovery/transport
+  work is deliberately excluded rather than published without integration proof.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added
