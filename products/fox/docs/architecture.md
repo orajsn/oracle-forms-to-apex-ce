@@ -25,6 +25,13 @@ Readable approved source           │
 
 ## Components
 
+The explicit local assessment path added in0.6.0 is separate from prepared-set
+handoff: selected FMB/XML → configured native extraction → `forms_facts` →
+hash-bound local assessment artifact → all-block UI with OPAF **Not run**.
+It creates no upload-ready manifest. Ordinary business SQL is source evidence,
+not an executed data loader. Related files remain explicitly unassessed.
+See [broad local assessment](broad-local-assessment.md).
+
 The development administrator setup path is separate from this conversion path:
 `install-fox.sh` → OS bootstrap Python → pinned private setup runtime → loopback
 browser wizard → verified single-folder storage (S0) → protected access/OPAF

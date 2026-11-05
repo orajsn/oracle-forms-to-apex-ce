@@ -32,6 +32,13 @@ user journey and acceptance criteria. These are targets, not released features.
 
 ## Development status
 
+Source0.6.0 adds [broad local Forms assessment](docs/broad-local-assessment.md):
+FMB/XML with multiple blocks and ordinary business SQL can receive a complete
+local object inventory without starting generation or AI submission. The UI
+keeps observed facts separate from OPAF understanding. The broader OPAF design
+and native generator remain in development; the narrow generation profile below
+still applies to that older path.
+
 This is experimental source, not an Oracle product, Support commitment or
 production migration factory. The multi-form implementation and local tests
 are ahead of the deployed lab release. A new host's fully connected installer,

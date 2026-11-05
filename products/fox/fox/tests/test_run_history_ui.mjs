@@ -29,7 +29,13 @@ test('saved output survives reopen and renamed sources, with read-only status an
   const input=createInterface({input:child.stdout});
   const first=await Promise.race([once(input,'line').then(([v])=>v),once(child,'exit').then(()=>{throw Error('Fixture exited before readiness: '+errors);}),new Promise((_,reject)=>setTimeout(()=>reject(Error('Fixture readiness timed out: '+errors)),20000).unref())]);
   const fixture=JSON.parse(first),{origin}=fixture;assert.match(origin,/^http:\/\/127\.0\.0\.1:\d+$/);
-  for(let n=0;n<100;n++){try{if((await fetch(origin+'/api/health')).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
+  let healthy=false;
+  for(let n=0;n<100;n++){
+   if(child.exitCode!==null||child.signalCode!==null)throw Error('Fixture exited before HTTP readiness: '+errors);
+   try{if((await fetch(origin+'/api/health',{signal:AbortSignal.timeout(1000)})).ok){healthy=true;break;}}catch{}
+   await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  assert.ok(healthy,'Fixture never reached actual HTTP health readiness: '+errors);
   browser=await chromium.launch({channel:'msedge',headless:true});context=await browser.newContext({viewport:{width:1440,height:1100}});page=await context.newPage();page.setDefaultTimeout(12000);
   // Test the current source, not an optional/stale ignored dist build. Keeping
   // assets on routes also exercises a true reload against the same real API.

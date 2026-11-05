@@ -1,17 +1,18 @@
 {
-  "version": "0.5.0",
+  "version": "0.6.0",
   "released_on": "2026-11-05",
-  "title": "Choose a complete conversion or an explicit partial APEX draft",
+  "title": "Assess multi-block Forms locally before AI design",
   "changes": [
-    "Preview supported forms and omissions before creating a separate demo source version.",
-    "Original sources stay saved; draft scope is visible in projects, runs and downloadable evidence.",
-    "Technically verified native output can be downloaded for development without claiming business acceptance.",
-    "Next-action guidance, setup status and recorded target versions make the APEX handoff clearer.",
-    "Lost draft-creation responses are checked against saved scope rather than automatically replayed."
+    "Extract and assess FMB or Forms XML locally, including multiple blocks and normal business SQL.",
+    "See all observed blocks/items, trigger counts, source identity/locations and review requirements.",
+    "Assessment stays local and cannot authorize AI submission, generation, import or source handoff.",
+    "Changed original, readable or assessment bytes revoke the displayed facts.",
+    "The UI distinguishes observed facts from OPAF understanding, which has not run in this assessment step."
   ],
   "limitations": [
-    "Experimental preview: partial drafts omit behavior; they do not translate arbitrary triggers, libraries or reports.",
-    "Raw Forms binaries still require supported Oracle tooling; unsupported schema or field mapping is not guessed.",
+    "This increment adds broad local assessment, not broad OPAF understanding or multi-block native generation.",
+    "Raw FMB extraction requires configured Oracle Forms tooling in the authenticated localhost application.",
+    "The existing hosted intake and narrow generation profiles are unchanged; no live model switch is implied.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "Release notes describe software changes, not proof of a successful conversion."
   ]

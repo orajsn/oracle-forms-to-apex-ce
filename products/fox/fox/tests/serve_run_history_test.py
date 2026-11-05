@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import platform
 import socket
 import sqlite3
 import sys
@@ -43,6 +44,10 @@ if __name__=='__main__':
             built=actual_release.__wrapped__(factory,SimpleNamespace(param=1))
             saved=case.__wrapped__(built,base,patch)
         from test_source_history_api import no_external_actions
+        # Uvicorn asks platform.system() during startup. On Windows its first
+        # stdlib lookup may spawn `ver`; cache this read-only OS probe before
+        # the fixture forbids all subsequent external actions, without an allowlist.
+        platform.system()
         no_external_actions.__wrapped__(patch)
         from fox.app import create_app,password_hash
         import uvicorn

@@ -4,6 +4,52 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.6.0] - 2026-11-05
+
+### Added
+
+- Explicit localhost **Extract and assess locally** action for FMB and Forms
+  XML. Broad, non-executing facts include all modules/blocks/items, source-bound
+  identities/locations, code hashes, lexical reference candidates and findings.
+  Normal quoted/numeric SQL in business code is not a blanket assessment refusal.
+- Authenticated assessment jobs use the existing loopback/owner/file controls
+  and single-extraction reservation. Original selections, readable output,
+  assessment and original-input sidecar hashes are retained and rechecked.
+  Assessment creates no ready/upload manifest and cannot authorize model calls,
+  generation, import, business acceptance or legacy source handoff.
+- Responsive all-block/item view, source identity and explicit **Application
+  understanding: Not run**. Source tampering revokes facts; unconfirmed POST
+  results are not automatically replayed. The new action requires an explicit
+  server capability; older preparation remains available separately.
+- Offline synthetic blueprint-evaluation fixtures/checks for future model
+  comparisons. No model winner or live benchmark is claimed by these fixtures.
+
+### Fixed
+
+- Hosted pages no longer offer a local preparation action that cannot run there;
+  both exact localhost origin and explicit server capability are required.
+- Presentation accepts the exact safe wildcard locations emitted for unknown
+  XML wrappers, retaining known blocks/items and their uninterpreted finding.
+- Saved-history browser fixtures resolve Windows' lazy platform metadata before
+  their unchanged external-action guard. Readiness now checks HTTP health/child
+  exit, so a failed fixture cannot masquerade as an application login timeout.
+
+### Verification and limits
+
+- Actual installed Oracle extraction and the authenticated local API assessed
+  two privately retained real FMBs: 9 blocks/222 items/54 triggers and 51 blocks/
+  414 items/95 triggers. Originals were unchanged; only metadata was returned.
+- Source/unit, API/race/tamper and canonical local browser checks use labelled
+  synthetic fixtures. Browser fake-native evidence is separate from actual
+  Oracle extraction proof. Desktop/mobile screenshots are retained locally.
+- This is G1 of the OPAF-first goal, not complete conversion. OPAF understanding,
+  model A/B inference, broader native generation and the real-file APEX export
+  acceptance case remain unfinished. No customer source or credentials are
+  included here. Existing hosted intake/generation gates remain unchanged.
+- No model switch, cloud/database mutation, deployment or human acceptance is
+  established by this source increment. Preserve earlier failed evidence and
+  the retained verifier fault; do not replay it to obtain a green result.
+
 ## [0.5.0] - 2026-11-05
 
 ### Added

@@ -67,6 +67,9 @@ class _Job:
     manifest_sha256: str | None = None
     files: dict = field(default_factory=dict)
     missing_dependencies: int = 0
+    mode: str = 'prepare'
+    assessment_sha256: str | None = None
+    assessment_files: dict = field(default_factory=dict)
 
 
 class LocalPreparationService:
@@ -100,6 +103,7 @@ class LocalPreparationService:
             except Exception:
                 formats = []
         return {'local_only': True, 'readable_formats': sorted(ALLOWED), 'native_formats': formats,
+                'forms_assessment_available': True,
                 'tool_presence_only': True, 'native_extraction_verified': False,
                 'max_files': MAX_FILES, 'max_file_bytes': MAX_FILE_BYTES,
                 'max_selected_bytes': MAX_SELECTED_BYTES, 'max_session_jobs': MAX_SESSION_JOBS,
@@ -120,12 +124,17 @@ class LocalPreparationService:
         with self._lock:
             self._busy = False
 
-    def submit_reserved(self, owner, selected):
+    def submit_reserved(self, owner, selected, *, assessment=False):
         identifier = 'prep-' + uuid.uuid4().hex
         directory = self.inputs / identifier
         source = directory / 's'
+        extra_paths = [directory / 'local-status.json']
+        if assessment:
+            extra_paths += [self.root / identifier / 'assessment.json', self.root / identifier / 'assessment-inputs.json',
+                *(self.root / identifier / 'readable' / extractor._output_name(name)
+                  for name, _ in selected if Path(name).suffix.lower() in {'.fmb', '.xml'})]
         extractor.validate_path_budget(source, self.root, [name for name, _ in selected], identifier,
-                                       self.backend, private_paths=[directory / 'local-status.json'])
+                                       self.backend, private_paths=extra_paths)
         try:
             extractor.assert_local_path(self.root)
             extractor.assert_local_path(self.inputs)
@@ -139,11 +148,11 @@ class LocalPreparationService:
             for name, raw in selected:
                 with (source / name).open('xb') as stream:
                     stream.write(raw)
-            job = _Job(identifier, owner, directory)
+            job = _Job(identifier, owner, directory, mode='assessment' if assessment else 'prepare')
             with self._lock:
                 self._jobs[identifier] = job
                 self._record(job)
-                self._future = self._executor.submit(self._prepare, job, source)
+                self._future = self._executor.submit(self._assess if assessment else self._prepare, job, source)
                 return self._public(job)
         except Exception:
             raise HTTPException(503, 'Local staging could not complete; no preparation was released.') from None
@@ -184,6 +193,78 @@ class LocalPreparationService:
         finally:
             self.release()
 
+    def _assess(self, job, source):
+        try:
+            prepared = extractor.assess(source, self.root, self.backend, job.identifier)
+            raw = _read(prepared / 'assessment.json', 2 * 1024 * 1024)
+            document = json.loads(raw)
+            if (document.get('job_id') != job.identifier or document.get('status') != 'ASSESSED_LOCAL_ONLY'
+                    or document.get('scope') != 'fox-local-forms-assessment-v1'):
+                raise ValueError('Invalid local assessment identity.')
+            input_path = prepared / 'assessment-inputs.json'
+            input_raw = _read(input_path, 64 * 1024)
+            inputs = json.loads(input_raw)
+            if (type(inputs) is not list or not 1 <= len(inputs) <= MAX_FILES
+                    or any(type(item) is not dict or set(item) != {'name', 'sha256', 'bytes'} for item in inputs)):
+                raise ValueError('Invalid original-source bindings.')
+            input_rows = {item['name']: item for item in inputs}
+            if len(input_rows) != len(inputs) or set(input_rows) != {p.name for p in source.iterdir()}:
+                raise ValueError('Original-source membership changed.')
+            bindings = {input_path: extractor.digest(input_raw)}
+            for name, item in input_rows.items():
+                extractor.safe_name(name)
+                path = source / name
+                original = _read(path, MAX_FILE_BYTES)
+                if len(original) != item['bytes'] or extractor.digest(original) != item['sha256']:
+                    raise ValueError('Original-source bytes changed.')
+                bindings[path] = item['sha256']
+            for entry in document['files']:
+                item = entry['readable']
+                if entry['source'] != input_rows.get(entry['source']['name']):
+                    raise ValueError('Assessment refers to a different original source.')
+                extractor.safe_name(item['name'])
+                path = prepared / 'readable' / item['name']
+                raw_source = _read(path, 5 * 1024 * 1024)
+                if len(raw_source) != item['bytes'] or extractor.digest(raw_source) != item['sha256']:
+                    raise ValueError('Assessment source changed.')
+                bindings[path] = item['sha256']
+            with self._lock:
+                job.prepared = prepared
+                job.assessment_sha256 = extractor.digest(raw)
+                job.assessment_files = bindings
+                job.state, job.code = 'ASSESSED_LOCAL_ONLY', 'LOCAL_FACTS_AVAILABLE'
+                self._record(job)
+        except Exception:
+            with self._lock:
+                job.state, job.code = 'BLOCKED', 'LOCAL_ASSESSMENT_FAILED'
+                job.files = {}
+                try:
+                    self._record(job)
+                except (OSError, ValueError):
+                    pass
+        finally:
+            self.release()
+
+    def _assessment(self, job):
+        if job.mode != 'assessment' or job.state != 'ASSESSED_LOCAL_ONLY' or job.prepared is None:
+            raise HTTPException(409, 'No completed local assessment is available.')
+        try:
+            raw = _read(job.prepared / 'assessment.json', 2 * 1024 * 1024)
+            if extractor.digest(raw) != job.assessment_sha256:
+                raise ValueError()
+            for path, digest in job.assessment_files.items():
+                if extractor.digest(_read(path, MAX_FILE_BYTES)) != digest:
+                    raise ValueError()
+            return raw
+        except (OSError, ValueError):
+            job.state, job.code = 'BLOCKED', 'ASSESSMENT_OUTPUT_CHANGED'
+            self._record(job)
+            raise HTTPException(409, 'Local assessment changed or is unavailable. Do not reuse it.') from None
+
+    def assessment(self, identifier, owner):
+        with self._lock:
+            return self._assessment(self._owned(identifier, owner))
+
     def _owned(self, identifier, owner):
         if not _JOB.fullmatch(identifier) or identifier not in self._jobs:
             raise HTTPException(404, 'Local preparation not found.')
@@ -211,18 +292,25 @@ class LocalPreparationService:
 
     @staticmethod
     def _public(job):
-        return {'job_id': job.identifier, 'state': job.state, 'code': job.code,
+        result = {'job_id': job.identifier, 'state': job.state, 'code': job.code,
                 'requires_human_review': True, 'approved_for_upload': False,
                 'automatic_upload': False, 'conversion_started': False,
                 'missing_dependency_count': job.missing_dependencies,
                 'files': [{'file_id': identifier, **entry} for identifier, entry in job.files.items()],
                 'note': 'Review/redact all readable output before an explicit handoff. Integrity is not approval.'}
+        if job.mode == 'assessment':
+            result.update(assessment_available=job.state == 'ASSESSED_LOCAL_ONLY',
+                          assessment_sha256=job.assessment_sha256 if job.state == 'ASSESSED_LOCAL_ONLY' else None)
+            result['note'] = 'Local extracted facts only. OPAF understanding, generation and technical verification have not run.'
+        return result
 
     def status(self, identifier, owner):
         with self._lock:
             job = self._owned(identifier, owner)
             if job.state == 'PREPARED_REVIEW_REQUIRED':
                 self._verified(job)
+            elif job.state == 'ASSESSED_LOCAL_ONLY':
+                self._assessment(job)
             return self._public(job)
 
     def output(self, identifier, file_id, owner):
@@ -317,7 +405,9 @@ def register_local_preparation(app, root, owner_callback, configured_backend=Non
         return JSONResponse(service.capabilities(), headers={'Cache-Control': 'no-store'})
 
     @router.post('/jobs', status_code=202)
+    @router.post('/assessments', status_code=202)
     async def prepare(request: Request):
+        assessment = request.url.path == PREFIX + '/assessments'
         service.reserve()
         submitted = False
         try:
@@ -366,11 +456,14 @@ def register_local_preparation(app, root, owner_callback, configured_backend=Non
                 raise HTTPException(422, 'Invalid local multipart file selection.') from None
             if not selected:
                 raise HTTPException(422, 'Select at least one source file.')
+            if assessment and not any(Path(name).suffix.lower() in {'.fmb', '.xml'} for name, _ in selected):
+                raise HTTPException(422, 'Select at least one FMB or readable Forms XML for assessment.')
             requested = {Path(name).suffix.lower() for name, _ in selected} & extractor.BINARY
             if requested - set(service.capabilities()['native_formats']):
                 raise HTTPException(409, 'Selected binaries require the configured installed Oracle tools; readable preparation remains available.')
             try:
-                result = service.submit_reserved(request.state.local_preparation_owner, selected)
+                result = (service.submit_reserved(request.state.local_preparation_owner, selected, assessment=True)
+                          if assessment else service.submit_reserved(request.state.local_preparation_owner, selected))
             except extractor.PathBudgetError:
                 return _error(422, {'code': 'LOCAL_PATH_BUDGET_EXCEEDED', 'message': extractor.PATH_BUDGET_MESSAGE})
             submitted = True
@@ -390,6 +483,12 @@ def register_local_preparation(app, root, owner_callback, configured_backend=Non
         return Response(raw, media_type='application/json' if name == UPLOAD_MANIFEST_NAME else 'text/plain',
                         headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
                                  'Content-Disposition': f'attachment; filename="{name}"'})
+
+    @router.get('/jobs/{identifier}/assessment')
+    def assessment_output(identifier: str, request: Request):
+        return Response(service.assessment(identifier, request.state.local_preparation_owner),
+                        media_type='application/json', headers={'Cache-Control': 'no-store',
+                        'X-Content-Type-Options': 'nosniff'})
 
     app.include_router(router)
     app.add_middleware(_LocalGate, owner_callback=owner_callback, origin=origin, host=parsed.netloc)

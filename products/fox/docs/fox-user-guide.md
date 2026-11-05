@@ -31,6 +31,12 @@ not one unrelated app per uploaded file.
 Source edits create a new source version. Previous runs and artifacts remain
 bound to their original source hash; they do not silently become current.
 
+For complex forms, the authenticated localhost app now offers **Extract and
+assess locally**. This inventories all FMB/XML blocks and code metadata even
+when ordinary business SQL does not fit the old conversion recipe. It stays
+local: no project source handoff, OPAF call or generation occurs. See
+[broad local assessment](broad-local-assessment.md) for the precise boundaries.
+
 The initial native profile is deliberately narrow: one table-backed block per
 form, explicit identity primary key, 2–20 NUMBER/DATE/VARCHAR2 columns and
 report/search/insert/update pages. The intake budget is 50 readable files and

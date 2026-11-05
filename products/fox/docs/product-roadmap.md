@@ -1,12 +1,24 @@
 # FOX product and UI roadmap
 
-Updated 4 November 2026. Implementation of the broader product/UI goals has been explicitly started. The goal definitions below refine the existing one-project/multiple-Forms/one-native-APEX contract. Implementation evidence and deployment status are tracked separately; a started goal is not a completed feature, deployed release or availability claim.
+Updated 5 November 2026. Implementation of the broader product/UI goals has been explicitly started. The goal definitions below refine the existing one-project/multiple-Forms/one-native-APEX contract. Implementation evidence and deployment status are tracked separately; a started goal is not a completed feature, deployed release or availability claim.
 
 ## Product outcome
 
 A business user manages multiple projects. Each project contains the Forms modules and supporting sources for one application. FOX helps the user complete that source set, explains what can and cannot be converted, runs embedded conversion and review, and produces a native APEX export with explicit target requirements and technical evidence. The user does not need to operate OPAF, write prompts or run Forms2XML/SQLcl/QA commands.
 
 "APEX generated", "technically verified" and "business behavior accepted" remain separate facts. The outcome is a declared supported conversion, not universal behavioral equivalence or an import guarantee for unspecified targets.
+
+## OPAF-first direction and 0.6.0 local-assessment increment
+
+The next conversion engine keeps factual extraction, compilation and checks in
+FOX, and moves broader source interpretation/design into OPAF. Source0.6.0 adds
+the first part: [broad local assessment](broad-local-assessment.md), including
+multiple blocks and normal business code, with original/derived identity checks
+and a clear OPAF **Not run** UI state. Real local Forms/API acceptance covers
+9-block and51-block inputs; source code is neither executed nor sent to AI by
+assessment. This does not complete the OPAF blueprint, native generator or
+real-source export/runtime acceptance milestone. The old narrow generation
+profile and transfer guards remain separate until that broader path is proven.
 
 ## Visible increment: 0.5.0, 5 November 2026
 

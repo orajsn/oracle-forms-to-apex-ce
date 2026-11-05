@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "scope": "fox-synthetic-understanding-benchmark-v1",
+  "provenance": "Public authored synthetic examples only. No customer source, model output or live execution evidence.",
+  "limits": "Deterministic evidence/structure checks, not business correctness, APEX validity, connection proof or a model ranking.",
+  "candidate_models": ["xai.grok-4.7", "xai.grok-4.3"],
+  "cases": [
+    {
+      "id": "multi-block-business-dml",
+      "labels": ["multi-block", "ordinary-business-dml", "control-versus-data"],
+      "source": {
+        "module": "SYN_ORDER_ENTRY",
+        "objects": [
+          {"id": "block:ORDERS", "kind": "block", "block_type": "data"},
+          {"id": "item:ORDERS.ORDER_NO", "kind": "item"},
+          {"id": "block:LINES", "kind": "block", "block_type": "data"},
+          {"id": "item:LINES.ORDER_NO", "kind": "item"},
+          {"id": "item:LINES.AMOUNT", "kind": "item"},
+          {"id": "block:FILTER", "kind": "block", "block_type": "control"},
+          {"id": "item:FILTER.STATUS", "kind": "item"},
+          {"id": "trigger:ORDERS.SAVE", "kind": "trigger"}
+        ],
+        "snippets": [
+          {"id": "src:save", "text": "UPDATE SYN_ORDERS SET STATUS = 'OPEN' WHERE ORDER_NO = :ORDERS.ORDER_NO; INSERT INTO SYN_ORDER_AUDIT (ORDER_NO, NOTE) VALUES (:ORDERS.ORDER_NO, 'DELETE is a note, not an executed command');"},
+          {"id": "src:ddl", "text": "CREATE TABLE SYN_ORDERS (ORDER_NO NUMBER PRIMARY KEY, STATUS VARCHAR2(12)); CREATE TABLE SYN_LINES (ORDER_NO NUMBER, AMOUNT NUMBER);"}
+        ],
+        "facts": [
+          {"id": "fact:table", "kind": "table", "subject": "block:ORDERS", "value": "SYN_ORDERS", "evidence_refs": ["src:save", "src:ddl"]},
+          {"id": "fact:key", "kind": "key", "subject": "block:ORDERS", "value": ["ORDER_NO"], "evidence_refs": ["src:ddl"]},
+          {"id": "fact:dml", "kind": "action", "subject": "trigger:ORDERS.SAVE", "value": "business-dml", "evidence_refs": ["src:save"]}
+        ],
+        "gaps": [
+          {"id": "gap:audit-ddl", "kind": "missing-ddl", "subject": "trigger:ORDERS.SAVE", "description": "SYN_ORDER_AUDIT is referenced; its DDL is not supplied."},
+          {"id": "gap:line-key", "kind": "unproven-key", "subject": "block:LINES", "description": "No primary key or foreign-key relationship is established for SYN_LINES."}
+        ]
+      },
+      "allowed_assumptions": [],
+      "allowed_components": {"data": ["form", "interactive-grid"], "control": ["page-items"]}
+    },
+    {
+      "id": "missing-package-and-ddl",
+      "labels": ["missing-ddl", "missing-package", "hallucinated-reference"],
+      "source": {
+        "module": "SYN_APPROVAL",
+        "objects": [
+          {"id": "block:REQUESTS", "kind": "block", "block_type": "data"},
+          {"id": "item:REQUESTS.REQUEST_NO", "kind": "item"},
+          {"id": "trigger:REQUESTS.APPROVE", "kind": "trigger"}
+        ],
+        "snippets": [{"id": "src:approve", "text": "SYN_APPROVAL_API.APPROVE(:REQUESTS.REQUEST_NO);"}],
+        "facts": [{"id": "fact:call", "kind": "routine-reference", "subject": "trigger:REQUESTS.APPROVE", "value": "SYN_APPROVAL_API.APPROVE", "evidence_refs": ["src:approve"]}],
+        "gaps": [
+          {"id": "gap:package-spec", "kind": "missing-package-spec", "subject": "trigger:REQUESTS.APPROVE", "description": "Called package specification is not supplied."},
+          {"id": "gap:package-body", "kind": "missing-package-body", "subject": "trigger:REQUESTS.APPROVE", "description": "Called package body is not supplied; approval behavior is unresolved."},
+          {"id": "gap:request-ddl", "kind": "missing-ddl", "subject": "block:REQUESTS", "description": "Base table, column types and keys are not established."}
+        ]
+      },
+      "allowed_assumptions": [],
+      "allowed_components": {"data": ["form"], "control": ["page-items"]}
+    },
+    {
+      "id": "explicit-prototype-assumptions",
+      "labels": ["prototype", "synthetic-key", "explicit-omission"],
+      "source": {
+        "module": "SYN_SCRATCHPAD",
+        "objects": [
+          {"id": "block:SCRATCH", "kind": "block", "block_type": "control"},
+          {"id": "item:SCRATCH.NOTE", "kind": "item"},
+          {"id": "trigger:SCRATCH.SAVE", "kind": "trigger"}
+        ],
+        "snippets": [{"id": "src:note", "text": "-- Synthetic screen metadata: control block SCRATCH, text item NOTE; SAVE trigger source unavailable."}],
+        "facts": [],
+        "gaps": [{"id": "gap:save-source", "kind": "missing-trigger-source", "subject": "trigger:SCRATCH.SAVE", "description": "Persistence behavior cannot be reconstructed."}]
+      },
+      "allowed_assumptions": ["prototype:scratch-table", "prototype:synthetic-key"],
+      "allowed_components": {"data": ["form"], "control": ["page-items"]}
+    }
+  ]
+}

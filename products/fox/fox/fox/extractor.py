@@ -395,6 +395,95 @@ def prepare(source: Path, output_root: Path, native: Backend | None = None, job_
     return job
 
 
+def assess(source: Path, output_root: Path, native: Backend | None = None,
+           job_id: str | None = None) -> Path:
+    """Extract broad local facts without creating a reviewed upload package.
+
+    Assessment deliberately does not call checked_source's model-transfer/DML
+    eligibility rule. The pure facts reader still checks XML, source safety and
+    resource bounds. No source code is executed or submitted to a provider.
+    Original selections and exact readable bytes remain private local evidence.
+    """
+    from .forms_facts import assess_forms_xml
+
+    source, output_root = assert_local_path(source), assert_local_path(output_root)
+    if output_root == source or output_root.is_relative_to(source) or source.is_relative_to(output_root):
+        raise ExtractionError('Source and assessment output must be separate non-nested directories.')
+    files = source_files(source)
+    assessed = [p for p in files if p.suffix.lower() in {'.fmb', '.xml'}]
+    if not assessed:
+        raise ExtractionError('Choose at least one FMB or readable Forms XML for local assessment.')
+    if any(p.suffix.lower() == '.fmb' for p in assessed) and native is None:
+        raise ExtractionError('FMB assessment requires the installed Oracle Forms backend.')
+    job_id = job_id or ('assess-' + uuid.uuid4().hex)
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}', job_id):
+        raise ExtractionError('Invalid assessment job ID.')
+    job = output_root / job_id
+    validate_path_budget(source, output_root, [p.relative_to(source) for p in files], job_id, native,
+        private_paths=[job / 'assessment.json', job / 'assessment-inputs.json',
+                       *(job / 'readable' / _output_name(p.name) for p in assessed)])
+    output_root.mkdir(parents=True, exist_ok=True)
+    job.mkdir(exist_ok=False)
+    readable = job / 'readable'
+    readable.mkdir()
+    inputs, entries, output_names = [], [], set()
+    with tempfile.TemporaryDirectory(prefix=_EXTRACT_TEMP_PREFIX) as scratch:
+        staging = Path(scratch) / 'sources'
+        staging.mkdir()
+        for path in files:
+            assert_local_path(path)
+            raw = path.read_bytes()
+            if not raw or len(raw) != path.stat().st_size or len(raw) > MAX_RAW_BYTES:
+                raise ExtractionError('Assessment input is empty, changed or exceeds its bound.')
+            inputs.append({'name': path.name, 'sha256': digest(raw), 'bytes': len(raw)})
+            (staging / path.name).write_bytes(raw)
+        for index, path in enumerate(files):
+            if path.suffix.lower() not in {'.fmb', '.xml'}:
+                continue
+            tool_out = Path(scratch) / f'output-{index}'
+            tool_out.mkdir()
+            backend = native if path.suffix.lower() == '.fmb' else ReadableBackend()
+            result = backend.extract(staging / path.name, tool_out)
+            if result.parent != tool_out or not result.is_file():
+                raise ExtractionError('Assessment backend returned an unexpected artifact.')
+            assert_local_path(result)
+            safe_name(result.name)
+            if result.name.casefold() in output_names:
+                raise ExtractionError('Assessment readable filenames collide.')
+            output_names.add(result.name.casefold())
+            size = result.stat().st_size
+            if not 0 < size <= 5 * 1024 * 1024:
+                raise ExtractionError('Readable assessment output exceeds its bound.')
+            raw = result.read_bytes()
+            if len(raw) != size:
+                raise ExtractionError('Assessment output changed while reading.')
+            facts = assess_forms_xml(result.name, raw)
+            if facts['source']['sha256'] != digest(raw) or facts['source']['bytes'] != len(raw):
+                raise ExtractionError('Local facts differ from the extracted source.')
+            with (readable / result.name).open('xb') as stream:
+                stream.write(raw)
+            entries.append({'source': inputs[index],
+                'readable': {'name': result.name, 'sha256': digest(raw), 'bytes': len(raw)}, 'facts': facts})
+        for path, expected in zip(files, inputs):
+            assert_local_path(path)
+            if digest(path.read_bytes()) != expected['sha256']:
+                raise ExtractionError('Original selection changed during assessment.')
+    document = {'schema_version': 1, 'scope': 'fox-local-forms-assessment-v1', 'job_id': job_id,
+        'status': 'ASSESSED_LOCAL_ONLY', 'raw_files_uploaded': False, 'network_calls': False,
+        'model_calls': False, 'conversion_started': False, 'files': entries,
+        'unassessed_sources': [{'name': p.name,
+            'reason': 'Related source retained locally; this action inventories FMB and Forms XML only.'}
+            for p in files if p.suffix.lower() not in {'.fmb', '.xml'}]}
+    raw = json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+    if len(raw) > 2 * 1024 * 1024:
+        raise ExtractionError('Local fact response exceeds the supported assessment bound.')
+    with (job / 'assessment.json').open('xb') as stream:
+        stream.write(raw)
+    with (job / 'assessment-inputs.json').open('xb') as stream:
+        stream.write(json.dumps(inputs, sort_keys=True, separators=(',', ':')).encode('utf-8'))
+    return job
+
+
 def verify(job: Path) -> dict:
     job = assert_local_path(job)
     for path in (job / 'status.json', job / 'manifest.json', job / 'ready'):

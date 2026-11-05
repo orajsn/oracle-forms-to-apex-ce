@@ -1,5 +1,8 @@
 import React, {useEffect, useState} from 'react';
 import {checkSelectedSources, uploadManifestName} from './preparedUpload';
+import {FormsUnderstanding} from './FormsUnderstanding';
+import {readFormsFacts} from './formsFactsPresentation';
+import type {SourceIdentity} from './formsFactsPresentation';
 
 // This client is only a local preparation/review surface, never upload or
 // conversion authority. The authenticated server repeats every safety check.
@@ -27,10 +30,12 @@ function isPathBudgetRejection(value:unknown){
   &&value.detail.code==='LOCAL_PATH_BUDGET_EXCEEDED'&&value.detail.message===pathBudgetMessage;
 }
 
-export type LocalCapabilities={readableFormats:string[];nativeFormats:string[];maxFiles:number;maxFileBytes:number;maxSelectedBytes:number};
+export type LocalCapabilities={readableFormats:string[];nativeFormats:string[];maxFiles:number;maxFileBytes:number;maxSelectedBytes:number;formsAssessmentAvailable?:boolean};
 export type LocalOutput={file_id:string;name:string;bytes:number;sha256:string};
-export type LocalJob={job_id:string;state:'RUNNING'|'PREPARED_REVIEW_REQUIRED'|'BLOCKED';code:string;missing_dependency_count:number;files:LocalOutput[]};
-export type PreparationState={visible:boolean;capabilities:LocalCapabilities|null;selected:File[];job:LocalJob|null;working:boolean;reviewed:boolean;handedOff:boolean;uncertain:boolean;error:string;notice:string};
+export type LocalJob={job_id:string;state:'RUNNING'|'PREPARED_REVIEW_REQUIRED'|'BLOCKED'|'ASSESSED_LOCAL_ONLY';code:string;missing_dependency_count:number;files:LocalOutput[];assessment_sha256?:string};
+type AssessmentFile={source:SourceIdentity;readable:SourceIdentity;facts:unknown};
+type Assessment={files:AssessmentFile[];unassessed:string[]};
+export type PreparationState={visible:boolean;capabilities:LocalCapabilities|null;selected:File[];job:LocalJob|null;working:boolean;reviewed:boolean;handedOff:boolean;uncertain:boolean;error:string;notice:string;assessment?:Assessment|null};
 
 export function isLocalPreparationOrigin(){
  if(typeof location==='undefined')return false;
@@ -48,8 +53,9 @@ export function readLocalCapabilities(value:unknown):LocalCapabilities{
    ||new Set(items).size!==items.length)throw fail();
   return items as string[];
  };
+ if(value.forms_assessment_available!==undefined&&typeof value.forms_assessment_available!=='boolean')throw fail();
  return {readableFormats:formats(value.readable_formats,readable,true),nativeFormats:formats(value.native_formats,native,false),
-  maxFiles:value.max_files,maxFileBytes:value.max_file_bytes,maxSelectedBytes:value.max_selected_bytes};
+  maxFiles:value.max_files,maxFileBytes:value.max_file_bytes,maxSelectedBytes:value.max_selected_bytes,...(value.forms_assessment_available===true?{formsAssessmentAvailable:true}:{})};
 }
 export function checkLocalSelection(files:File[],capabilities:LocalCapabilities){
  if(!files.length||files.length>capabilities.maxFiles)throw localError('Choose 1–'+capabilities.maxFiles+' files to prepare locally.');
@@ -68,7 +74,7 @@ export function readLocalJob(value:unknown,expected?:string):LocalJob{
  if(!object(value)||!jobId(value.job_id)||(expected!==undefined&&value.job_id!==expected)
   ||value.requires_human_review!==true||value.approved_for_upload!==false||value.automatic_upload!==false||value.conversion_started!==false
   ||!integer(value.missing_dependency_count,0,Number.MAX_SAFE_INTEGER)||!Array.isArray(value.files))throw fail();
- const pairs:Record<string,string[]>={RUNNING:['PREPARING_LOCALLY'],PREPARED_REVIEW_REQUIRED:['REVIEW_READABLE_OUTPUT'],BLOCKED:['LOCAL_PREPARATION_FAILED','PREPARED_OUTPUT_CHANGED']};
+ const pairs:Record<string,string[]>={RUNNING:['PREPARING_LOCALLY'],PREPARED_REVIEW_REQUIRED:['REVIEW_READABLE_OUTPUT'],BLOCKED:['LOCAL_PREPARATION_FAILED','PREPARED_OUTPUT_CHANGED','LOCAL_ASSESSMENT_FAILED','ASSESSMENT_OUTPUT_CHANGED'],ASSESSED_LOCAL_ONLY:['LOCAL_FACTS_AVAILABLE']};
  if(typeof value.state!=='string'||!Object.hasOwn(pairs,value.state)||typeof value.code!=='string'||!pairs[value.state].includes(value.code))throw fail();
  const files:LocalOutput[]=[];const ids=new Set<string>(),names=new Set<string>();let total=0,manifests=0;
  for(const entry of value.files){
@@ -81,9 +87,10 @@ export function readLocalJob(value:unknown,expected?:string):LocalJob{
   files.push({file_id:entry.file_id,name:entry.name,bytes:entry.bytes,sha256:entry.sha256});
  }
  if(value.state==='PREPARED_REVIEW_REQUIRED'?(files.length<2||files.length>51||manifests!==1||total>25*MiB):files.length!==0)throw fail();
- return {job_id:value.job_id,state:value.state as LocalJob['state'],code:value.code,missing_dependency_count:value.missing_dependency_count,files};
+ if(value.state==='ASSESSED_LOCAL_ONLY'&&(!hash(value.assessment_sha256)||value.assessment_available!==true||value.missing_dependency_count!==0))throw fail();
+ return {job_id:value.job_id,state:value.state as LocalJob['state'],code:value.code,missing_dependency_count:value.missing_dependency_count,files,...(value.state==='ASSESSED_LOCAL_ONLY'?{assessment_sha256:value.assessment_sha256 as string}:{})};
 }
-function membership(job:LocalJob){return JSON.stringify([job.job_id,job.state,job.code,job.missing_dependency_count,[...job.files].sort((a,b)=>a.file_id.localeCompare(b.file_id))]);}
+function membership(job:LocalJob){return JSON.stringify([job.job_id,job.state,job.code,job.missing_dependency_count,job.assessment_sha256,[...job.files].sort((a,b)=>a.file_id.localeCompare(b.file_id))]);}
 async function sha256(bytes:ArrayBuffer){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');}
 async function abortable<T>(work:Promise<T>,signal:AbortSignal):Promise<T>{
  let abort=()=>{};
@@ -109,11 +116,14 @@ async function boundedBytes(response:Response,maximum:number,signal:AbortSignal)
 }
 async function responseJSON(response:Response,signal:AbortSignal){
  const text=new TextDecoder('utf-8',{fatal:true}).decode(await boundedBytes(response,65536,signal));
+ return parseJSON(text,4);
+}
+function parseJSON(text:string,maxDepth:number){
  // Reject duplicate object keys and excessive nesting before JSON.parse.
  const stack:(Set<string>|null)[]=[];
  for(const token of text.matchAll(/"(?:\\[\s\S]|[^"\\])*"|[{}\[\]]/g)){
   const part=token[0];
-  if(part==='{'||part==='['){stack.push(part==='{'?new Set():null);if(stack.length>4)throw fail();}
+  if(part==='{'||part==='['){stack.push(part==='{'?new Set():null);if(stack.length>maxDepth)throw fail();}
   else if(part==='}'||part===']'){if(!stack.length)throw fail();stack.pop();}
   else if(/^\s*:/.test(text.slice(token.index!+part.length))){const keys=stack[stack.length-1],key=JSON.parse(part);if(!keys||keys.has(key))throw fail();keys.add(key);}
  }
@@ -122,7 +132,7 @@ async function responseJSON(response:Response,signal:AbortSignal){
 async function request<T>(path:string,sessionSignal:AbortSignal,consume:(response:Response,signal:AbortSignal)=>Promise<T>,body?:FormData):Promise<T>{
  if(!isLocalPreparationOrigin())throw localError('Local preparation is only available in the authenticated localhost app.',true);
  // Callers construct only fixed route suffixes from validated opaque IDs.
- if(!/^\/(?:capabilities|jobs(?:\/prep-[0-9a-f]{32}(?:\/files\/file-[0-9a-f]{32})?)?)(?![\s\S])/.test(path))throw fail();
+ if(!/^\/(?:capabilities|assessments|jobs(?:\/prep-[0-9a-f]{32}(?:\/files\/file-[0-9a-f]{32}|\/assessment)?)?)(?![\s\S])/.test(path))throw fail();
  sessionSignal.throwIfAborted();
  const controller=new AbortController(),signal=controller.signal;
  const abort=()=>controller.abort(sessionSignal.reason);
@@ -152,6 +162,7 @@ export class LocalPreparationSession{
  state:PreparationState={visible:false,capabilities:null,selected:[],job:null,working:false,reviewed:false,handedOff:false,uncertain:false,error:'',notice:''};
  externalBusy=false;
  private controller=new AbortController();private disposed=false;private invalidated=new Set<string>();
+ private assessmentSources:SourceIdentity[]|null=null;
  constructor(private changed:(state:PreparationState)=>void){}
  private update(next:Partial<PreparationState>){if(!this.disposed){this.state={...this.state,...next};this.changed(this.state);}}
  dispose(){this.disposed=true;this.controller.abort();}
@@ -172,7 +183,7 @@ export class LocalPreparationSession{
   if(this.state.working||this.externalBusy||this.state.uncertain||this.state.job?.state==='RUNNING')return;
   try{if(!this.state.capabilities)throw fail();checkLocalSelection(this.state.selected,this.state.capabilities);}
   catch(error){this.update({error:message(error)});return;}
-  this.update({working:true,reviewed:false,handedOff:false,error:'',notice:''});
+  this.assessmentSources=null;this.update({working:true,reviewed:false,handedOff:false,assessment:null,error:'',notice:''});
   let submitted=false,rejected=false;
   try{const form=new FormData();for(const file of this.state.selected)form.append('files',file,file.name);
    submitted=true;const job=await request('/jobs',this.controller.signal,async(response,signal)=>{
@@ -192,26 +203,61 @@ export class LocalPreparationSession{
    this.update({uncertain,error:message(error)+(uncertain?' The preparation outcome is uncertain. Do not resubmit; ask the local operator to inspect the retained job.':'')});}
   finally{this.update({working:false});}
  }
+ async assess(){
+  if(this.state.working||this.externalBusy||this.state.uncertain||this.state.job?.state==='RUNNING')return;
+  try{if(!this.state.capabilities?.formsAssessmentAvailable)throw fail();checkLocalSelection(this.state.selected,this.state.capabilities);}catch(error){this.update({error:message(error)});return;}
+  const selected=[...this.state.selected];this.update({working:true,reviewed:false,handedOff:false,assessment:null,error:'',notice:''});
+  let submitted=false,rejected=false,accepted=false;
+  try{
+   const sources:SourceIdentity[]=[];for(const file of selected)sources.push({name:file.name,bytes:file.size,sha256:await sha256(await file.arrayBuffer())});
+   const form=new FormData();for(const file of selected)form.append('files',file,file.name);
+   submitted=true;const job=await request('/assessments',this.controller.signal,async(response,signal)=>{
+    if([400,404,409,413,415,422,429].includes(response.status)){rejected=true;throw localError('Local assessment could not start. Check the selected files and local preparation status.',true);}
+    if(response.status!==202)throw fail();return readLocalJob(await responseJSON(response,signal));
+   },form);
+   accepted=true;this.assessmentSources=sources;this.update({job,selected:[]});
+   if(job.state==='ASSESSED_LOCAL_ONLY')await this.loadAssessment(job);
+  }catch(error){const uncertain=submitted&&!accepted&&!rejected&&!(error instanceof LocalPreparationError&&error.definiteRejection);this.update({uncertain,error:accepted?'The retained assessment could not be verified. Check local status; do not resubmit the assessment.':message(error)+(uncertain?' The assessment outcome is uncertain. Do not resubmit; ask the local operator to inspect the retained job.':'')});}
+  finally{this.update({working:false});}
+ }
+ private async loadAssessment(job:LocalJob){
+  if(job.state!=='ASSESSED_LOCAL_ONLY'||!hash(job.assessment_sha256)||!this.assessmentSources)throw fail();
+  const expected=this.assessmentSources;const result=await request('/jobs/'+job.job_id+'/assessment',this.controller.signal,async(response,signal)=>{
+   if(response.status===409){this.invalidate(job,true);throw fail();}if(!response.ok)throw fail();const raw=await boundedBytes(response,2*MiB,signal);
+   if(await sha256(raw)!==job.assessment_sha256)throw fail();
+   const value:unknown=parseJSON(new TextDecoder('utf-8',{fatal:true}).decode(raw),64);
+   if(!object(value)||value.schema_version!==1||value.scope!=='fox-local-forms-assessment-v1'||value.job_id!==job.job_id||value.status!=='ASSESSED_LOCAL_ONLY'
+    ||value.raw_files_uploaded!==false||value.network_calls!==false||value.model_calls!==false||value.conversion_started!==false||!Array.isArray(value.files)||!Array.isArray(value.unassessed_sources))throw fail();
+   const files:AssessmentFile[]=[],seen=new Set<string>();
+   const identity=(v:unknown):SourceIdentity=>{if(!object(v)||!safeName(v.name)||!hash(v.sha256)||!integer(v.bytes,1,25*MiB))throw fail();return {name:v.name,sha256:v.sha256,bytes:v.bytes};};
+   for(const entry of value.files){if(!object(entry))throw fail();const source=identity(entry.source),readable=identity(entry.readable),selected=expected.find(x=>x.name===source.name);
+    if(!selected||selected.sha256!==source.sha256||selected.bytes!==source.bytes||seen.has(source.name))throw fail();readFormsFacts(entry.facts,readable);seen.add(source.name);files.push({source,readable,facts:entry.facts});}
+   const unassessed:string[]=[];for(const entry of value.unassessed_sources){if(!object(entry)||!safeName(entry.name)||!expected.some(x=>x.name===entry.name)||seen.has(entry.name)||typeof entry.reason!=='string')throw fail();seen.add(entry.name);unassessed.push(entry.name);}
+   if(seen.size!==expected.length)throw fail();return {files,unassessed};
+  });
+  const current=await this.fetchStatus(job.job_id);if(membership(current)!==membership(job))throw fail();this.update({assessment:result});
+ }
  async refresh(){
   if(this.state.working||this.externalBusy||!this.state.job)return;
-  this.update({working:true,error:'',notice:''});
+  this.update({working:true,assessment:null,error:'',notice:''});
   try{const job=await this.fetchStatus(this.state.job.job_id);const changed=membership(job)!==membership(this.state.job);
-   this.update({job,reviewed:changed||job.state!=='PREPARED_REVIEW_REQUIRED'?false:this.state.reviewed,handedOff:changed?false:this.state.handedOff});
+   this.update({job,assessment:changed?null:this.state.assessment,reviewed:changed||job.state!=='PREPARED_REVIEW_REQUIRED'?false:this.state.reviewed,handedOff:changed?false:this.state.handedOff});
+   if(job.state==='ASSESSED_LOCAL_ONLY'&&!this.state.assessment)await this.loadAssessment(job);
   }catch(error){this.update({reviewed:false,error:message(error)});}
   finally{this.update({working:false});}
  }
  private async fetchStatus(identifier:string){
   if(!jobId(identifier))throw fail();return request('/jobs/'+identifier,this.controller.signal,async(response,signal)=>{
    if(response.status===409&&this.state.job?.job_id===identifier){
-    this.invalidate(this.state.job);
-    throw localError('The prepared output changed or is unavailable. Prepare a new set before using it.');
+    const assessment=this.assessmentSources!==null;this.invalidate(this.state.job,assessment);
+    throw localError(assessment?'The local assessment changed or is unavailable. Do not reuse it.':'The prepared output changed or is unavailable. Prepare a new set before using it.');
    }
    if(!response.ok)throw fail();const job=readLocalJob(await responseJSON(response,signal),identifier);
    if(this.invalidated.has(identifier))throw localError('This prepared set previously failed an integrity check. Prepare a new set before using it.');
    return job;
   });
  }
- private invalidate(job:LocalJob){this.invalidated.add(job.job_id);this.update({job:{...job,state:'BLOCKED',code:'PREPARED_OUTPUT_CHANGED',files:[]},reviewed:false,handedOff:false});}
+ private invalidate(job:LocalJob,assessment=false){this.invalidated.add(job.job_id);this.update({job:{...job,state:'BLOCKED',code:assessment?'ASSESSMENT_OUTPUT_CHANGED':'PREPARED_OUTPUT_CHANGED',files:[]},assessment:null,reviewed:false,handedOff:false});}
  private async currentPrepared(){
   const original=this.state.job;if(!original||original.state!=='PREPARED_REVIEW_REQUIRED')throw fail();
   const current=await this.fetchStatus(original.job_id);
@@ -265,7 +311,7 @@ export function scheduleLocalPreparationPoll(session:LocalPreparationSession|nul
  if(!session||!state||state.job?.state!=='RUNNING'||state.working||state.error||busy)return;
  const timer=setTimeout(()=>void session.refresh(),2000);return()=>clearTimeout(timer);
 }
-export function LocalPreparationView({state,busy,onSelect,onPrepare,onRefresh,onReview,onUse,onDownload}:{state:PreparationState;busy:boolean;onSelect:(files:File[])=>void;onPrepare:()=>void;onRefresh:()=>void;onReview:(value:boolean)=>void;onUse:()=>void;onDownload:(id:string)=>void}){
+export function LocalPreparationView({state,busy,onSelect,onPrepare,onAssess,onRefresh,onReview,onUse,onDownload}:{state:PreparationState;busy:boolean;onSelect:(files:File[])=>void;onPrepare:()=>void;onAssess?:()=>void;onRefresh:()=>void;onReview:(value:boolean)=>void;onUse:()=>void;onDownload:(id:string)=>void}){
  if(!state.visible)return null;
  const locked=busy||state.working;const capabilities=state.capabilities,job=state.job;
  return <section className="panel" aria-label="Prepare source locally">
@@ -276,10 +322,14 @@ export function LocalPreparationView({state,busy,onSelect,onPrepare,onRefresh,on
    <p className="subtle">Up to {capabilities.maxFiles} files · {capabilities.maxFileBytes/MiB} MB/file · {capabilities.maxSelectedBytes/MiB} MB selected. Prepared readable output must fit 5 MB/file and 25 MB total.</p>
    <label className="button secondary upload-button">Choose local source files<input aria-label="Choose local source files" type="file" multiple accept={[...capabilities.readableFormats,...capabilities.nativeFormats].join(',')} disabled={locked||job?.state==='RUNNING'||state.uncertain} onChange={event=>{onSelect(Array.from(event.target.files||[]));event.target.value='';}}/></label>
    {state.selected.length>0&&<ul>{state.selected.map(file=><li key={file.name}>{file.name} ({file.size.toLocaleString()} bytes)</li>)}</ul>}
-   <button type="button" disabled={locked||!state.selected.length||job?.state==='RUNNING'||state.uncertain} onClick={onPrepare}>Prepare locally</button>
+   {capabilities.formsAssessmentAvailable&&<><p className="subtle">Assessment stays local. It does not add sources to the current project or run OPAF.</p>
+    <button type="button" disabled={!onAssess||locked||!state.selected.length||job?.state==='RUNNING'||state.uncertain} onClick={onAssess}>Extract and assess locally</button></>}
+   <button type="button" className={capabilities.formsAssessmentAvailable?'secondary':undefined} disabled={locked||!state.selected.length||job?.state==='RUNNING'||state.uncertain} onClick={onPrepare}>Prepare locally</button>
   </>}
   {job&&<div aria-live="polite"><p>Local job: <code>{job.job_id}</code></p>
-   {job.state==='RUNNING'?<p>Preparing selected files locally. No upload or conversion has started.</p>:job.state==='BLOCKED'?<p>Preparation is blocked. {job.code==='PREPARED_OUTPUT_CHANGED'?'The retained output changed or is unavailable. Do not reuse it.':'No verified readable set is available. Check the selected source and installed tooling with the local operator.'}</p>:<>
+   {job.state==='RUNNING'?<p>Preparing selected files locally. No upload or conversion has started.</p>:job.state==='BLOCKED'?<p>Preparation is blocked. {['PREPARED_OUTPUT_CHANGED','ASSESSMENT_OUTPUT_CHANGED'].includes(job.code)?'The retained output changed or is unavailable. Do not reuse it.':'No verified readable set is available. Check the selected source and installed tooling with the local operator.'}</p>:job.state==='ASSESSED_LOCAL_ONLY'?<>
+    {!state.assessment?<p>Local assessment is retained. Check local status to verify and display its facts.</p>:<>{state.assessment.unassessed.length>0&&<p>Not assessed as Forms: {state.assessment.unassessed.join(', ')}. These selected files still need separate review.</p>}{state.assessment.files.map(entry=><div key={entry.source.name}><p>Original selected source: <strong>{entry.source.name}</strong> · SHA-256 <code>{entry.source.sha256}</code></p><FormsUnderstanding facts={entry.facts} selectedSource={entry.readable}/></div>)}</>}
+   </>:<>
     <h3>Verified readable output — review required</h3><p>Integrity checks match this prepared set. They do not establish safe redaction, complete dependencies or behavioral equivalence.</p>
     <p>{job.missing_dependency_count} candidate missing {job.missing_dependency_count===1?'dependency':'dependencies'} reported. Review these with the source owner.</p>
     <ul>{job.files.map(file=><li key={file.file_id}><strong>{file.name}</strong> ({file.bytes.toLocaleString()} bytes) <button className="secondary" type="button" disabled={locked} onClick={()=>onDownload(file.file_id)}>Download {file.name}</button><details><summary>File integrity</summary><code>{file.sha256}</code></details></li>)}</ul>
@@ -307,5 +357,5 @@ export default function LocalPreparation({busy,onUseReviewed}:LocalPreparationPr
   const url=URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=file.name;link.click();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
  }
- return <LocalPreparationView state={state} busy={busy} onSelect={files=>session.select(files)} onPrepare={()=>void session.prepare()} onRefresh={()=>void session.refresh()} onReview={value=>session.setReviewed(value)} onUse={()=>void session.useReviewed(onUseReviewed)} onDownload={identifier=>void download(identifier)}/>;
+ return <LocalPreparationView state={state} busy={busy} onSelect={files=>session.select(files)} onPrepare={()=>void session.prepare()} onAssess={()=>void session.assess()} onRefresh={()=>void session.refresh()} onReview={value=>session.setReviewed(value)} onUse={()=>void session.useReviewed(onUseReviewed)} onDownload={identifier=>void download(identifier)}/>;
 }
