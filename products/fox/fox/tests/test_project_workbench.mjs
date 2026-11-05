@@ -14,7 +14,7 @@ import ts from 'typescript';
 const foxRoot=fileURLToPath(new URL('../',import.meta.url));
 const workspace=path.dirname(foxRoot),require=createRequire(import.meta.url);
 const sources={};
-for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','preparedUpload.ts','projectWorkbench.css','verificationPresentation.ts'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
+for(const name of ['projectConversion.ts','ProjectWorkbench.tsx','preparedUpload.ts','projectWorkbench.css','verificationPresentation.ts','SourceRequestPanel.tsx','sourceRequests.ts'])sources[name]=await readFile(path.join(foxRoot,'web',name),'utf8');
 const sha=raw=>createHash('sha256').update(raw).digest('hex');
 function load(source,fileName,imports={}){
  const compiled=ts.transpileModule(source,{fileName,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
@@ -25,7 +25,9 @@ function load(source,fileName,imports={}){
 const verification=load(sources['verificationPresentation.ts'],'verificationPresentation.ts');
 const api=load(sources['projectConversion.ts'],'projectConversion.ts',{'./verificationPresentation':verification});
 const upload=load(sources['preparedUpload.ts'],'preparedUpload.ts');
-const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload});
+const requestApi=load(sources['sourceRequests.ts'],'sourceRequests.ts');
+const requestPanel=load(sources['SourceRequestPanel.tsx'],'SourceRequestPanel.tsx',{'./sourceRequests':requestApi});
+const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel});
 const render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
 const clone=value=>JSON.parse(JSON.stringify(value));
 

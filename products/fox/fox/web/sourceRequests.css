@@ -1,0 +1,5 @@
+.sr-list{margin:1.25rem 0;display:grid;gap:1rem}.sr-list>h3,.sr-list>p{margin:0}
+.sr-card h3{overflow-wrap:anywhere}.sr-card li{margin:.6rem 0;overflow-wrap:anywhere}.sr-card li p{margin:.25rem 0}
+.sr-card details{margin:.8rem 0}.sr-card summary{cursor:pointer;min-height:36px;padding:.4rem 0}
+.sr-card textarea{width:100%;font:inherit;font-size:.85rem;line-height:1.5;resize:vertical;min-height:10rem;margin-top:.6rem}
+.sr-card code{overflow-wrap:anywhere;white-space:normal}.sr-card .fw-detail-heading{flex-wrap:wrap;gap:.7rem}

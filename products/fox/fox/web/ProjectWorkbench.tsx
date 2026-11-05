@@ -4,6 +4,7 @@ import {checkSelectedSources,uploadManifestName,type UploadMode} from './prepare
 import {actionContext,available,findingOwnerLabels,formReadinessLabels,presentProjectPlan,presentProjectRun,processAvailability,recoveryAvailability,runBelongsToProject,validSourceBinding,workbenchSteps,
  type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectDependency,type ProjectFinding,type ProjectForm,type ProjectRun,type SourceBinding,type SourceLocation,type WorkbenchStep} from './projectConversion';
 import './projectWorkbench.css';
+import SourceRequests from './SourceRequestPanel';
 
 export type WorkbenchProject={id:string;name:string;customer:string;description?:string;file_count?:number;run_count?:number};
 export type SavedSourceVersion={id:string;label:string;source_hash:string;file_count:number};
@@ -11,7 +12,7 @@ export type WorkbenchActionResult={status:'confirmed'|'rejected'|'unconfirmed';m
 export type HumanReviewControls={disabled:boolean;perform:(action:()=>Promise<WorkbenchActionResult>)=>Promise<boolean>};
 export type WorkbenchCapabilities={upload?:ActionCapability;select_version?:ActionCapability;generate?:ActionCapability;local_preparation?:ActionCapability};
 export type ProjectWorkbenchProps={
- project:WorkbenchProject;source:SourceBinding;plan:unknown;runs:ProjectRun[];versions?:SavedSourceVersion[];
+ project:WorkbenchProject;source:SourceBinding;plan:unknown;runs:ProjectRun[];versions?:SavedSourceVersion[];sourceRequests?:unknown;
  capabilities:WorkbenchCapabilities;processingNotice:string;busy?:boolean;error?:string;unknownOutcome?:boolean;
  onBack?:()=>void;
  onUpload?:(files:File[],mode:UploadMode,context:ProjectActionContext)=>Promise<WorkbenchActionResult>;
@@ -242,6 +243,7 @@ export default function ProjectWorkbench(props:ProjectWorkbenchProps){
   </section>}
 
   {step==='review'&&plan&&<ReviewForms plan={plan} onResolve={()=>setStep('resolve')} onContinue={()=>setStep('convert')}/>}
+  {step==='resolve'&&plan&&<SourceRequests key={plan.plan_sha256} value={props.sourceRequests} plan={plan} onAddFiles={()=>setStep('upload')}/>}
   {step==='resolve'&&plan&&<section aria-label="Resolve project findings"><div className="fw-list-heading"><div><h2>What is needed before conversion</h2><p>Missing information and human decisions are separate from unsupported technical features.</p></div></div>{plan.state==='EMPTY'?<div className="fw-surface"><h3>Add your source files first</h3><p>An empty project is not ready to generate an application.</p><button type="button" onClick={()=>setStep('upload')}>Add source files <Upload size={16}/></button></div>:plan.summary.blocking_findings===0?<div className="fw-surface fw-clear"><CheckCircle2 size={26}/><h3>No blocking findings reported</h3><p>This source plan is ready. It is not yet a generated app or proof of business behavior.</p><button type="button" onClick={()=>setStep('convert')}>Review processing <ArrowRight size={16}/></button></div>:<>{plan.project_findings.map((item,index)=><Finding key={`project-${index}`} finding={item} onUpload={()=>setStep('upload')}/>)}{plan.forms.flatMap(form=>form.findings.map((item,index)=><Finding key={`${form.module_id}-${index}`} finding={item} moduleName={form.form_name} onUpload={()=>setStep('upload')}/>))}<p className="fw-small">Updating files creates a new source version and a new assessment. Previous results are retained; they do not certify changed sources.</p></>}</section>}
 
   {step==='convert'&&<section aria-label="Convert the project"><div className="fw-surface"><h2>Generate one APEX application</h2><p>{plan?.assessment_complete?`${plan.summary.form_count} selected forms will be considered together. FOX will not silently leave out a blocked form.`:'Complete the source assessment before conversion.'}</p><p>FOX maps and reviews the supplied structure, generates native components, then validates and tests the output. Business meaning stays with your team.</p>{processingNotice?<div className="fw-processing-notice"><strong>Processing route</strong><p>{processingNotice}</p></div>:<p className="fw-notice">The processing route has not been reported. Conversion stays unavailable.</p>}

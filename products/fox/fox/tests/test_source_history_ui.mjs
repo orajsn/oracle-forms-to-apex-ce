@@ -31,7 +31,7 @@ function nameHooks(context){
 }
 const compiled=ts.transpileModule(instrumented,{fileName:'main.candidate.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.React},transformers:{before:[nameHooks]}}).outputText;
 const iconNames=['ArrowRight','FolderOpen','Plus','Upload','Download','ShieldCheck','ChevronLeft','LogOut','FileCode2','TriangleAlert'];
-const componentNames=['SourceVersionHistory','LocalPreparation','SourceOverview','SourceEligibility','ManagedVerificationStatus','RunEvidence'];
+const componentNames=['SourceVersionHistory','LocalPreparation','SourceOverview','SourceEligibility','ManagedVerificationStatus','RunEvidence','ReleaseInfo'];
 const stubs=Object.fromEntries([...iconNames,...componentNames].map(name=>[name,Object.defineProperty(()=>null,'name',{value:name})]));
 const names=['React','__useState','__useRef','useEffect','api','json','runLabel','checkSelectedSources','uploadManifestName','selectSourceSet','excludeSourceFile','assertRefreshedSourceProject','sourceHistoryErrorMessage','sourceHistoryRefreshRequired','__capture','setInterval','clearInterval',...Object.keys(stubs)];
 const factory=new Function(...names,compiled+'\nreturn {App,Acceptance,SourceUpload};');

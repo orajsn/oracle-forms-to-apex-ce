@@ -30,6 +30,7 @@ from .prepared_source import (UPLOAD_MANIFEST_NAME, MAX_MANIFEST_BYTES,
                               verify_upload_manifest)
 from . import source_history
 from .release_info import public_release
+from .source_requests import build_source_requests, request_text
 from .storage import initialize_schema as initialize_storage_schema
 
 LEGACY_PROFILE = 'legacy-html-prototype-v1'
@@ -581,6 +582,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 # project-name/input bounds need attention. No run is created.
                 p['project_plan'] = None
                 p['project_plan_error'] = {'code': error.code, 'message': str(error)}
+            p['source_requests'] = build_source_requests(p['project_plan']) if p['project_plan'] else None
             configuration = configured_conversion()
             configured = configuration['conversion_configured']
             plan_ready = bool(p['project_plan'] and p['project_plan']['can_generate'])
@@ -639,6 +641,20 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             except ProjectConversionInputError as error:
                 raise HTTPException(422, str(error)) from None
             return history_json_response(value)
+    @app.get('/api/projects/{pid}/source-requests.txt')
+    def export_source_requests(pid:str,request:Request,source_hash:str,plan_sha256:str):
+        p=project(request,pid)
+        with db() as c:
+            c.execute('BEGIN')
+            try:
+                plan=selected_project_plan(c,p)
+                if plan['source_hash']!=source_hash or plan['plan_sha256']!=plan_sha256:
+                    raise HTTPException(409,'The source version changed. Refresh before downloading its request list.')
+                text=request_text(plan,build_source_requests(plan))
+            except (ProjectConversionInputError,ValueError):
+                raise HTTPException(422,'A grouped request list is unavailable. Review individual form findings.') from None
+            return Response(text,media_type='text/plain',headers={'Content-Disposition':'attachment; filename="fox-source-requests.txt"'})
+
     @app.post('/api/projects/{pid}/sources')
     async def upload(pid:str,request:Request,files:list[UploadFile]=File(...),prepared_manifest:UploadFile|None=File(None),
                      expected_current_source_set_id:str|None=Form(None)):
