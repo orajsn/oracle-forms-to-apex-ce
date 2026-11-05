@@ -11,6 +11,7 @@ import {createHash} from 'node:crypto';
 
 const foxRoot=fileURLToPath(new URL('../',import.meta.url));
 const workspace=path.dirname(foxRoot),require=createRequire(import.meta.url);
+const release=JSON.parse(await readFile(path.join(foxRoot,'fox/release.json'),'utf8'));
 const fixtureCode=String.raw`
 import json,runpy
 d=runpy.run_path('tests/test_project_conversion.py')
@@ -39,7 +40,7 @@ test('canonical main: source-bound multi-project workflow and uncertain-write re
  assert.equal(ordersMapping?.scope,'fox-project-storage-v1');assert.equal(ordersMapping.source_table_name,'ORDERS');
  assert.equal(ordersMapping.target_table_name,'FOX_NATIVE_'+ordersMapping.identity_sha256.slice(0,19).toUpperCase());
  const out=path.resolve(workspace,process.env.FOX_UI_ARTIFACT_DIR??`work/project-main-ui-${Date.now()}`);
- assert.ok(out.startsWith(path.join(workspace,'work')+path.sep));await mkdir(out);
+ assert.ok(out.startsWith(path.join(workspace,'work')+path.sep));await mkdir(path.dirname(out),{recursive:true});await mkdir(out);
  const uiSourceNames=['main.tsx','projectConversion.ts','ProjectWorkbench.tsx'];
  const uiSourcesAtBuild=Object.fromEntries(await Promise.all(uiSourceNames.map(async name=>[name,await readFile(path.join(foxRoot,'web',name),'utf8')])));
  const mainAtBuild=uiSourcesAtBuild['main.tsx'];
@@ -51,7 +52,7 @@ test('canonical main: source-bound multi-project workflow and uncertain-write re
   await context.setOffline(true);await context.route('**/*',route=>route.request().url()==='http://fox.synthetic.test/'?route.fulfill({status:200,contentType:'text/html',body:'<div id="root"></div>'}):route.abort());page=await context.newPage();
   page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://fox.synthetic.test/');
-  const installMock=async retained=>page.evaluate(({fixtures,retained})=>{
+  const installMock=async retained=>page.evaluate(({fixtures,retained,release})=>{
    const clone=value=>JSON.parse(JSON.stringify(value)),sid=n=>'ss-'+String(n).repeat(32);
    const pid='a'.repeat(32),other='b'.repeat(32),created='c'.repeat(32);
    const state=retained??{events:[],current:'ready',planOverride:null,projects:[pid,other],showCreated:false,createdRecord:null,visibleRun:false,pendingRun:null,run:null,acceptMode:'unknown',username:'Synthetic UI QA',loggedIn:true};
@@ -69,6 +70,7 @@ test('canonical main: source-bound multi-project workflow and uncertain-write re
     const url=String(input),method=init.method??'GET';
     const body=typeof init.body==='string'?JSON.parse(init.body):null;
     state.events.push({url,method,body});
+    if(url==='/api/release'&&method==='GET')return json(release);
     if(url==='/api/session')return state.loggedIn?json({username:state.username,conversion_configured:true,conversion_profile:'native-project-v1',configuration_scope:'Synthetic fixture',configuration_checks:[]}):json({detail:'Synthetic signed-out session'},401);
     if(url==='/api/logout'&&method==='POST'){state.loggedIn=false;return json({ok:true});}
     if(url==='/api/login'&&method==='POST'){state.loggedIn=true;state.username=body.username;return json({ok:true});}
@@ -98,11 +100,19 @@ test('canonical main: source-bound multi-project workflow and uncertain-write re
     }
     throw new Error('Unexpected synthetic request: '+method+' '+url);
    };
-  },{fixtures,retained});
+  },{fixtures,retained,release});
   const mount=async retained=>{await installMock(retained);await page.addStyleTag({content:css});await page.addScriptTag({content:js});};
   const reload=async(options={})=>{const retained=await page.evaluate(()=>window.__fixture);await page.reload({waitUntil:'domcontentloaded'});if(options.storageUnavailable)await page.evaluate(()=>{const get=Storage.prototype.getItem,set=Storage.prototype.setItem;Storage.prototype.getItem=function(key){if(key==='fox.project-uncertainty.v1')throw new DOMException('Synthetic storage unavailable','SecurityError');return get.call(this,key);};Storage.prototype.setItem=function(key,value){if(key==='fox.project-uncertainty.v1')throw new DOMException('Synthetic storage unavailable','SecurityError');return set.call(this,key,value);};});await mount(retained);};
   await mount();
   await page.getByRole('heading',{name:'Your projects',exact:true}).waitFor();
+  const releaseSummary=page.getByText('FOX v'+release.version+' · What changed',{exact:true});
+  await releaseSummary.waitFor();await releaseSummary.click();
+  await page.getByRole('heading',{name:release.title,exact:true}).waitFor();
+  await page.screenshot({path:path.join(out,'release-desktop.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2),'Release notes must not add horizontal overflow');
+  await page.screenshot({path:path.join(out,'release-mobile.png'),fullPage:true});
+  await releaseSummary.click();await page.setViewportSize({width:1440,height:1100});
   await page.screenshot({path:path.join(out,'desktop-project-dashboard.png')});
   await page.getByRole('button',{name:'New project',exact:true}).click();
   assert.equal(await page.getByLabel('Project name',{exact:true}).getAttribute('maxlength'),'80');

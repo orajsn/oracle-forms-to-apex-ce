@@ -5,6 +5,10 @@ contains multiple Forms modules and produces one native APEX application/export.
 The web UI manages multiple projects, source versions, conversion runs, findings
 and result review. Business users do not need Codex, prompts or QA commands.
 
+See [What changed](CHANGELOG.md) for versioned FOX increments and the
+[release policy](docs/release-policy.md) for source, verification and deployment
+boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
+
 ```text
 Project → Upload/prepare → Resolve gaps → Process → Native APEX output
                                               → Technical checks

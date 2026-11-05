@@ -29,6 +29,7 @@ from .prepared_source import (UPLOAD_MANIFEST_NAME, MAX_MANIFEST_BYTES,
                               encode_upload_manifest, parse_upload_manifest,
                               verify_upload_manifest)
 from . import source_history
+from .release_info import public_release
 from .storage import initialize_schema as initialize_storage_schema
 
 LEGACY_PROFILE = 'legacy-html-prototype-v1'
@@ -499,16 +500,20 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             response.headers['Cache-Control']='public, max-age=31536000, immutable'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         return response
+    @app.get('/api/release')
+    def release_identity():
+        return public_release()
+
     @app.get('/api/health')
     def health():
         if fresh is not None and fresh.identity()['state'] == 'FENCED':
-            return JSONResponse({'status':'fenced','product':'FOX','version':'0.1.0',
+            return JSONResponse({'status':'fenced','product':'FOX','version':public_release()['version'],
                 'installation':fresh.identity()},status_code=200)
         worker=worker_monitor.snapshot(thread_alive=worker_thread.is_alive() if worker_thread else False)
         # Existing healthy consumers retain status/product/version and HTTP 200.
         # Error/stale workers deliberately return 503; no provider is called here.
         return JSONResponse({'status':'ok' if worker['healthy'] else 'degraded',
-            'product':'FOX','version':'0.1.0','worker':worker},status_code=200 if worker['healthy'] else 503)
+            'product':'FOX','version':public_release()['version'],'worker':worker},status_code=200 if worker['healthy'] else 503)
     if fresh is not None:
         @app.get('/api/installation')
         def installation_identity():

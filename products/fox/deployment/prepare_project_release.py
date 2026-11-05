@@ -95,7 +95,7 @@ def read(path, *, allow_empty=False, maximum=MAX_FILE, reject_key_material=True)
 def source_files(root):
     """Only runtime source trees and named public profiles/QA assets are admitted."""
     root = Path(root).resolve(strict=True)
-    names = set(PROFILE_FILES) | set(QA_FILES)
+    names = set(PROFILE_FILES) | set(QA_FILES) | {'fox/fox/release.json'}
     for directory in ("fox/fox", "qa/operator"):
         base = root / directory
         need(base.is_dir() and base.resolve() == base, "SOURCE_DIRECTORY_REQUIRED")

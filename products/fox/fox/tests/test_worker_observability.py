@@ -10,6 +10,7 @@ import pytest
 
 from fox.worker_observability import WorkerMonitor, observed_poll
 from fox.app import create_app, password_hash
+from fox.release_info import public_release
 
 
 JOB = 'fox-' + 'a' * 20
@@ -187,7 +188,7 @@ def test_health_endpoint_preserves_healthy_keys_and_headers(tmp_path, monkeypatc
         response = client.get('/api/health')
     assert response.status_code == 200
     assert {key: response.json()[key] for key in ('status', 'product', 'version')} == {
-        'status': 'ok', 'product': 'FOX', 'version': '0.1.0'}
+        'status': 'ok', 'product': 'FOX', 'version': public_release()['version']}
     assert response.json()['worker']['state'] == 'disabled'
     assert response.headers['cache-control'] == 'no-store'
 

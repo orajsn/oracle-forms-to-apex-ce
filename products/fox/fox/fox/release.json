@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "released_on": "2026-11-05",
+  "title": "Know which FOX you are using",
+  "changes": [
+    "See the UI and server versions from every project workspace.",
+    "Open What changed without leaving your project.",
+    "Get a clear refresh or retry message when release information does not match."
+  ],
+  "limitations": [
+    "Experimental preview with bounded Forms-to-native-APEX conversion coverage.",
+    "APEX generated, technical checks passed and business acceptance remain separate.",
+    "Release notes describe software changes, not proof of a successful conversion."
+  ]
+}

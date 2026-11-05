@@ -181,7 +181,7 @@ def test_public_profile_rejects_secret_or_unknown_fields():
 def test_source_collection_does_not_admit_other_workspace_files(tmp_path):
     for name in p.PROFILE_FILES + p.QA_FILES:
         path = tmp_path / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b"{}\n")
-    for name in ("fox/fox/__init__.py", "fox/fox/native/FoxPllExtract.java", "qa/operator/hosted_service.py"):
+    for name in ("fox/fox/__init__.py", "fox/fox/release.json", "fox/fox/native/FoxPllExtract.java", "qa/operator/hosted_service.py"):
         path = tmp_path / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b"# source\n")
     for name in ("fox/fox/secrets.json", "outputs/customer.fmb", "work/private/admin.dpapi", ".git/config"):
         path = tmp_path / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b"not admitted")
@@ -230,6 +230,26 @@ def test_converter_context_contains_exact_handoff_dependency_closure(tmp_path):
     recipe=p.containerfiles()['converter']
     assert b'COPY --chown=10001:10001 qa-contract /opt/forms2apex/converter/fox' in recipe
     assert b'from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile' in recipe
+
+
+def test_release_metadata_is_copied_into_the_backend_image_context(tmp_path):
+    value=inputs();metadata=(HERE.parent/'fox/fox/release.json').read_bytes()
+    value['files']['fox/fox/release.json']=metadata
+    output=tmp_path/'release-candidate'
+    result=p.materialize(**value,output_root=output)
+    files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
+    assert files['bundle/fox/fox/release.json']==metadata
+    assert files['build/fox/fox/release.json']==metadata
+
+
+def test_source_collector_requires_the_release_resource(tmp_path):
+    required=set(p.PROFILE_FILES)|set(p.QA_FILES)|{'fox/fox/release.json',
+        'fox/fox/native/FoxPllExtract.java','qa/operator/hosted_service.py'}
+    for name in required:
+        path=tmp_path/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'synthetic source file')
+    assert p.source_files(tmp_path)['fox/fox/release.json']==b'synthetic source file'
+    (tmp_path/'fox/fox/release.json').unlink()
+    with pytest.raises(FileNotFoundError):p.source_files(tmp_path)
 
 
 @pytest.mark.parametrize('name',p.QA_CONTRACT_FILES)

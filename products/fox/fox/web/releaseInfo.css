@@ -1,0 +1,7 @@
+.release-info{min-width:0;max-width:40rem;font-size:.875rem;color:#4d5967}
+.release-info summary{cursor:pointer;font-weight:600;line-height:1.6;overflow-wrap:anywhere;min-height:44px;padding:.5rem 0}
+.release-notes{padding:.8rem 0;line-height:1.55;font-size:.875rem;color:#263445}
+.release-notes h3{font-size:1rem;margin:.6rem 0}.release-notes h4{font-size:.85rem;margin:1rem 0 .3rem}
+.release-notes p{margin:.5rem 0}.release-notes ul{padding-left:1.2rem;margin:.5rem 0}
+.release-notes li{margin:.35rem 0}.release-info summary:focus-visible{outline:2px solid #a64025;outline-offset:4px}
+@media(max-width:700px){.page-footer{flex-direction:column;align-items:flex-start;gap:.8rem}.release-info{max-width:100%;width:100%}}
