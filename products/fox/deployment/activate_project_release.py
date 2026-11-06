@@ -222,8 +222,9 @@ def plan_document(raw, expected_sha256):
     need(type(value) is dict and type(value.get('schema_version')) is int
          and value['schema_version'] in (1,2), 'PLAN_FIELDS_INVALID')
     upgrade = value['schema_version'] == 2
+    queue_option = {'hosted_forms_queue'} if upgrade and 'hosted_forms_queue' in value else set()
     need(set(value) == {'schema_version', 'scope', 'source_bundle_sha256',
-         'bundle_root', 'provider', 'release', 'helper_sha256'} | ({'current_installation'} if upgrade else set())
+         'bundle_root', 'provider', 'release', 'helper_sha256'} | ({'current_installation'} if upgrade else set()) | queue_option
          and value['scope'] == (UPGRADE_SCOPE if upgrade else SCOPE)
          and canonical(value) == raw, 'PLAN_FIELDS_INVALID')
     need(SHA.fullmatch(value['source_bundle_sha256']) and SHA.fullmatch(value['helper_sha256']), 'PLAN_DIGEST_INVALID')
@@ -239,6 +240,8 @@ def plan_document(raw, expected_sha256):
     if upgrade:
         need(value['current_installation']['path'] not in (value['provider']['path'],value['release']['path']),
              'CURRENT_INSTALLATION_REFERENCE_COLLIDES')
+    if queue_option:
+        hosted_queue_path(value['hosted_forms_queue'])
     return value
 
 
@@ -394,10 +397,56 @@ def names(release):
     return {'fox': 'fox-project-' + suffix, 'converter': 'forms2apex-project-' + suffix}
 
 
-def new_environment(role, old, release, profile):
+def hosted_queue_path(value):
+    """Dedicated private queue below the existing /data bind, never an app path.
+
+    This is a declaration only, not proof of filesystem access or a running host
+    processor. Runtime path checks and the separately prepared private directory
+    remain necessary; this option creates no directory, listener or mount.
+    """
+    need(type(value) is str and re.fullmatch(
+        r'/data/native-preparations(?:-[a-z0-9][a-z0-9-]{0,47})?', value),
+        'BOUNDED_HOSTED_FORMS_QUEUE_REQUIRED')
+    return value
+
+
+def validate_hosted_queue(plan, python):
+    """Read-only mapped-UID check; never create/chmod/chown the host queue.
+
+    The separately configured host processor must prepare the exact directory
+    first. Rootless unshare observes the same UID mapping as the FOX /data bind.
+    """
+    if 'hosted_forms_queue' not in plan:
+        return None
+    queue = hosted_queue_path(plan['hosted_forms_queue'])
+    absolute(python)
+    code = (
+        'import json,pathlib,stat,sys;root=pathlib.Path("/home/opc/fox/data");'
+        'queue=root/sys.argv[1];'
+        '\nfor path in (root,queue):'
+        '\n info=path.lstat()'
+        '\n assert path.resolve(strict=True)==path and stat.S_ISDIR(info.st_mode)'
+        '\n assert info.st_uid==1000 and info.st_gid==1000 and stat.S_IMODE(info.st_mode)==0o700'
+        '\nprint(json.dumps({"status":"PRIVATE_HOSTED_FORMS_QUEUE_CHECKED"}))'
+    )
+    observed = parse(command(['/usr/bin/podman', 'unshare', python, '-I', '-B', '-c', code,
+                              PurePosixPath(queue).name]))
+    need(observed == {'status': 'PRIVATE_HOSTED_FORMS_QUEUE_CHECKED'}, 'PRIVATE_HOSTED_FORMS_QUEUE_UNCONFIRMED')
+    return observed
+
+
+def new_environment(role, old, release, profile, *, hosted_forms_queue=None):
     result = environment(old)
+    if hosted_forms_queue is not None:
+        hosted_queue_path(hosted_forms_queue)
+    # Every upgrade must explicitly reauthorize this optional capability. Never
+    # enable it by inheriting an ambient or previously configured environment.
+    need('FOX_HOSTED_FORMS_QUEUE' not in result or (role == 'fox' and hosted_forms_queue is not None),
+         'EXPLICIT_HOSTED_FORMS_QUEUE_REQUIRED')
     if role == 'fox':
         result.update(FOX_CONVERSION_PROFILE='native-project-v1', FOX_VERIFIER_RELEASE_SHA256=release)
+        if hosted_forms_queue is not None:
+            result['FOX_HOSTED_FORMS_QUEUE'] = hosted_forms_queue
         need(result.get('FOX_NATIVE_PROFILE_FILE') == '/run/fox-native/profile.json'
              and result.get('FOX_RUN_ADAPTER') == 'embedded-opaf' and result.get('FOX_VERIFICATION_ENABLED') == '1',
              'FOX_ENVIRONMENT_BOUNDARY_CHANGED')
@@ -478,6 +527,9 @@ def candidate_argv(role, old, plan, release, stage, *, baseline_profiles=None):
 
 
 def check_candidate(item, role, plan, release, env, mounts, *, baseline_item):
+    queue = hosted_queue_path(plan['hosted_forms_queue']) if 'hosted_forms_queue' in plan else None
+    need(env.get('FOX_HOSTED_FORMS_QUEUE') == (queue if role == 'fox' else None),
+         'CANDIDATE_HOSTED_FORMS_QUEUE_CHANGED')
     config = item['HostConfig']
     need(item['Name'].lstrip('/') == names(plan['release']['sha256'])[role]
          and item['Image'].split(':')[-1] == release['images'][role][7:]
@@ -569,13 +621,15 @@ def create_candidates(plan, *, expected_plan_sha256, apply=False):
     existing_names = set(command(['/usr/bin/podman','ps','-a','--format','{{.Names}}']).decode().splitlines())
     need(not (set(names(plan['release']['sha256']).values()) & existing_names), 'CANDIDATE_NAME_ALREADY_EXISTS')
     profile = parse(read(Path(release['opaf_profile']['host_path'])))
+    validate_hosted_queue(plan, provider['python']['path'])
     with held_stage(stage, create=True):
         create_file(stage / 'plan.json', canonical(plan))
         create_file(stage / 'before.private.json', canonical(before))
         result = {}
         for role, old_name in (('fox','fox'), ('converter','forms2apex-mcp')):
             old = before[old_name]
-            env = new_environment(role, old, plan['release']['sha256'], profile)
+            env = new_environment(role, old, plan['release']['sha256'], profile,
+                                  hosted_forms_queue=plan.get('hosted_forms_queue'))
             create_file(stage / (role + '.env'), ('\n'.join(k+'='+v for k,v in sorted(env.items()))+'\n').encode())
             args, mounts = (candidate_argv(role,old,plan,release,stage) if current is None else
                 candidate_argv(role,old,plan,release,stage,baseline_profiles=current.profile_paths))
@@ -643,10 +697,11 @@ def main():
         result = stage_status(plan, args.plan_sha256)
     else:
         need(not args.apply, 'READ_ONLY_INSPECTION_REQUIRED')
-        load_bindings(plan); current = current_baseline(plan)
+        provider, _ = load_bindings(plan); current = current_baseline(plan)
         if current is not None:current.scope()
         items = baseline() if current is None else baseline(current)
         validate_bound_sources(items)
+        validate_hosted_queue(plan, provider['python']['path'])
         result = {'status':'PRECREATE_BASELINE_OBSERVED','plan_sha256':args.plan_sha256,
             'containers':{name:{'id':v['Id'],'image':'sha256:'+v['Image'].split(':')[-1]} for name,v in items.items()},
             'services_changed':False,'containers_started':False}

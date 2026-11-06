@@ -43,6 +43,80 @@ def test_v2_plan_requires_an_explicit_hash_bound_adapter():
     with pytest.raises(M.TransitionError):M.plan_document(raw,M.sha(raw))
 
 
+def test_v2_can_pin_candidate_plan_without_changing_legacy_transition_contract():
+    value = v2_plan()
+    value['candidate_plan'] = {'path': '/home/opc/private/activation-plan.json', 'sha256': 'c' * 64}
+    raw = M.cb(value)
+    assert M.plan_document(raw, M.sha(raw)) == value
+    assert 'candidate_plan' in M.references(value)
+    legacy = plan(); legacy['candidate_plan'] = value['candidate_plan']; raw = M.cb(legacy)
+    with pytest.raises(M.TransitionError, match='TRANSITION_PLAN_INVALID'):
+        M.plan_document(raw, M.sha(raw))
+
+
+@pytest.mark.parametrize('fault', ['none', 'missing', 'path', 'sha'])
+def test_opt_in_candidate_requires_exact_transition_reference(fault):
+    path = Path('/home/opc/private/activation-plan.json')
+    candidate = {'hosted_forms_queue': '/data/native-preparations'}; raw = M.cb(candidate)
+    value = v2_plan(); value['candidate_plan'] = {'path': str(path), 'sha256': M.sha(raw)}
+    if fault == 'missing': del value['candidate_plan']
+    elif fault == 'path': value['candidate_plan']['path'] = '/home/opc/other.json'
+    elif fault == 'sha': value['candidate_plan']['sha256'] = '0' * 64
+    if fault == 'none': M.validate_candidate_plan_reference(value, path, raw, candidate)
+    else:
+        with pytest.raises(M.TransitionError):
+            M.validate_candidate_plan_reference(value, path, raw, candidate)
+    M.validate_candidate_plan_reference(v2_plan(), path, M.cb({}), {})
+
+
+@pytest.mark.parametrize('queue', [None, '/data/native-preparations'])
+@pytest.mark.parametrize('fault', ['none', 'missing', 'changed', 'unapproved'])
+def test_transition_preflight_rechecks_exact_planned_queue_before_service_actions(queue, fault, tmp_path, monkeypatch):
+    """Real environment/candidate gates with synthetic host observations only."""
+    from test_activate_project_release import M as A, prepared, profile, upgrade_plan
+    context = object.__new__(M.Transition); context.A = A
+    context.p = {'old_unit': {'sha256': A.sha(b'synthetic unit')},
+                 'new_unit': {'path': '/private/new.service'}}
+    context.R = 'e' * 64; context.candidate_plan = upgrade_plan(queue)
+    context.cfg = {'python': {'path': '/usr/bin/python3'}, 'state_root': str(tmp_path)}
+    rows = {role: prepared(role) for role in ('fox', 'converter')}
+    old = {name: rows[role][5] for role, name in (('fox', 'fox'), ('converter', 'forms2apex-mcp'))}
+    old['oracle-applied-ai-label'] = {'Id': '3' * 64, 'State': {'Running': True}}
+    context.old = SimpleNamespace(preflight=lambda: None)
+    context.old_pins = {name: {'id': item['Id']} for name, item in old.items()}
+    context.pins = {name: {'id': rows[role][6]['Id']} for role, name in (('fox', 'fox'), ('converter', 'forms2apex-mcp'))}
+    context.snapshot = {'runtime': {'tls': {'id': '4' * 64, 'image': 'sha256:' + '5' * 64}}}
+    context.snapshot_raw = b'synthetic snapshot'; context.p['snapshot'] = {'sha256': '6' * 64}
+    context.release = rows['fox'][1]; context.root = tmp_path; context.retained = {}
+    context.scope = lambda: None; context.health = lambda: None
+    context.M = SimpleNamespace(validate_snapshot_bindings=lambda *_: None,
+        configuration_signature=S.configuration_signature, require_never_started=lambda _: None,
+        service_state=lambda *_: {'MainPID': '0', 'ActiveState': 'inactive'}, verify_service_unit=lambda *_: None)
+    context.S = SimpleNamespace(_inspect=lambda *_: {'Name': 'fox-https', 'Image': '5' * 64,
+        'State': {'Running': True, 'Pid': 100}}, measure=lambda *_args, **_kwargs: {'fits_current_limits': True})
+    candidates = {rows[role][6]['Id']: rows[role][6] for role in rows}
+    fox = candidates[rows['fox'][6]['Id']]
+    if queue is not None and fault != 'missing':
+        fox['Config']['Env'].append('FOX_HOSTED_FORMS_QUEUE=' + (queue if fault != 'changed' else queue + '-changed'))
+    if fault == 'unapproved' and queue is None:
+        fox['Config']['Env'].append('FOX_HOSTED_FORMS_QUEUE=/data/native-preparations')
+    calls = []
+    monkeypatch.setattr(A, 'inspect_container', lambda name: old[name] if name in old else candidates[name])
+    monkeypatch.setattr(A, 'read', lambda path, **kwargs: b'synthetic unit' if path == M.UNIT else A.canonical(profile()))
+    monkeypatch.setattr(A, 'validate_hosted_queue', lambda plan, python: calls.append(('private-queue', plan.get('hosted_forms_queue'))))
+    monkeypatch.setattr(A, 'command', lambda argv: (calls.append(('host-observation', argv)) or
+        (b'enabled\n' if 'is-enabled' in argv else b'')))
+    monkeypatch.setattr(M.os, 'getxattr', lambda *_: b'system_u:object_r:container_file_t:s0:c75,c812', raising=False)
+    fails = (queue is not None and fault in ('missing', 'changed')) or (queue is None and fault == 'unapproved')
+    if fails:
+        with pytest.raises(A.ActivationError, match='STOPPED_CANDIDATE_CONFIGURATION_CHANGED'):
+            context.preflight()
+        assert calls == [('private-queue', queue)]
+    else:
+        context.preflight()
+        assert calls[0] == ('private-queue', queue)
+
+
 @pytest.mark.parametrize('fault',['path','sha','no-measured-file'])
 def test_v2_adapter_cannot_import_outside_the_verified_new_bundle(fault,monkeypatch):
     value=v2_plan();inventory={'files':{'qa/operator/hosted_snapshot.py':'b'*64}}

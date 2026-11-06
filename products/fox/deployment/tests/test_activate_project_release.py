@@ -83,6 +83,103 @@ def test_exact_plan_uses_canonical_linux_paths_offline():
     assert M.plan_document(raw, M.sha(raw)) == value
 
 
+def upgrade_plan(queue=None):
+    value = plan()
+    value.update(schema_version=2, scope=M.UPGRADE_SCOPE,
+                 current_installation={'path': '/home/opc/private/old-installation.json', 'sha256': '9' * 64})
+    if queue is not None:
+        value['hosted_forms_queue'] = queue
+    return value
+
+
+@pytest.mark.parametrize('queue', ['/data/native-preparations', '/data/native-preparations-20261107a'])
+def test_queue_opt_in_is_hash_bound_and_only_in_upgrade_plans(queue):
+    value = upgrade_plan(queue); raw = M.canonical(value)
+    assert M.plan_document(raw, M.sha(raw)) == value
+    changed = deepcopy(value); changed['hosted_forms_queue'] += '-changed'
+    with pytest.raises(M.ActivationError, match='EXACT_PLAN_REQUIRED'):
+        M.plan_document(M.canonical(changed), M.sha(raw))
+    legacy = plan(); legacy['hosted_forms_queue'] = queue; raw = M.canonical(legacy)
+    with pytest.raises(M.ActivationError, match='PLAN_FIELDS_INVALID'):
+        M.plan_document(raw, M.sha(raw))
+
+
+@pytest.mark.parametrize('queue', [None, True, 1, {}, '', '/data', '/data/', '/data/fox.sqlite3',
+    '/tmp/native-preparations', '/database/native-preparations', '/data/native-preparations/child',
+    '/data/../data/native-preparations', '/data//native-preparations', '/data/./native-preparations',
+    '//data/native-preparations', 'data/native-preparations', 'C:/data/native-preparations',
+    '/data/native-preparations/', '/data/native-preparations-', '/data/native-preparations-UPPER',
+    '/data/native-preparations-abc\n', '/data/native-preparations\x00', '/data/native-preparations\\other',
+    '/data/native-preparations-' + 'a' * 49])
+def test_invalid_queue_plan_is_rejected_offline(queue):
+    value = upgrade_plan(); value['hosted_forms_queue'] = queue; raw = M.canonical(value)
+    with pytest.raises(M.ActivationError, match='BOUNDED_HOSTED_FORMS_QUEUE_REQUIRED'):
+        M.plan_document(raw, M.sha(raw))
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+def test_explicit_queue_changes_only_fox_environment_and_no_mount_or_port(role, monkeypatch):
+    monkeypatch.setenv('FOX_HOSTED_FORMS_QUEUE', '/untrusted/ambient')
+    value, release, env, argv, mounts, old, item = prepared(role)
+    assert 'FOX_HOSTED_FORMS_QUEUE' not in env  # Ambient process env has no authority.
+    value = upgrade_plan('/data/native-preparations')
+    selected = M.new_environment(role, old, value['release']['sha256'], profile(),
+                                 hosted_forms_queue=value['hosted_forms_queue'])
+    assert selected == ({**env, 'FOX_HOSTED_FORMS_QUEUE': value['hosted_forms_queue']} if role == 'fox' else env)
+    args, selected_mounts = M.candidate_argv(role, old, value, release, PurePosixPath('/private/stage'))
+    assert args == argv and selected_mounts == mounts
+    item['Config']['Env'] = [key + '=' + val for key, val in sorted(selected.items())]
+    M.check_candidate(item, role, value, release, selected, mounts, baseline_item=old)
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+def test_inherited_queue_requires_explicit_reauthorization(role):
+    old = baseline_item(role)
+    old['Config']['Env'].append('FOX_HOSTED_FORMS_QUEUE=/data/native-preparations')
+    with pytest.raises(M.ActivationError, match='EXPLICIT_HOSTED_FORMS_QUEUE_REQUIRED'):
+        M.new_environment(role, old, 'e' * 64, profile())
+    if role == 'fox':
+        env = M.new_environment(role, old, 'e' * 64, profile(), hosted_forms_queue='/data/native-preparations-new')
+        assert env['FOX_HOSTED_FORMS_QUEUE'] == '/data/native-preparations-new'
+
+
+@pytest.mark.parametrize('planned,observed', [(None, '/data/native-preparations'),
+    ('/data/native-preparations', None), ('/data/native-preparations', '/data/native-preparations-wrong')])
+def test_candidate_queue_must_match_plan_even_if_supplied_environment_matches_item(planned, observed):
+    value, release, env, argv, mounts, old, item = prepared('fox')
+    value = upgrade_plan(planned)
+    if observed is not None:
+        env['FOX_HOSTED_FORMS_QUEUE'] = observed
+    item['Config']['Env'] = [key + '=' + val for key, val in sorted(env.items())]
+    with pytest.raises(M.ActivationError, match='CANDIDATE_HOSTED_FORMS_QUEUE_CHANGED'):
+        M.check_candidate(item, 'fox', value, release, env, mounts, baseline_item=old)
+
+
+def test_private_queue_check_is_opt_in_read_only_and_uses_mapped_uid(monkeypatch):
+    calls = []
+    def observe(argv):
+        calls.append(argv)
+        return M.canonical({'status': 'PRIVATE_HOSTED_FORMS_QUEUE_CHECKED'})
+    monkeypatch.setattr(M, 'command', observe)
+    assert M.validate_hosted_queue(upgrade_plan(), '/usr/bin/python3') is None
+    assert calls == []
+    assert M.validate_hosted_queue(upgrade_plan('/data/native-preparations'), '/usr/bin/python3') == {
+        'status': 'PRIVATE_HOSTED_FORMS_QUEUE_CHECKED'}
+    args = calls[0]
+    assert args[:7] == ['/usr/bin/podman', 'unshare', '/usr/bin/python3', '-I', '-B', '-c', args[6]]
+    assert args[7:] == ['native-preparations']
+    compile(args[6], '<private-queue-check>', 'exec')
+    assert 'info.st_uid==1000' in args[6] and 'info.st_gid==1000' in args[6]
+    assert 'stat.S_IMODE(info.st_mode)==0o700' in args[6]
+    assert not any(action in args[6] for action in ('chmod', 'chown', 'mkdir', 'write'))
+
+
+def test_unconfirmed_private_queue_check_stops_before_creation(monkeypatch):
+    monkeypatch.setattr(M, 'command', lambda _: M.canonical({'status': 'anything-else'}))
+    with pytest.raises(M.ActivationError, match='PRIVATE_HOSTED_FORMS_QUEUE_UNCONFIRMED'):
+        M.validate_hosted_queue(upgrade_plan('/data/native-preparations'), '/usr/bin/python3')
+
+
 @pytest.mark.parametrize('mutation', ['hash', 'extra', 'bool', 'bundle', 'inside', 'same', 'relative', 'traversal'])
 def test_changed_plan_is_rejected_before_effects(mutation):
     value = plan()

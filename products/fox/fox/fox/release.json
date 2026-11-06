@@ -1,8 +1,9 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "released_on": "2026-11-07",
-  "title": "Server-side FMB preparation and guided source adoption",
+  "title": "Guarded activation of private host preparation",
   "changes": [
+    "Bind the private Forms queue setting to the reviewed deployment plan and recheck it at activation.",
     "Prepare one raw FMB on a configured private Oracle Forms host from the project upload screen.",
     "Preserve the original, both native exports, effective metadata and validated redaction evidence.",
     "Bind preparation to the project owner and selected source version without starting AI processing.",

@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import stat
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -39,6 +40,14 @@ def file_hashes(root):
             for p in root.rglob('*') if p.is_file()}
 
 
+def inventory_fixture(count):
+    """Authored metadata only; no claim about an actual stopped capture."""
+    directory = dict(kind='directory', mode=0o700, uid=0, gid=0,
+                     mtime_ns=0, device=0, inode=0)
+    return {'fox-data': directory, **{
+        'fox-data/' + str(index): dict(directory) for index in range(count - 1)}}
+
+
 class SnapshotContractTests(unittest.TestCase):
     def test_exact_four_role_directory_contract(self):
         self.assertEqual(s.ROLES, frozenset(('fox-data', 'converter-jobs',
@@ -60,6 +69,105 @@ class SnapshotContractTests(unittest.TestCase):
                          'converter-jobs/.native-schema/identity.json')
         self.assertEqual(str(s._member_path('operator-state/handoffs/.retained')),
                          'operator-state/handoffs/.retained')
+
+    def test_finite_capacity_and_other_safeguards_are_unchanged(self):
+        self.assertEqual(s.MAX_ENTRIES, 20000)
+        self.assertEqual(s.MAX_MEMBER_BYTES, 64 * 1024 * 1024)
+        self.assertEqual(s.MAX_TOTAL_BYTES, 128 * 1024 * 1024)
+        self.assertEqual(s.MAX_MANIFEST_BYTES, 8 * 1024 * 1024)
+        self.assertEqual((s.MAX_ROWS, s.MAX_ROW_BYTES, s.MAX_SQLITE_SECONDS),
+                         (200000, 2 * 1024 * 1024, 30))
+        self.assertEqual(s.MAX_ARCHIVE_BYTES, 216137728)
+        self.assertEqual(s.MAX_ARCHIVE_BYTES, s.MAX_TOTAL_BYTES + s.MAX_ENTRIES * 4096)
+
+    def test_inventory_accepts_exactly_20000_and_rejects_20001(self):
+        value = inventory_fixture(20000)
+        self.assertEqual(s._validate_inventory(value, ['fox-data']), 0)
+        value['fox-data/overflow'] = dict(value['fox-data'])
+        with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_INVALID$'):
+            s._validate_inventory(value, ['fox-data'])
+
+    def test_source_collection_accepts_exact_capacity_and_rejects_next_entry(self):
+        # Real portable directory traversal; no POSIX/privacy behavior is mocked.
+        with tempfile.TemporaryDirectory(prefix='fox-entry-bound-') as temporary:
+            root = Path(temporary)
+            for index in range(s.MAX_ENTRIES - 1):
+                (root / str(index)).mkdir()
+            self.assertEqual(len(s._inventory({'fox-data': root})), 20000)
+            (root / 'overflow').mkdir()
+            with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_LIMIT_OR_DUPLICATE$'):
+                s._inventory({'fox-data': root})
+
+    def test_member_and_total_byte_boundaries_remain_enforced(self):
+        value = inventory_fixture(4)
+        for index, size in enumerate((s.MAX_MEMBER_BYTES, s.MAX_MEMBER_BYTES, 0)):
+            value['fox-data/' + str(index)].update(
+                kind='file', bytes=size, sha256=s._sha(b''))
+        self.assertEqual(s._validate_inventory(value, ['fox-data']), s.MAX_TOTAL_BYTES)
+        value['fox-data/0']['bytes'] += 1
+        with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_FILE_INVALID$'):
+            s._validate_inventory(value, ['fox-data'])
+        value['fox-data/0']['bytes'] -= 1
+        value['fox-data/2']['bytes'] = 1
+        with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_ROOT_OR_SIZE_INVALID$'):
+            s._validate_inventory(value, ['fox-data'])
+
+    def test_manifest_and_archive_file_reads_retain_finite_byte_bounds(self):
+        with tempfile.TemporaryDirectory(prefix='fox-byte-bound-') as temporary:
+            path = Path(temporary) / 'material'
+            with path.open('wb') as stream:
+                stream.truncate(s.MAX_MANIFEST_BYTES)
+            self.assertEqual(len(s._read(path, s.MAX_MANIFEST_BYTES)), s.MAX_MANIFEST_BYTES)
+            with path.open('ab') as stream:
+                stream.write(b'x')
+            with self.assertRaisesRegex(s.SnapshotError, '^BOUNDED_REGULAR_FILE_REQUIRED$'):
+                s._read(path, s.MAX_MANIFEST_BYTES)
+            with path.open('wb') as stream:
+                stream.truncate(s.MAX_ARCHIVE_BYTES + 1)
+            with patch.object(s.tarfile, 'open', side_effect=AssertionError('ARCHIVE_OPEN_FORBIDDEN')):
+                with self.assertRaisesRegex(s.SnapshotError, '^ARCHIVE_SIZE_LIMIT$'):
+                    s._verify_archive(path, inventory_fixture(1))
+
+    def test_exact_capacity_archive_stops_at_first_extra_member_without_payload_read(self):
+        value = inventory_fixture(20000)
+        with tempfile.TemporaryDirectory(prefix='fox-tar-bound-') as temporary:
+            path = Path(temporary) / 'roles.tar'
+            with tarfile.open(str(path), 'w') as archive:
+                for name in value:
+                    member = tarfile.TarInfo(name)
+                    member.type, member.mode = tarfile.DIRTYPE, 0o700
+                    archive.addfile(member)
+            with patch.object(tarfile.TarFile, 'getmembers', side_effect=AssertionError('EAGER_SCAN_FORBIDDEN')):
+                s._verify_archive(path, value)
+            with tarfile.open(str(path), 'a') as archive:
+                for index in range(1000):
+                    archive.addfile(tarfile.TarInfo('fox-data/extra-' + str(index)))
+            real_next, calls, observed = tarfile.TarFile.next, [], set()
+            def bounded_next(archive):
+                calls.append(None)
+                # tarfile may return its cached first member a second time.
+                self.assertLessEqual(len(calls), s.MAX_ENTRIES + 2)
+                member = real_next(archive)
+                if member is not None:
+                    observed.add(member.name)
+                return member
+            with patch.object(tarfile.TarFile, 'next', bounded_next), \
+                    patch.object(tarfile.TarFile, 'getmembers', side_effect=AssertionError('EAGER_SCAN_FORBIDDEN')), \
+                    patch.object(tarfile.TarFile, 'extractfile', side_effect=AssertionError('PAYLOAD_READ_FORBIDDEN')):
+                with self.assertRaisesRegex(s.SnapshotError, '^ARCHIVE_MEMBERSHIP_DIFFERS$'):
+                    s._verify_archive(path, value)
+            self.assertEqual(len(observed), 20001)
+
+    def test_entry_capacity_does_not_override_serialized_manifest_limit(self):
+        value = inventory_fixture(20000)
+        self.assertLess(len(s._raw({'inventory': value})), s.MAX_MANIFEST_BYTES)
+        # Legal long Unicode names expand under ensure_ascii=True. Entry count
+        # alone is not a promise that every possible manifest fits eight MiB.
+        expanded = {'fox-data': value['fox-data'], **{
+            'fox-data/' + str(index).zfill(5) + '\u00e9' * 100: entry
+            for index, entry in enumerate(list(value.values())[1:])}}
+        self.assertEqual(s._validate_inventory(expanded, ['fox-data']), 0)
+        self.assertGreater(len(s._raw({'inventory': expanded})), s.MAX_MANIFEST_BYTES)
 
 
 @unittest.skipUnless(os.name == 'posix', 'Actual POSIX permissions required; use local WSL unittest runner.')
@@ -301,6 +409,16 @@ class SnapshotFilesystemTests(unittest.TestCase):
         with self.assertRaisesRegex(s.SnapshotError, '^BACKUP_FAILED_PARTIALS_PRESERVED$') as error:
             self.backup()
         self.assertNotIn(SECRET.decode().strip(), str(error.exception))
+        self.assertFalse((self.output / 'backup/completion.json').exists())
+
+    def test_oversized_manifest_never_writes_manifest_or_completion(self):
+        # Exercise the real writer/SQLite path with a deliberately tiny limit.
+        # The production eight-MiB value is pinned by the portable contract test.
+        with patch.object(s, 'MAX_MANIFEST_BYTES', 1):
+            with self.assertRaisesRegex(s.SnapshotError, '^MANIFEST_SIZE_LIMIT$'):
+                self.backup()
+        self.assertTrue((self.output / 'backup/roles.tar').exists())
+        self.assertFalse((self.output / 'backup/manifest.json').exists())
         self.assertFalse((self.output / 'backup/completion.json').exists())
 
 

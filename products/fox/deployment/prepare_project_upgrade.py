@@ -4,6 +4,9 @@ The source bundle and independently pinned current installation are checked
 before importing or writing. Existing configuration/keys/state remain intact.
 Only --apply creates a new private configuration directory; no container,
 service, model, SQL or OCI state-changing operation is exposed.
+
+--hosted-forms-queue explicitly authorizes a private queue on the existing /data
+mount. Repeat the option on later upgrades; no environment variable enables it.
 """
 from __future__ import annotations
 import argparse
@@ -50,9 +53,10 @@ def compose(configuration,root,images):
     return raw,A.canonical(manifest)
 
 
-def prepare(bundle_sha256,current_installation,*,apply=False):
+def prepare(bundle_sha256,current_installation,*,apply=False,hosted_forms_queue=None):
     A.need(type(apply)is bool and type(bundle_sha256)is str and A.SHA.fullmatch(bundle_sha256),
            'EXACT_SOURCE_BUNDLE_REQUIRED')
+    if hosted_forms_queue is not None:A.hosted_queue_path(hosted_forms_queue)
     A.host_identity()
     root=Path('/home/opc/.local/share/fox-project-builds')/bundle_sha256/'bundle'
     root,runtime,bridge,verifier=A.source_namespace(root,bundle_sha256)
@@ -81,6 +85,7 @@ def prepare(bundle_sha256,current_installation,*,apply=False):
         'bundle_root':str(root),'provider':{'path':str(destination/'provider.json'),'sha256':A.sha(c)},
         'release':{'path':str(destination/'release.json'),'sha256':A.sha(r)},
         'current_installation':dict(current_installation),'helper_sha256':A.sha(helper)}
+    if hosted_forms_queue is not None:plan['hosted_forms_queue']=hosted_forms_queue
     raw=A.canonical(plan);digest=A.sha(raw);A.plan_document(raw,digest)
     A.need(not destination.exists() and not destination.is_symlink(),'CONFIGURATION_ATTEMPT_EXISTS_INSPECT_NO_REPLAY')
     current.scope()
@@ -90,6 +95,7 @@ def prepare(bundle_sha256,current_installation,*,apply=False):
         'current_installation_sha256':current_installation['sha256'],'configuration_directory':str(destination),
         'target_profile_sha256':A.parse(c)['target_profile_sha256'],'images':images,
         'files_written':False,'containers_started':False,'services_changed':False,'automatic_replay_permitted':False}
+    if hosted_forms_queue is not None:result['hosted_forms_queue']=hosted_forms_queue
     if not apply:return result
     A.host_identity();current.scope()
     if not CONFIG_ROOT.exists():
@@ -113,10 +119,11 @@ def main():
     parser.add_argument('--source-bundle-sha256',required=True)
     parser.add_argument('--current-installation',required=True)
     parser.add_argument('--current-installation-sha256',required=True)
+    parser.add_argument('--hosted-forms-queue',help='Explicit private /data/native-preparations[-suffix] queue; requires a separately configured host processor')
     parser.add_argument('--apply',action='store_true')
     args=parser.parse_args()
     value=prepare(args.source_bundle_sha256,{'path':args.current_installation,
-        'sha256':args.current_installation_sha256},apply=args.apply)
+        'sha256':args.current_installation_sha256},apply=args.apply,hosted_forms_queue=args.hosted_forms_queue)
     print(json.dumps(value,sort_keys=True))
 
 

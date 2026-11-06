@@ -85,3 +85,17 @@ strictly validated redacted document is adopted into project history. Retained
 technical names can still be sensitive; redaction is not a guarantee that all
 personal/customer information is removed. The source owner must approve the
 actual processing boundary before external AI use.
+
+## Guarded upgrade activation
+
+For the existing guarded paired-release workflow, supply
+`--hosted-forms-queue /data/native-preparations` when preparing the upgrade.
+This writes the option into the hash-bound candidate plan; it does not start
+the processor or enable the serving app immediately. Repeat the explicit option
+on future upgrades that should retain hosted preparation.
+
+Candidate creation and the final transition recheck the exact setting and the
+existing private queue. The transition must also pin the candidate plan's path
+and digest. Do not enable this feature by changing a running container's
+environment or editing a previously sealed plan. The existing data mount is
+reused; another mount or public listener is not required.

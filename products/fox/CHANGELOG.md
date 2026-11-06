@@ -4,6 +4,23 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.9.1] - 2026-11-07
+
+- Add an explicit private-queue option to the guarded upgrade plan. Candidate
+  creation and activation must agree on the exact setting; existing deployments
+  without the option keep their previous behavior.
+- Bind the opted-in candidate plan into the transition's checked references.
+  Reject queue paths outside the dedicated private preparation namespace.
+- Reuse the existing app data mount and compatible native host. No extra public
+  port, mount, SSH credential, database credential or OCI resource is introduced.
+- Raise the finite backup entry limit from 10,000 to 20,000 to retain accumulated
+  audit history. The 128 MiB total-data, 64 MiB member and 8 MiB manifest limits
+  remain in place; backups still fail closed if any limit is exceeded.
+
+The option is deployment configuration, not proof of extraction or conversion.
+The actual installed UI/native-worker journey and downstream OPAF/APEX stages
+require separate acceptance evidence.
+
 ## [0.9.0] - 2026-11-07
 
 ### Server-side FMB preparation

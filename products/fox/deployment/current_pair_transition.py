@@ -31,7 +31,8 @@ REFS=('old_installation','new_installation','old_unit','new_unit','helper','supp
 
 
 def references(p):
-    return REFS + (('snapshot_adapter',) if p['schema_version'] == 2 else ())
+    return REFS + (('snapshot_adapter',) if p['schema_version'] == 2 else ()) + (
+        ('candidate_plan',) if p['schema_version'] == 2 and 'candidate_plan' in p else ())
 
 
 class TransitionError(RuntimeError):pass
@@ -113,6 +114,19 @@ def validate_profile_access_labels(old_label,new_label,old_process,new_process):
     if old_label is None and new_label is None and not old_process and not new_process:return
     need(type(old_label)is str and ':object_r:container_file_t:' in old_label
         and new_label==old_label and old_process==new_process,'PREPARE_NEW_PROFILE_ACCESS_LABELS_FIRST')
+
+
+def validate_candidate_plan_reference(p,path,raw,candidate):
+    """New queue authority must be in the reviewed transition digest as well.
+
+    Legacy transitions remain unchanged. An opt-in candidate is never authorized
+    merely by hashing whichever configuration happens to be present on disk.
+    """
+    reference=p.get('candidate_plan')
+    need('hosted_forms_queue' not in candidate or reference is not None,
+         'EXPLICIT_CANDIDATE_PLAN_REFERENCE_REQUIRED')
+    if reference is not None:
+        need(reference=={'path':str(path),'sha256':sha(raw)},'CANDIDATE_PLAN_REFERENCE_CHANGED')
 
 
 BACKEND=r'''
@@ -269,6 +283,7 @@ class Transition:
             and document(inventory)['files']['fox/fox/verification_recovery.py']==p['recovery']['sha256'],'UNBOUND_RECOVERY_READER')
         self.candidate_path=absolute(self.new_i['provider']['path']).parent/'activation-plan.json'
         raw=A.read(self.candidate_path,private=True);self.candidate_plan=A.plan_document(raw,sha(raw))
+        validate_candidate_plan_reference(p,self.candidate_path,raw,self.candidate_plan)
         need(self.candidate_plan['current_installation']==p['old_installation'] and self.candidate_plan['release']==self.new_i['release']
             and self.candidate_plan['provider']==self.new_i['provider'] and self.candidate_plan['helper_sha256']==p['helper']['sha256'],'NEW_CANDIDATE_PLAN_CHANGED')
         self.root=PARENT/self.R;self.stage=self.root
@@ -338,11 +353,13 @@ class Transition:
         need(tls['Name'].lstrip('/')=='fox-https' and tls['Image'].removeprefix('sha256:')==self.snapshot['runtime']['tls']['image'][7:]
             and tls['State']['Running'] is True and tls['State']['Pid']>0,'CURRENT_TLS_CHANGED')
         profile=document(A.read(absolute(self.candidate_plan['bundle_root'])/'deployment/project-opaf-profile-v2.json'))
+        A.validate_hosted_queue(self.candidate_plan,self.cfg['python']['path'])
         signatures={'old':{},'new':{}}
         for role,name in (('fox','fox'),('converter','forms2apex-mcp')):
             signatures['old'][role]=self.M.configuration_signature(A,old[name])
             candidate=A.inspect_container(self.pins[name]['id']);self.M.require_never_started(candidate)
-            env=A.new_environment(role,old[name],self.R,profile)
+            env=A.new_environment(role,old[name],self.R,profile,
+                hosted_forms_queue=self.candidate_plan.get('hosted_forms_queue'))
             profiles={'fox':A.mount_map(old['fox'])['/run/fox-native/profile.json'][0],
                 'converter':A.mount_map(old['forms2apex-mcp'])['/run/fox-target/profile.json'][0]}
             _,mounts=A.candidate_argv(role,old[name],self.candidate_plan,self.release,self.root,baseline_profiles=profiles)
