@@ -28,7 +28,7 @@ const upload=load(sources['preparedUpload.ts'],'preparedUpload.ts');
 const requestApi=load(sources['sourceRequests.ts'],'sourceRequests.ts');
 const requestPanel=load(sources['SourceRequestPanel.tsx'],'SourceRequestPanel.tsx',{'./sourceRequests':requestApi});
 const draftPanel=load(sources['PartialDraftPanel.tsx'],'PartialDraftPanel.tsx');
-const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel,'./PartialDraftPanel':draftPanel});
+const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel,'./PartialDraftPanel':draftPanel,'./PrototypeConversion':{default:()=>null}});
 const render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
 const clone=value=>JSON.parse(JSON.stringify(value));
 

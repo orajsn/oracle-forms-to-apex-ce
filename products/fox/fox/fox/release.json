@@ -1,17 +1,19 @@
 {
-  "version": "0.7.0",
-  "released_on": "2026-11-05",
-  "title": "Conversion-engine preview checkpoint",
+  "version": "0.8.0",
+  "released_on": "2026-11-06",
+  "title": "Prepared Forms intake and prototype workflow",
   "changes": [
-    "Derive effective metadata and conservatively redact a separate local source view.",
-    "Bind OPAF analysis sections, complete blueprint coverage and independent review receipts to exact sources.",
-    "Render native multi-block synthetic prototypes with explicit unsupported behavior and read-only boundaries.",
-    "Retain versioned model-role definitions and labelled benchmark tooling without automatic activation."
+    "Upload prepared redacted Forms XML with exact matching receipts through a dedicated project path.",
+    "Retain immutable redaction provenance and revalidate sources when reading their history.",
+    "Review code-unit selection and explicit synthetic-prototype permissions in the project UI.",
+    "Queue source-bound prototype work separately from the existing strict native-project workflow.",
+    "Negotiate runtime/export adapters without treating exported bytes as full technical or business acceptance."
   ],
   "limitations": [
-    "Inactive engine preview: no new connected UI conversion route is enabled by this release.",
-    "Actual offline SQLcl candidate validation is not proof of OPAF conversion, import or runnable pages.",
-    "Real-file UI-to-export acceptance and guarded hosted deployment remain pending.",
+    "Verified checkpoint: local prepared-source intake, assessment and UI. Hosted activation remains pending.",
+    "The prototype processing profile and trusted converter/browser adapters require explicit operator configuration.",
+    "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
+    "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "Release notes describe software changes, not proof of a successful conversion."
   ]

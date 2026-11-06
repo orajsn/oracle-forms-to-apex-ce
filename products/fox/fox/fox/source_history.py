@@ -121,12 +121,29 @@ def readable_source_bytes(entry: dict) -> bytes:
     _fail()
 
 
-def _checked(entry: dict) -> dict:
+def _checked(entry: dict, connection=None, project_id=None) -> dict:
     raw = readable_source_bytes(entry)
     try:
         verified = checked_source(entry.get('name'), raw)
     except (ValueError, TypeError, AttributeError):
-        raise SourceHistoryError(_BAD) from None
+        # Only the dedicated redacted-prototype upload persists this provenance.
+        # Revalidate exact bytes and the strict analysis-only grammar on every
+        # read; a receipt/hash by itself never overrides ordinary source checks.
+        try:
+            if connection is None or not project_id or not connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_redaction_receipts'").fetchone():
+                _fail()
+            receipt = _one(connection, 'SELECT receipt_json,receipt_sha256,owner FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
+                           (project_id, entry.get('name'), entry.get('sha256')))
+            owner = _one(connection, 'SELECT owner FROM projects WHERE id=?', (project_id,))
+            if (not receipt or not owner or receipt['owner'] != owner['owner']
+                    or len(receipt['receipt_json'].encode('utf-8')) > 2_000_000
+                    or hashlib.sha256(receipt['receipt_json'].encode('utf-8')).hexdigest() != receipt['receipt_sha256']):
+                _fail()
+            from .prototype_source import validate_redacted_prototype_source
+            verified = validate_redacted_prototype_source(entry.get('name'), raw, json.loads(receipt['receipt_json']))
+        except (ValueError, TypeError, AttributeError, KeyError, ImportError):
+            raise SourceHistoryError(_BAD) from None
     if any(verified[key] != entry.get(key) for key in ('name', 'sha256', 'bytes', 'text')):
         _fail()
     return verified
@@ -166,7 +183,7 @@ def _load_set(c: sqlite3.Connection, pid: str, sid: str) -> tuple[dict, list[dic
             _fail()
         names.add(member['name'])
         source = {key: member[key] for key in ('id', 'project', 'name', 'sha256', 'bytes', 'text', 'created')}
-        _checked(source)
+        _checked(source, c, pid)
         _now(source['created'])
         files.append(source)
     if (len(files) != head['file_count'] or sum(item['bytes'] for item in files) != head['source_bytes']
@@ -304,7 +321,7 @@ def initialize(c: sqlite3.Connection) -> None:
             FROM sources s WHERE s.project=? AND s.rowid=(SELECT MAX(newer.rowid)
             FROM sources newer WHERE newer.project=s.project AND newer.name=s.name) ORDER BY s.name''', (pid,))
         for item in files:
-            _checked(item)
+            _checked(item, c, pid)
             _now(item['created'])
         sid = _new_set(c, pid, files, now, 'legacy-current')[0] if files else None
         c.execute('INSERT INTO project_source_selection(project,current_source_set_id,updated) VALUES(?,?,?)', (pid, sid, now))
@@ -437,7 +454,7 @@ def _publish_sources(c, pid, checked, now, owner, *, replace):
         _fail()
     uploaded, names = [], set()
     for item in checked:
-        value = _checked(item)
+        value = _checked(item, c, pid)
         if value['name'] in names:
             _fail()
         names.add(value['name'])
@@ -450,7 +467,7 @@ def _publish_sources(c, pid, checked, now, owner, *, replace):
     for item in uploaded:
         row = _one(c, 'SELECT id,project,name,sha256,bytes,text,created FROM sources WHERE project=? AND name=? AND sha256=?', (pid, item['name'], item['sha256']))
         if row:
-            _checked(row)
+            _checked(row, c, pid)
             if any(row[key] != item[key] for key in ('name', 'sha256', 'bytes', 'text')):
                 _fail()
         else:

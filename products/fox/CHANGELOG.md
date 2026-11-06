@@ -4,6 +4,38 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.8.0] - 2026-11-06
+
+### Prepared Forms intake and prototype workflow
+
+- Added prepared redacted XML/receipt upload without relaxing the ordinary
+  data-loading filter. Exact immutable provenance is revalidated on history
+  reads. Comments and processing instructions cannot hide unmasked payloads.
+
+- Added an explicit project prototype assessment/submission path and worker
+  branch, preserving the existing strict native-project route. Source versions,
+  selected code units, owner permission and processing destination are bound to
+  the saved job; uncertain operations are not automatically repeated.
+- Added a separate native-prototype UI with readable code-unit labels, explicit
+  synthetic-storage scope, refreshed consent after selection changes, and
+  actionable configuration/rejection states.
+- Added converter authority transport, authenticated stage routes and guarded
+  runtime/export adapters. Runtime requires a real authenticated browser runner;
+  missing adapters do not produce verification claims.
+- Separated generated/exported output from package reimport, clean installation
+  and human business acceptance. Export alone cannot mark a package verified.
+
+Local verification includes actual authenticated upload/assessment of one approved
+redacted real Forms module, unchanged source hash and all 71 code units retained;
+59 prepared-source/API tests; 103 existing history/project regressions; and actual
+desktop/mobile browser interaction checks with synthetic API responses. A focused
+independent review confirmed the hidden-XML-content repair.
+
+Hosted activation and a complete real-file conversion are **not yet proven**.
+The processing profile, trusted converter authorization, production browser
+callback and complete-package reimport remain integration work. This release
+does not enable them automatically or claim a ready downloadable real application.
+
 ## [0.7.0] - 2026-11-05
 
 ### Inactive conversion-engine preview

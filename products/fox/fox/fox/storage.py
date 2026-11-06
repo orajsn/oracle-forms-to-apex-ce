@@ -27,6 +27,9 @@ BASE_SCHEMA_SQL = '''
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY,owner TEXT NOT NULL,action TEXT NOT NULL,object_id TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS acceptances(run TEXT PRIMARY KEY REFERENCES runs(id),owner TEXT NOT NULL,source_hash TEXT NOT NULL,artifact_sha256 TEXT NOT NULL,notes TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS prepared_uploads(id TEXT PRIMARY KEY,project TEXT NOT NULL REFERENCES projects(id),extraction_job_id TEXT NOT NULL,readable_source_hash TEXT NOT NULL,canonical_manifest_sha256 TEXT NOT NULL,manifest_json TEXT NOT NULL,created REAL NOT NULL,UNIQUE(project,canonical_manifest_sha256));
+        CREATE TABLE IF NOT EXISTS source_redaction_receipts(project TEXT NOT NULL REFERENCES projects(id),name TEXT NOT NULL,sha256 TEXT NOT NULL,receipt_json TEXT NOT NULL,receipt_sha256 TEXT NOT NULL,owner TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(project,name,sha256));
+        CREATE TRIGGER IF NOT EXISTS source_redaction_receipts_no_update BEFORE UPDATE ON source_redaction_receipts BEGIN SELECT RAISE(ABORT,'Source redaction receipts are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS source_redaction_receipts_no_delete BEFORE DELETE ON source_redaction_receipts BEGIN SELECT RAISE(ABORT,'Source redaction receipts are immutable'); END;
         '''
 
 

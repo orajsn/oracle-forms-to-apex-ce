@@ -1033,6 +1033,13 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             raise HTTPException(409,'Package changed after acceptance. Download is blocked.')
         return Response(raw,media_type='application/zip',
                         headers={'Content-Disposition':'attachment; filename="'+rid+'-apex.zip"'})
+    from .prototype_project_routes import attach_prototype_project_routes
+    def prototype_admission_allowed(connection):
+        from .verification_recovery import VerificationRecovery
+        return (not verifier_config.enabled or
+                VerificationRecovery(database, enabled=True).admission_allowed(connection))
+    attach_prototype_project_routes(app, root=root, db=db, project=project,
+        current_sources=current_sources, admission_allowed=prototype_admission_allowed)
     if enable_local_preparation:
         # Trusted localhost startup only. Reuse the exact existing session owner
         # check; HTTP requests and environment settings cannot enable this route.

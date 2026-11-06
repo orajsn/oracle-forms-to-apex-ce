@@ -74,8 +74,13 @@ def stage_snapshot(root,job_id,snapshot):
     return {'job_id':job_id,'state':'INTAKE_READY','source_manifest_sha256':snapshot['source_hash']}
 
 
-def attach_routes(mcp,workflow,settings):
+def attach_routes(mcp,workflow,settings, *, prototype_gateway=None):
     router=workflow if isinstance(workflow,WorkflowRouter) else WorkflowRouter(settings,legacy=workflow)
+    # Explicit trusted integration only: legacy startup must not silently enable
+    # a new profile or manufacture source/processing authorization.
+    if prototype_gateway is not None:
+        from .prototype_routes import attach_prototype_routes
+        attach_prototype_routes(mcp, prototype_gateway, settings)
 
     def authorized(request):
         return hmac.compare_digest(request.headers.get('authorization','').encode(),('Bearer '+settings.bearer_token).encode())

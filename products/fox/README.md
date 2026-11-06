@@ -32,7 +32,18 @@ user journey and acceptance criteria. These are targets, not released features.
 
 ## Development status
 
-Source **0.7.0 is an inactive conversion-engine preview**, not a completed
+Source **0.8.0 adds prepared redacted Forms intake and prototype workflow UI**.
+One approved real module passed local authenticated upload/assessment with its
+exact source hash and all 71 code units retained. In Upload, choose **Open prepared
+prototype intake**, then provide redacted XML and matching redaction receipts.
+Uploading does not invoke AI. Technical identifiers remain visible; receipts do
+not establish complete anonymization or permission to process customer code.
+
+Prototype processing is separately configured and is not activated automatically.
+Hosted deployment, the full real-file OPAF-to-APEX journey and downloadable export
+acceptance remain pending. See [prepared prototype intake](docs/prepared-prototype-intake.md).
+
+Source **0.7.0 introduced an inactive conversion-engine preview**, not a completed
 hosted conversion release. It adds source-bound OPAF design/review contracts,
 effective-property derivation, conservative redaction, and native multi-block
 prototype rendering. These helpers do not enable a new end-to-end UI route.
