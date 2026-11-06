@@ -242,7 +242,7 @@ def public_status(root, run, config=None):
         with recovery._db() as connection:
             connection.execute('BEGIN')
             available = recovery._recovery_available(connection)
-            if available or recovery._qa_stage_schema(connection):
+            if available or recovery._qa_stage_schema(connection) or recovery._project_prewrite_schema(connection):
                 eligibility = recovery._eligibility(connection, run['id'])
                 attempt_row = connection.execute('SELECT attempt_id FROM verification_retry_attempts WHERE job_id=?',
                                                   (run['id'],)).fetchone() if available else None
@@ -255,6 +255,7 @@ def public_status(root, run, config=None):
                              'VERIFICATION_RECOVERY_RELEASE_CHANGED')
                     recovery_state = 'retry_' + attempt['state']
                 recovery_messages = {
+                    'project_prewrite_failed_closed': 'APEX was generated and clean-imported, but an automated runtime check stopped before test-data writes. This failed check is closed; its output and original evidence are preserved. No successful verification or automatic retry is implied.',
                     'qa_stage_failed_closed': 'APEX was generated and clean-imported, but browser verification stopped before staging because an environment component was missing. This failed attempt is closed; its app and original output are preserved. No technical success or automatic retry is implied.',
                     'precheck_failed_closed': 'Verification stopped before QA because an environment prerequisite was missing. This failed attempt is closed; its original output is preserved. No technical success or automatic retry is implied.',
                     'failed_closed': 'This verification attempt failed and is closed. No successful technical proof or automatic retry is implied.',

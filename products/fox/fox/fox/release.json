@@ -1,8 +1,10 @@
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "released_on": "2026-11-06",
-  "title": "Prepared Forms intake and prototype workflow",
+  "title": "Matched renderer packaging and guarded upgrade recovery",
   "changes": [
+    "Include the deterministic native renderer and its exact templates in the app image.",
+    "Preserve and close retained pre-business verification failures without replay or success claims.",
     "Upload prepared redacted Forms XML with exact matching receipts through a dedicated project path.",
     "Retain immutable redaction provenance and revalidate sources when reading their history.",
     "Review code-unit selection and explicit synthetic-prototype permissions in the project UI.",

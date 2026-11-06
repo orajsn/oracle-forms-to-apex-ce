@@ -140,7 +140,13 @@ with store._db(False) as db:
    a=m._load(row[0]);job=a['binding']['job_id'];store._closed_qa_stage(db,job)
    assert a['session'] not in stages and a['session'] not in closed
    stages[a['session']]={'job_id':job,'assessment_sha256':m.digest(row[0]),'retained_sha256':a['retained_sha256']}
- print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed,'closed_qa_stages':stages},sort_keys=True))
+ prewrite={}
+ if hasattr(store,'_project_prewrite_schema') and store._project_prewrite_schema(db):
+  for row in db.execute('SELECT assessment_raw FROM verification_project_prewrite_failures'):
+   a=m._load(row[0]);job=a['binding']['job_id'];store._closed_project_prewrite(db,job)
+   assert a['session'] not in prewrite and a['session'] not in closed and a['session'] not in stages
+   prewrite[a['session']]={'job_id':job,'assessment_sha256':m.digest(row[0]),'retained_sha256':a['retained_sha256']}
+ print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed,'closed_qa_stages':stages,'closed_project_prewrite':prewrite},sort_keys=True))
 '''
 
 
@@ -148,8 +154,8 @@ def retained_failure_sessions(value):
     """Read separately validated failure families, never infer a successful seal."""
     need(type(value)is dict,'FAILURE_FAMILY_SNAPSHOT_INVALID')
     result={}
-    for key,family,count in (('closed_prechecks','clean_check',7),('closed_qa_stages','qa_stage',17)):
-        entries=value.get(key)
+    for key,family,count in (('closed_prechecks','clean_check',7),('closed_qa_stages','qa_stage',17),('closed_project_prewrite','project_prewrite',22)):
+        entries=value.get(key,{}) if key=='closed_project_prewrite' else value.get(key)
         need(type(entries)is dict,'FAILURE_FAMILY_SNAPSHOT_INVALID')
         for session,row in entries.items():
             need(type(session)is str and re.fullmatch(r'session-[a-f0-9]{24}',session)

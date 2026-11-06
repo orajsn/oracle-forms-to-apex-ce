@@ -41,6 +41,40 @@ LEGACY_QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','projec
 QA_CONTRACT_FILES = LEGACY_QA_CONTRACT_FILES + ('native_verification.py',
                      'native_verification_policy.py','native_pipeline.py','opaf.py',
                      'project_verification.py')
+# Keep this independent archive admission projection equal to the preparer's
+# explicit pure closure. Historical recipes without its marker remain unchanged.
+APP_RENDERER_FILES = (
+    'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
+    'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
+    'fox_source_contract/__init__.py', 'fox_source_contract/intake.py',
+    'fox_source_contract/native_source.py', 'fox_source_contract/project_conversion.py',
+    'fox_source_contract/source-manifest.json',
+    'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
+    'defusedxml-0.7.1.dist-info/LICENSE',
+)
+APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
+                               'forms2apex/templates/blueprint-prototype-v1/')
+APP_RENDERER_REQUIRED_TEMPLATES = (
+    'forms2apex/templates/native-table-v1/.apex/apexlang.json',
+    'forms2apex/templates/native-table-v1/application.apx',
+    'forms2apex/templates/native-table-v1/_fragments/form.apx.tmpl',
+    'forms2apex/templates/native-table-v1/_fragments/report.apx.tmpl',
+    'forms2apex/templates/native-table-v1/deployments/default.json',
+    'forms2apex/templates/native-table-v1/page-groups.apx',
+    'forms2apex/templates/native-table-v1/pages/p00000-global-page.apx',
+    'forms2apex/templates/native-table-v1/pages/p09999-login.apx',
+    'forms2apex/templates/native-table-v1/shared-components/authentications.apx',
+    'forms2apex/templates/native-table-v1/shared-components/authorizations.apx',
+    'forms2apex/templates/native-table-v1/shared-components/breadcrumbs.apx',
+    'forms2apex/templates/native-table-v1/shared-components/build-options.apx',
+    'forms2apex/templates/native-table-v1/shared-components/component-settings.apx',
+    'forms2apex/templates/native-table-v1/shared-components/lists.apx',
+    'forms2apex/templates/native-table-v1/shared-components/lovs.apx',
+    'forms2apex/templates/native-table-v1/shared-components/themes/universal-theme/theme.apx',
+    'forms2apex/templates/native-table-v1/supporting-objects/deinstall-script.sql',
+    'forms2apex/templates/native-table-v1/supporting-objects/supporting-objects.apx',
+    'forms2apex/templates/blueprint-prototype-v1/control.apx.tmpl',
+)
 
 
 class StageError(RuntimeError):
@@ -161,6 +195,14 @@ def validate_files(files):
         recipe = "deployment/Containerfile.project-" + role
         need(recipe in bundle, "BOUND_IMAGE_RECIPE_REQUIRED")
         contexts["build/" + role + "/Containerfile"] = bundle[recipe]
+    if b'# fox-prototype-renderer-closure-v1\n' in bundle['deployment/Containerfile.project-fox']:
+        converter = {name.removeprefix('converter/'): raw for name, raw in bundle.items()
+                     if name.startswith('converter/')}
+        names = set(APP_RENDERER_FILES)
+        names.update(name for name in converter if name.startswith(APP_RENDERER_TEMPLATE_ROOTS))
+        need(set(APP_RENDERER_FILES).issubset(converter)
+             and set(APP_RENDERER_REQUIRED_TEMPLATES).issubset(names), 'COMPLETE_APP_RENDERER_CLOSURE_REQUIRED')
+        contexts.update({'build/fox/renderer/'+name:converter[name] for name in names})
     # Retained historical archives have no QA-contract COPY instruction and
     # keep their exact older context. New recipes require the full fixed pure
     # closure, projected byte-for-byte from the caller-pinned source bundle.

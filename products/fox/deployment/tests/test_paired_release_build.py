@@ -9,7 +9,9 @@ import subprocess
 import sys
 from pathlib import Path
 import tarfile
+import zipfile
 
+import defusedxml
 import pytest
 
 
@@ -27,6 +29,18 @@ p = module("prepare_project_release")
 r = module("build_project_release")
 
 
+def renderer_inputs():
+    dependency = p.defusedxml_payload(Path(defusedxml.__file__).resolve().parent.parent)
+    source = HERE.parent / 'converter'
+    payload = {name: dependency[name] if name.startswith(('defusedxml/', 'defusedxml-'))
+               else (source/name).read_bytes() for name in p.APP_RENDERER_FILES}
+    for prefix in p.APP_RENDERER_TEMPLATE_ROOTS:
+        for path in (source/prefix).rglob('*'):
+            if path.is_file():
+                payload[path.relative_to(source).as_posix()] = path.read_bytes()
+    return payload
+
+
 def inputs():
     return {
         "files": {**{'fox/fox/'+name:b'# synthetic pure contract\n' for name in p.QA_CONTRACT_FILES},
@@ -35,7 +49,7 @@ def inputs():
                   "deployment/project-opaf-profile-v2.json": (HERE / "project-opaf-profile-v2.json").read_bytes()},
         "ui": {"index.html": b"<html>synthetic</html>", "assets/main-a.js": b"// synthetic"},
         "converter": {"forms2apex/__init__.py": b"", "fox_source_contract/source-manifest.json": b"{}\n",
-                      "defusedxml/ElementTree.py": b"# synthetic dependency\n"},
+                      "defusedxml/ElementTree.py": b"# synthetic dependency\n", **renderer_inputs()},
         "build_evidence": {"synthetic": True},
     }
 
@@ -112,6 +126,20 @@ def test_rehashed_changed_build_context_still_blocked(tmp_path, member):
     raw = pack(reseal(files))
     with pytest.raises(r.StageError, match="BUILD_CONTEXT_DIFFERS_FROM_SOURCE_BUNDLE"):
         r.load_archive(raw, r.digest(raw))
+
+
+@pytest.mark.parametrize('member', [
+    'build/fox/renderer/forms2apex/native_blueprint.py',
+    'build/fox/renderer/forms2apex/templates/blueprint-prototype-v1/control.apx.tmpl',
+    'build/fox/renderer/forms2apex/templates/native-table-v1/.apex/apexlang.json',
+    'build/fox/renderer/fox_source_contract/intake.py',
+])
+def test_rehashed_app_renderer_change_cannot_escape_exact_source_projection(tmp_path, member):
+    output, result = prepared(tmp_path)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    files[member] += b'\nchanged renderer content\n'
+    with pytest.raises(r.StageError, match='BUILD_CONTEXT_DIFFERS_FROM_SOURCE_BUNDLE'):
+        r.validate_files(reseal(files))
 
 
 def test_rehashed_changed_bundle_still_blocked(tmp_path):
@@ -232,10 +260,139 @@ def test_converter_context_contains_exact_handoff_dependency_closure(tmp_path):
     assert b'from fox.project_qa_plan import derive_project_qa_plan,derive_project_qa_profile' in recipe
 
 
+def test_app_context_contains_only_explicit_real_pure_renderer_closure(tmp_path):
+    value = inputs()
+    value['converter']['forms2apex/server.py'] = b'not part of the app renderer'
+    value['converter']['forms2apex/sqlcl.py'] = b'not part of the app renderer'
+    output = tmp_path/'r'
+    result = p.materialize(**value, output_root=output)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    assert p.APP_RENDERER_FILES == r.APP_RENDERER_FILES
+    assert p.APP_RENDERER_TEMPLATE_ROOTS == r.APP_RENDERER_TEMPLATE_ROOTS
+    assert p.APP_RENDERER_REQUIRED_TEMPLATES == r.APP_RENDERER_REQUIRED_TEMPLATES
+    expected = p.app_renderer_payload(value['converter'])
+    actual = {name.removeprefix('build/fox/renderer/'): raw for name, raw in files.items()
+              if name.startswith('build/fox/renderer/')}
+    assert actual == expected
+    assert all(raw == files['bundle/converter/'+name] for name, raw in actual.items())
+    assert 'forms2apex/server.py' not in actual and 'forms2apex/sqlcl.py' not in actual
+    assert not any(name.startswith(('oci/', 'fastmcp/')) for name in actual)
+    assert 'forms2apex/templates/native-table-v1/.apex/apexlang.json' in actual
+    assert 'defusedxml-0.7.1.dist-info/LICENSE' in actual
+    assert b'COPY --chown=1000:1000 renderer /app' in p.containerfiles()['fox']
+
+
+@pytest.mark.parametrize('name', p.APP_RENDERER_FILES + p.APP_RENDERER_REQUIRED_TEMPLATES)
+def test_missing_renderer_dependency_rejects_before_creating_candidate(tmp_path, name):
+    value = inputs()
+    del value['converter'][name]
+    with pytest.raises(p.BuildError, match='COMPLETE_APP_RENDERER_CLOSURE_REQUIRED'):
+        p.materialize(**value, output_root=tmp_path/'rejected')
+    assert not (tmp_path/'rejected').exists()
+
+
+def test_real_frozen_app_context_renders_one_native_zip_without_development_imports(tmp_path):
+    value = inputs()
+    # Public checkout deliberately excludes private legacy profile files. Only
+    # the actual app package is needed for this frozen lazy-render import test.
+    value['files'].update({'fox/fox/'+path.name: p.read(path, allow_empty=True)
+                           for path in (HERE.parent/'fox/fox').glob('*.py')})
+    output = tmp_path/'frozen'
+    result = p.materialize(**value, output_root=output)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    # Reconstruct what the app recipe COPYs, using ONLY checked frozen members.
+    app = tmp_path/'app'
+    app.mkdir()
+    for prefix, destination in (('build/fox/fox/', app/'fox'), ('build/fox/renderer/', app)):
+        for name, raw in files.items():
+            if name.startswith(prefix):
+                path = destination/name.removeprefix(prefix)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+    code = r'''import hashlib,io,json,pathlib,sys,zipfile
+app=pathlib.Path(sys.argv[1]).resolve()
+assert sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode
+sys.path.insert(0,str(app))
+def reject_external(event,args):
+ if event.startswith('socket.') or event in ('subprocess.Popen','os.system','os.posix_spawn'):
+  raise AssertionError('External operation forbidden during pure app render')
+sys.addaudithook(reject_external)
+from fox.prototype_pipeline import NativeBlueprintRenderer
+from fox.forms_understanding_packet import local_packet
+from fox.forms_native_plan import POLICY_ID,build_native_prototype_plan
+documents=[('first.xml',b'<FormModule Name="FIRST"><Block Name="BUSINESS" DatabaseBlock="true"><Item Name="VALUE" ItemType="Text Item" DataType="Char" MaximumLength="80" DatabaseItem="true" Prompt="Value"/></Block></FormModule>'),
+ ('second.xml',b'<FormModule Name="SECOND"><Block Name="CONTROL" DatabaseBlock="false"><Item Name="SEARCH" ItemType="Text Item" DataType="Char" MaximumLength="80" DatabaseItem="false" Prompt="Search"/></Block></FormModule>')]
+packet=local_packet(documents)
+rows=[]
+for entry in packet['sources']:
+ for obj in entry['facts']['objects']:
+  row={'source_object_id':obj['id'],'disposition':'unresolved','reason':'Synthetic structural prototype only.'}
+  if obj['kind'] in ('Block','Item'):
+   row.update(disposition='proposed',screen_id='synthetic-screen')
+   if obj['kind']=='Block':row['native_component']='form' if obj['classification']=='database' else 'page-items'
+  rows.append(row)
+blueprint={'schema_version':1,'scope':'fox-forms-blueprint-v1','source_binding':packet['source_binding'],
+ 'objects':rows,'screens':[{'id':'synthetic-screen','title':'Synthetic prototype'}],
+ **{name:[] for name in ('claims','relationships','actions','questions','assumptions')}}
+spec=build_native_prototype_plan(documents,blueprint,project_id='synthetic-project',project_name='Synthetic app',approved_policy_id=POLICY_ID)['rendering_spec']
+raw,trace=NativeBlueprintRenderer().render(spec)
+assert raw==NativeBlueprintRenderer().render(spec)[0]
+with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+ assert archive.namelist().count('application.apx')==1
+ assert '.apex/apexlang.json' in archive.namelist()
+ assert 'pages/p00001-block_1.apx' in archive.namelist()
+ assert 'pages/p00002-edit_1.apx' in archive.namelist()
+ assert 'pages/p00003-block_2.apx' in archive.namelist()
+ assert b'form' in archive.read('pages/p00002-edit_1.apx')
+ assert b'textField' in archive.read('pages/p00003-block_2.apx')
+for name,module in tuple(sys.modules.items()):
+ if name.split('.')[0] in ('fox','forms2apex','fox_source_contract','defusedxml') and getattr(module,'__file__',None):
+  assert pathlib.Path(module.__file__).resolve().is_relative_to(app),(name,module.__file__)
+assert 'fastapi' not in sys.modules and 'oci' not in sys.modules and 'forms2apex.server' not in sys.modules
+(app/'candidate-apexlang.zip').write_bytes(raw)
+proof={'scope':'isolated-frozen-app-renderer','source_bundle_sha256':sys.argv[2],
+ 'zip_sha256':hashlib.sha256(raw).hexdigest(),'zip_bytes':len(raw),
+ 'application_count':trace['application_count'],'block_count':trace['block_count'],
+ 'site_packages_disabled':True,'development_paths_used':False,'sqlcl_or_oracle_run':False}
+(app/'renderer-proof.json').write_text(json.dumps(proof,sort_keys=True))
+print(json.dumps(proof,sort_keys=True))
+'''
+    completed = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', code, str(app), result['source_bundle_sha256']],
+                               cwd=app, capture_output=True, timeout=30)
+    assert completed.returncode == 0, completed.stderr.decode()
+    proof = json.loads(completed.stdout)
+    assert proof['application_count'] == 1 and proof['block_count'] == 2
+    assert proof['site_packages_disabled'] is True and proof['development_paths_used'] is False
+    assert proof['source_bundle_sha256'] == result['source_bundle_sha256']
+    assert p.digest((app/'candidate-apexlang.zip').read_bytes()) == proof['zip_sha256']
+    with zipfile.ZipFile(app/'candidate-apexlang.zip') as archive:
+        assert len(archive.namelist()) >= 10
+
+
+def test_historical_app_context_without_renderer_marker_is_not_relabelled(tmp_path):
+    output, result = prepared(tmp_path)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    recipe = 'bundle/deployment/Containerfile.project-fox'
+    files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v1\n', b'').replace(
+        b'COPY --chown=1000:1000 renderer /app\n', b'')
+    files['build/fox/Containerfile'] = files[recipe]
+    for name in list(files):
+        if name.startswith('build/fox/renderer/'):
+            del files[name]
+    inventory = json.loads(files['source-inventory.json'])
+    inventory['files']['deployment/Containerfile.project-fox'] = r.digest(files[recipe])
+    files['source-inventory.json'] = r.canonical(inventory)
+    manifest = json.loads(files['manifest.json'])
+    manifest['source_bundle_sha256'] = r.digest(files['source-inventory.json'])
+    files['manifest.json'] = r.canonical(manifest)
+    checked, _ = r.validate_files(reseal(files))
+    assert not any(name.startswith('build/fox/renderer/') for name in checked)
+
+
 def test_release_metadata_is_copied_into_the_backend_image_context(tmp_path):
     value=inputs();metadata=(HERE.parent/'fox/fox/release.json').read_bytes()
     value['files']['fox/fox/release.json']=metadata
-    output=tmp_path/'release-candidate'
+    output=tmp_path/'r'
     result=p.materialize(**value,output_root=output)
     files,_=r.load_archive((output/'paired-source.tar').read_bytes(),result['archive_sha256'])
     assert files['bundle/fox/fox/release.json']==metadata

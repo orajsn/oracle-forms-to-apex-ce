@@ -4,6 +4,21 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.8.1] - 2026-11-06
+
+- Package the exact native renderer, source contracts, XML dependency and
+  template files into the FOX app image. An isolated projected-app check renders
+  a real two-block native candidate without borrowing checkout/site packages.
+- Add an operator-only protected closure for retained pre-business QA failures,
+  preserving an original-state export before the append-only failed disposition.
+  Pipe reads/writes and the reserved-transaction observer have explicit deadlines.
+- Preserve failed outcomes and prohibit automatic retry. Closure does not claim
+  technical success, human acceptance or a successful Forms conversion.
+
+Local packaging/recovery tests and controlled Linux timeout/permission checks
+passed. Installed-version and full-conversion claims still require their own
+live verification; the version number alone is not deployment evidence.
+
 ## [0.8.0] - 2026-11-06
 
 ### Prepared Forms intake and prototype workflow

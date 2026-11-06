@@ -164,6 +164,17 @@ def test_closed_stage_and_clean_check_transcripts_are_distinct_failure_families(
     assert 'failure_family' not in old and 'failure_family' not in stage
 
 
+def test_completed_prebusiness_qa_has_its_own_exact_22_file_family():
+    row={'job_id':'fox-'+'3'*20,'assessment_sha256':'e'*64,
+         'retained_sha256':{f'qa-{i}.json':'f'*64 for i in range(22)}}
+    value={'closed_prechecks':{},'closed_qa_stages':{},'closed_project_prewrite':{'session-'+'3'*24:row}}
+    result=M.retained_failure_sessions(value)
+    assert result['session-'+'3'*24]['failure_family']=='project_prewrite'
+    assert 'failure_family' not in row
+    value['closed_project_prewrite']['session-'+'3'*24]['retained_sha256'].pop('qa-0.json')
+    with pytest.raises(M.TransitionError):M.retained_failure_sessions(value)
+
+
 @pytest.mark.parametrize('fault',['missing','duplicate','wrong-count','unsafe-name','bad-sha'])
 def test_failure_family_mismatch_never_exempts_a_pending_session(fault):
     session='session-'+'1'*24

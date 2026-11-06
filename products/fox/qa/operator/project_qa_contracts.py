@@ -18,12 +18,13 @@ HANDOFF = ('package.zip', 'native-project-spec.json', 'source-to-apex.json',
 EVIDENCE = tuple(name for name in HANDOFF if name != 'runtime-credentials.json')
 
 
-def prepare_evidence(plan_raw, files, *, operator_code_sha256):
+def prepare_evidence(plan_raw, files, *, operator_code_sha256, historical=False):
     """Validate existing clean evidence without receiving runtime credentials.
 
     This pure reader grants no retry, stage, launch or technical promotion.
     Recovery observers can check retained imports without exporting passwords.
     """
+    c._require(type(historical) is bool, 'Explicit historical read mode is required.')
     c._require(type(files) is dict and set(files) == set(EVIDENCE)
                and all(type(raw) is bytes and raw for raw in files.values()), 'Project handoff members differ.')
     plan = pc.validate_plan(plan_raw, operator_code_sha256=operator_code_sha256)
@@ -35,7 +36,7 @@ def prepare_evidence(plan_raw, files, *, operator_code_sha256):
     pc.validate_allocation(allocation_raw, plan)
     expected_policy = c.canonical_bytes(pc.make_verification_profile(plan, allocation_raw))
     c._require(files['verification-profile.json'] == expected_policy, 'Project handoff policy differs.')
-    policy = BoundVerificationPolicy(expected_policy)
+    policy = BoundVerificationPolicy(expected_policy, historical=historical)
     validate_allocation_receipt(allocation_raw, policy)
     qa_plan = derive_project_qa_plan(package['project'], c.digest(package['project_raw']),
                                    package['trace'], c.digest(package['trace_raw']))

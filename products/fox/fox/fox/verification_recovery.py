@@ -1059,7 +1059,8 @@ class VerificationRecovery:
             if existing:
                 _need(existing['assessment_sha256'] == expected_sha256, 'PRECHECK_DIFFERENT_CLOSURE_EXISTS')
                 return {**existing, 'action': 'ALREADY_RECORDED_NO_REPLAY'}
-            _need(self._closed_qa_stage(db,binding.job_id) is None,'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
+            _need(self._closed_qa_stage(db,binding.job_id) is None and self._closed_project_prewrite(db,binding.job_id) is None,
+                  'PRECHECK_CONFLICTING_RECOVERY_HISTORY')
             if self._recovery_available(db):
                 _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',
                                  (binding.job_id,)).fetchone() is None
@@ -1236,7 +1237,8 @@ class VerificationRecovery:
             if existing:
                 _need(existing['assessment_sha256']==expected_sha256,'QA_STAGE_DIFFERENT_CLOSURE_EXISTS')
                 return {**existing,'action':'ALREADY_RECORDED_NO_REPLAY'}
-            _need(self._closed_precheck(db,binding.job_id) is None,'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
+            _need(self._closed_precheck(db,binding.job_id) is None and self._closed_project_prewrite(db,binding.job_id) is None,
+                  'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
             if self._recovery_available(db):
                 _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',(binding.job_id,)).fetchone() is None
                       and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?',(binding.job_id,)).fetchone() is None,
@@ -1255,6 +1257,160 @@ class VerificationRecovery:
                        tuple(value[k] for k in self._QA_STAGE_COLUMNS))
             result=self._closed_qa_stage(db,binding.job_id)
             _need(self._precheck_original_rows(db)==original,'QA_STAGE_ORIGINAL_ROWS_CHANGED')
+            return {**result,'action':'RECORDED_ONCE','original_rows_unchanged':True}
+
+    # Completed project QA failed before a business-write dispatch. This is a
+    # separate 22-file transcript; old native/7/17 contracts remain unchanged.
+    _PROJECT_PREWRITE_TABLE = 'verification_project_prewrite_failures'
+    _PROJECT_PREWRITE_COLUMNS = ('job_id','assessment_sha256','assessment_raw',
+        'legacy_record_sha256','closed_at_utc','record_sha256')
+
+    @classmethod
+    def _project_prewrite_definitions(cls):
+        table=cls._PROJECT_PREWRITE_TABLE
+        result={('table',table):'CREATE TABLE IF NOT EXISTS '+table+'''(
+            job_id TEXT PRIMARY KEY REFERENCES verification_queue(job_id),
+            assessment_sha256 TEXT NOT NULL UNIQUE,assessment_raw BLOB NOT NULL,
+            legacy_record_sha256 TEXT NOT NULL,closed_at_utc TEXT NOT NULL,record_sha256 TEXT NOT NULL)'''}
+        for action in ('UPDATE','DELETE'):
+            name=table+'_no_'+action.lower()
+            result[('trigger',name)]=('CREATE TRIGGER IF NOT EXISTS '+name+' BEFORE '+action+' ON '+table+
+                " BEGIN SELECT RAISE(ABORT,'project prewrite history is append-only'); END")
+        return result
+
+    @classmethod
+    def _project_prewrite_schema(cls, db, *, create=False):
+        expected=cls._project_prewrite_definitions();table=cls._PROJECT_PREWRITE_TABLE
+        rows=[tuple(row) for row in db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE type IN ('table','trigger')")
+            if row[2]==table or (row[0],row[1]) in expected]
+        if not rows:
+            if not create:return False
+            _need(db.in_transaction,'PROJECT_PREWRITE_SCHEMA_TRANSACTION_REQUIRED')
+            for sql in expected.values():db.execute(sql)
+            return cls._project_prewrite_schema(db)
+        actual={(row[0],row[1]):row[3] for row in rows}
+        _need(set(actual)==set(expected) and all(cls.normalized_schema_sql(actual[key])==cls.normalized_schema_sql(sql)
+            for key,sql in expected.items()),'PROJECT_PREWRITE_SCHEMA_OR_FENCES_CHANGED')
+        _need(tuple(row[1] for row in db.execute('PRAGMA table_info('+table+')'))==cls._PROJECT_PREWRITE_COLUMNS,
+            'PROJECT_PREWRITE_SCHEMA_COLUMNS_CHANGED')
+        return True
+
+    def initialize_project_prewrite_ledger(self, *, apply=False):
+        _need(apply is True,'PROJECT_PREWRITE_EXPLICIT_INITIALIZATION_REQUIRED')
+        with self._db(True) as db:
+            db.execute('SELECT job_id,record_sha256 FROM verification_queue LIMIT 0')
+            existed=self._project_prewrite_schema(db);self._project_prewrite_schema(db,create=True)
+            return {'status':'PROJECT_PREWRITE_LEDGER_READY','created':not existed,
+                'technical_success':False,'automatic_retry_permitted':False}
+
+    @staticmethod
+    def _project_prewrite_assessment(value):
+        fields={'schema_version','scope','status','binding','session','installation_sha256','legacy_record_sha256',
+            'claim_sha256','retained_sha256','clean_sha256','collection_sha256','capture_sha256','plan_sha256',
+            'qa_source_sha256','qa_image','qa_run_id','qa_report_sha256','retained_steps','failed_phase','dispatch_state',
+            'target','expected_versions','current_admission_blocks','closure_performed','technical_success',
+            'human_acceptance_recorded','automatic_replay_permitted','recovery_authorized'}
+        _need(type(value) is dict and set(value)==fields,'PROJECT_PREWRITE_ASSESSMENT_FIELDS')
+        _need(type(value['schema_version']) is int and value['schema_version']==1
+            and value['scope']=='fox-project-prewrite-qa-assessment-v1'
+            and value['status']=='CLASSIFIED_PROJECT_PREWRITE_QA_NOT_CLOSED' and value['failed_phase']=='qa_run'
+            and value['dispatch_state']=='PREFLIGHT_BLOCKED' and value['retained_steps']==list(PHASES)
+            and value['current_admission_blocks'] is True and all(value[k] is False for k in
+                ('closure_performed','technical_success','human_acceptance_recorded','automatic_replay_permitted','recovery_authorized')),
+            'PROJECT_PREWRITE_ASSESSMENT_NOT_FAILURE')
+        binding=VerificationBinding.from_payload(value['binding'])
+        _need(type(value['session']) is str and _SESSION.fullmatch(value['session'])
+            and all(_sha(value[k]) for k in ('installation_sha256','legacy_record_sha256','claim_sha256','capture_sha256',
+                'plan_sha256','qa_source_sha256','qa_report_sha256'))
+            and type(value['qa_image']) is str and re.fullmatch(r'(?:sha256:)?[a-f0-9]{64}',value['qa_image'])
+            and type(value['qa_run_id']) is str and re.fullmatch(r'FPQ-[0-9]{8}T[0-9]{6}-[a-f0-9]{8}',value['qa_run_id']),
+            'PROJECT_PREWRITE_ASSESSMENT_BINDING')
+        journal={'session.json','attention.json',*('p0001-'+step.replace('_','-')+suffix for step in ('claim',*PHASES)
+            for suffix in ('.intent.json','.complete.json'))}
+        clean={'package.zip','native-project-spec.json','source-to-apex.json','allocate.evidence.json','verification-profile.json',
+            'verify.evidence.json','plan.json','schema.evidence.json','import.evidence.json',
+            *(phase+suffix for phase in ('allocate','schema','import','verify') for suffix in ('.intent.json','.complete.json'))}
+        collection={'package.zip','native-project-spec.json','source-to-apex.json','allocation-receipt.json',
+            'verification-profile.json','clean-import-receipt.json','qa-profile.json','target-receipt.json','qa-result.json',
+            'stage-receipt.json','launch-intent.json','launch-receipt.json','collection-manifest.json'}
+        for key,expected in (('retained_sha256',journal),('clean_sha256',clean),('collection_sha256',collection)):
+            _need(type(value[key]) is dict and set(value[key])==expected and all(_sha(v) for v in value[key].values()),
+                'PROJECT_PREWRITE_MANIFEST_CHANGED')
+        a,b=value['clean_sha256'],value['collection_sha256']
+        pairs={'package.zip':'package.zip','native-project-spec.json':'native-project-spec.json','source-to-apex.json':'source-to-apex.json',
+            'allocation-receipt.json':'allocate.evidence.json','verification-profile.json':'verification-profile.json','clean-import-receipt.json':'verify.evidence.json'}
+        _need(a['package.zip']==binding.package_sha256 and a['plan.json']==value['plan_sha256']
+            and b['qa-result.json']==value['qa_report_sha256'] and all(b[key]==a[original] for key,original in pairs.items()),
+            'PROJECT_PREWRITE_CROSS_MANIFEST_CHANGED')
+        policy=BoundVerificationPolicy(canonical_bytes({'schema_version':1,'scope':'fox-native-verification-profile-v2','policy_id':POLICY_ID,
+            'binding':{k:v for k,v in binding.payload().items() if k!='verifier_release_sha256'}|{'allocation_receipt_sha256':a['allocate.evidence.json']},
+            'target':value['target'],'expected_versions':value['expected_versions'],'max_evidence_age_seconds':86400}),historical=True)
+        _need(policy.sha256==a['verification-profile.json'],'PROJECT_PREWRITE_POLICY_CHANGED')
+        return binding
+
+    def _project_prewrite_current(self, db, assessment):
+        binding=self._project_prewrite_assessment(assessment)
+        row=VerificationQueue._record(db.execute('SELECT * FROM verification_queue WHERE job_id=?',(binding.job_id,)).fetchone())
+        _need(row is not None and row['state']=='attention' and row['proof_sha256'] is None
+            and row['attention_code']=='BACKEND_OUTCOME_UNCONFIRMED' and row['record_sha256']==assessment['legacy_record_sha256']
+            and all(row[k]==v for k,v in binding.payload().items())
+            and claim_sha256(Claim(binding,row['claim_token']))==assessment['claim_sha256'],'PROJECT_PREWRITE_ORIGINAL_QUEUE_CHANGED')
+        self._server_run(db,binding,unverified=True)
+        snapshot=_load((self.database.parent/'jobs'/binding.job_id/'source-snapshot.json').read_bytes())
+        _need(snapshot.get('conversion_profile')=='native-project-v1','PROJECT_PREWRITE_PROJECT_PROFILE_REQUIRED')
+        return binding
+
+    def _closed_project_prewrite(self, db, job_id):
+        if not self._project_prewrite_schema(db):return None
+        row=db.execute('SELECT * FROM '+self._PROJECT_PREWRITE_TABLE+' WHERE job_id=?',(job_id,)).fetchone()
+        if row is None:return None
+        value=dict(row)
+        _need(set(value)==set(self._PROJECT_PREWRITE_COLUMNS) and type(value['assessment_raw']) is bytes
+            and value['record_sha256']==self._record_hash(value) and digest(value['assessment_raw'])==value['assessment_sha256'],
+            'PROJECT_PREWRITE_LEDGER_ROW_CHANGED')
+        assessment=_load(value['assessment_raw']);self._project_prewrite_assessment(assessment)
+        _need(canonical_bytes(assessment)==value['assessment_raw'] and assessment['binding']['job_id']==job_id
+            and assessment['legacy_record_sha256']==value['legacy_record_sha256'],'PROJECT_PREWRITE_LEDGER_DOCUMENT_CHANGED')
+        _time(value['closed_at_utc']);self._project_prewrite_current(db,assessment)
+        return {'status':'FAILED_PROJECT_PREWRITE_QA_CLOSED','job_id':job_id,'assessment_sha256':value['assessment_sha256'],
+            'technical_success':False,'human_acceptance_recorded':False,'automatic_retry_permitted':False}
+
+    def close_project_prewrite_failure(self, assessment_raw, *, expected_sha256, observer=None, apply=False, now=None):
+        """Append failure only; caller must hold real host exclusion and recovery export.
+
+        The observer freshly captures/classifies inside this reserved transaction.
+        This method neither creates nor substitutes for the current-I OS lease.
+        No original run/queue/claim, application or phase is completed or replayed.
+        """
+        _need(apply is True and callable(observer),'PROJECT_PREWRITE_PROTECTED_OBSERVER_REQUIRED')
+        _need(type(assessment_raw) is bytes and 0<len(assessment_raw)<=65536 and _sha(expected_sha256)
+            and digest(assessment_raw)==expected_sha256,'PROJECT_PREWRITE_EXACT_ASSESSMENT_REQUIRED')
+        assessment=_load(assessment_raw);binding=self._project_prewrite_assessment(assessment)
+        _need(canonical_bytes(assessment)==assessment_raw,'PROJECT_PREWRITE_CANONICAL_ASSESSMENT_REQUIRED')
+        with self._db(True) as db:
+            _need(self._project_prewrite_schema(db),'PROJECT_PREWRITE_EXPLICIT_LEDGER_INITIALIZATION_REQUIRED')
+            existing=self._closed_project_prewrite(db,binding.job_id)
+            if existing:
+                _need(existing['assessment_sha256']==expected_sha256,'PROJECT_PREWRITE_DIFFERENT_CLOSURE_EXISTS')
+                return {**existing,'action':'ALREADY_RECORDED_NO_REPLAY'}
+            _need(self._closed_precheck(db,binding.job_id) is None and self._closed_qa_stage(db,binding.job_id) is None,
+                'PROJECT_PREWRITE_CONFLICTING_RECOVERY_HISTORY')
+            if self._recovery_available(db):
+                _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',(binding.job_id,)).fetchone() is None
+                    and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?',(binding.job_id,)).fetchone() is None,
+                    'PROJECT_PREWRITE_CONFLICTING_RECOVERY_HISTORY')
+            self._project_prewrite_current(db,assessment);original=self._precheck_original_rows(db)
+            try:observed=observer(binding,assessment['session'])
+            except Exception:raise RecoveryError('PROJECT_PREWRITE_FRESH_OBSERVATION_UNCONFIRMED') from None
+            _need(type(observed) is dict and canonical_bytes(observed)==assessment_raw,'PROJECT_PREWRITE_FRESH_OBSERVATION_CHANGED')
+            self._project_prewrite_current(db,assessment)
+            value={'job_id':binding.job_id,'assessment_sha256':expected_sha256,'assessment_raw':assessment_raw,
+                'legacy_record_sha256':assessment['legacy_record_sha256'],'closed_at_utc':_clock(now).isoformat()}
+            value['record_sha256']=self._record_hash(value)
+            db.execute('INSERT INTO '+self._PROJECT_PREWRITE_TABLE+' VALUES('+','.join('?' for _ in value)+')',
+                tuple(value[k] for k in self._PROJECT_PREWRITE_COLUMNS))
+            result=self._closed_project_prewrite(db,binding.job_id)
+            _need(self._precheck_original_rows(db)==original,'PROJECT_PREWRITE_ORIGINAL_ROWS_CHANGED')
             return {**result,'action':'RECORDED_ONCE','original_rows_unchanged':True}
 
     @staticmethod
@@ -1560,7 +1716,8 @@ class VerificationRecovery:
         sha = digest(disposition_raw)
         with self._db(True) as db:
             _need(self._closed_precheck(db,claim.binding.job_id) is None
-                  and self._closed_qa_stage(db,claim.binding.job_id) is None,
+                  and self._closed_qa_stage(db,claim.binding.job_id) is None
+                  and self._closed_project_prewrite(db,claim.binding.job_id) is None,
                   'RECOVERY_CONFLICTING_FAILURE_FAMILY')
             prior = db.execute('SELECT * FROM verification_failed_dispositions WHERE job_id=?', (claim.binding.job_id,)).fetchone()
             if prior is not None:
@@ -1661,6 +1818,11 @@ class VerificationRecovery:
         row = db.execute('SELECT attempt_id FROM verification_retry_attempts WHERE job_id=?', (job_id,)).fetchone() if available else None
         retry = self._attempt(db, row['attempt_id']) if row else None
         result = admission_status(dict(run), dict(legacy) if legacy else None, closed, retry)
+        prewrite = self._closed_project_prewrite(db,job_id)
+        if prewrite is not None:
+            _need(closed is None and retry is None and self._closed_precheck(db,job_id) is None
+                  and self._closed_qa_stage(db,job_id) is None,'PROJECT_PREWRITE_CONFLICTING_RECOVERY_HISTORY')
+            return {'blocks_admission':False,'recovery_state':'project_prewrite_failed_closed','retry_eligible':False}
         precheck = self._closed_precheck(db, job_id)
         if precheck is not None:
             _need(closed is None and retry is None and self._closed_qa_stage(db,job_id) is None,
@@ -1707,6 +1869,8 @@ class VerificationRecovery:
             query += ' UNION SELECT job_id FROM '+self._PRECHECK_TABLE
         if self._qa_stage_schema(db):
             query += ' UNION SELECT job_id FROM '+self._QA_STAGE_TABLE
+        if self._project_prewrite_schema(db):
+            query += ' UNION SELECT job_id FROM '+self._PROJECT_PREWRITE_TABLE
         return [row[0] for row in db.execute(query)]
 
     def _other_work_allows(self, db, *, except_job_id=None):
@@ -1736,6 +1900,7 @@ class VerificationRecovery:
                   and all(row[key] == value for key, value in binding.payload().items()),
                   'RECOVERY_NORMAL_CLAIM_CHANGED')
             VerificationQueue._run(db, binding, states={'QA_REQUIRED'})
+            _need(self._closed_project_prewrite(db,binding.job_id) is None,'PROJECT_PREWRITE_NORMAL_REPLAY_FORBIDDEN')
             if self._recovery_available(db):
                 _need(db.execute('SELECT 1 FROM verification_failed_dispositions WHERE job_id=?',
                                  (binding.job_id,)).fetchone() is None

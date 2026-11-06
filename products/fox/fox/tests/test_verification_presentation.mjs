@@ -153,6 +153,12 @@ test('a closed QA-stage fault preserves generated output without implying a brow
  assert.equal(value.contactOperator,true);assert.match(value.action,/do not restart this closed attempt/);
  assert.doesNotMatch(JSON.stringify(value),/PRIVATE_DIAGNOSTIC/);
 });
+test('a closed project pre-business check remains a visible failed result with no restart action',()=>{
+ const value=view({configured:true,state:'project_prewrite_failed_closed',operator_contact:'recent',message:'PRIVATE_DIAGNOSTIC'});
+ assert.equal(value.state,'project_prewrite_failed_closed');assert.equal(value.contactOperator,true);
+ assert.match(value.label,/before test-data writes/);assert.match(value.message,/not a successful verification/);
+ assert.match(value.action,/do not restart this closed attempt/);assert.doesNotMatch(JSON.stringify(value),/PRIVATE_DIAGNOSTIC/);
+});
 test('existing product rendering and consent proof acceptance download gates remain intact',()=>{
  assert.match(ui,/import \{presentSourceFindings,presentReviewer\} from '\.\/productPresentation'/);
  assert.match(ui,/\{r\.state==='QA_REQUIRED'&&<ManagedVerificationStatus run=\{r\}\/>\}/);

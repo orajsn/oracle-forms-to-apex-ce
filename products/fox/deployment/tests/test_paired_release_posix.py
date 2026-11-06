@@ -23,6 +23,21 @@ def load(name):
 p, r = load("prepare_project_release"), load("build_project_release")
 
 
+def converter_fixture():
+    # These tests exercise real POSIX staging/modes, not renderer execution.
+    return {**{name: b'# synthetic pure renderer member\n'
+               for name in p.APP_RENDERER_FILES + p.APP_RENDERER_REQUIRED_TEMPLATES},
+            'forms2apex/__init__.py': b'', 'defusedxml/ElementTree.py': b'# synthetic\n',
+            'defusedxml-0.7.1.dist-info/REQUESTED': b'',
+            'fox_source_contract/source-manifest.json': b'{}\n'}
+
+
+class PackagingFixture(unittest.TestCase):
+    def test_renderer_projection_is_complete_even_on_non_posix_hosts(self):
+        closure = p.app_renderer_payload(converter_fixture())
+        self.assertEqual(set(closure), set(p.APP_RENDERER_FILES + p.APP_RENDERER_REQUIRED_TEMPLATES))
+
+
 @unittest.skipUnless(os.name == "posix", "requires actual POSIX permissions")
 class PosixStaging(unittest.TestCase):
     def setUp(self):
@@ -36,10 +51,7 @@ class PosixStaging(unittest.TestCase):
             "qa/operator/hosted_service.py": b"# synthetic\n",
             "deployment/project-opaf-profile-v2.json": (HERE / "project-opaf-profile-v2.json").read_bytes(),
             "fox/fox/__init__.py": b"", "fox/fox/project_conversion.py": b"# synthetic\n"},
-            ui={"index.html": b"<html>synthetic</html>"}, converter={
-                "forms2apex/__init__.py": b"", "defusedxml/ElementTree.py": b"# synthetic\n",
-                "defusedxml-0.7.1.dist-info/REQUESTED": b"",
-                "fox_source_contract/source-manifest.json": b"{}\n"},
+            ui={"index.html": b"<html>synthetic</html>"}, converter=converter_fixture(),
             output_root=self.output, build_evidence={"synthetic": True})
 
     def tearDown(self):

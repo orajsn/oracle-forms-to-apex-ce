@@ -46,6 +46,38 @@ QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conve
                      'native_qa_plan.py','project_qa_plan.py','native_verification.py',
                      'native_verification_policy.py','native_pipeline.py','opaf.py',
                      'project_verification.py')
+APP_RENDERER_FILES = (
+    'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
+    'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
+    'fox_source_contract/__init__.py', 'fox_source_contract/intake.py',
+    'fox_source_contract/native_source.py', 'fox_source_contract/project_conversion.py',
+    'fox_source_contract/source-manifest.json',
+    'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
+    'defusedxml-0.7.1.dist-info/LICENSE',
+)
+APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
+                               'forms2apex/templates/blueprint-prototype-v1/')
+APP_RENDERER_REQUIRED_TEMPLATES = (
+    'forms2apex/templates/native-table-v1/.apex/apexlang.json',
+    'forms2apex/templates/native-table-v1/application.apx',
+    'forms2apex/templates/native-table-v1/_fragments/form.apx.tmpl',
+    'forms2apex/templates/native-table-v1/_fragments/report.apx.tmpl',
+    'forms2apex/templates/native-table-v1/deployments/default.json',
+    'forms2apex/templates/native-table-v1/page-groups.apx',
+    'forms2apex/templates/native-table-v1/pages/p00000-global-page.apx',
+    'forms2apex/templates/native-table-v1/pages/p09999-login.apx',
+    'forms2apex/templates/native-table-v1/shared-components/authentications.apx',
+    'forms2apex/templates/native-table-v1/shared-components/authorizations.apx',
+    'forms2apex/templates/native-table-v1/shared-components/breadcrumbs.apx',
+    'forms2apex/templates/native-table-v1/shared-components/build-options.apx',
+    'forms2apex/templates/native-table-v1/shared-components/component-settings.apx',
+    'forms2apex/templates/native-table-v1/shared-components/lists.apx',
+    'forms2apex/templates/native-table-v1/shared-components/lovs.apx',
+    'forms2apex/templates/native-table-v1/shared-components/themes/universal-theme/theme.apx',
+    'forms2apex/templates/native-table-v1/supporting-objects/deinstall-script.sql',
+    'forms2apex/templates/native-table-v1/supporting-objects/supporting-objects.apx',
+    'forms2apex/templates/blueprint-prototype-v1/control.apx.tmpl',
+)
 
 
 class BuildError(RuntimeError):
@@ -192,17 +224,37 @@ def inventory(files):
             "files": {name: digest(raw) for name, raw in sorted(files.items())}}
 
 
+def app_renderer_payload(converter):
+    """Pure lazy-import closure, projected from the measured converter payload.
+
+    No OCI, HTTP server, SQLcl, configuration or installed converter tree is
+    copied into the app. The tiny XML dependency retains its original license;
+    prepare() has already checked those exact distribution bytes against RECORD.
+    """
+    names = set(APP_RENDERER_FILES)
+    names.update(name for name in converter if name.startswith(APP_RENDERER_TEMPLATE_ROOTS))
+    need(set(APP_RENDERER_FILES).issubset(converter)
+         and set(APP_RENDERER_REQUIRED_TEMPLATES).issubset(names), 'COMPLETE_APP_RENDERER_CLOSURE_REQUIRED')
+    for name in names:
+        safe_name(name)
+        need(type(converter[name]) is bytes and len(converter[name]) <= MAX_FILE,
+             'APP_RENDERER_MEMBER_INVALID')
+    return {name: converter[name] for name in sorted(names)}
+
+
 def containerfiles():
     # These removals occur only in new image layers, never in a running container
     # or mounted data. Fixed old package directories are replaced, not overlaid.
     fox = f"""FROM {BASE_IMAGES['fox']}
 USER root
-RUN python -I -B -c "import pathlib,shutil; roots=[pathlib.Path('/app/fox'),pathlib.Path('/app/dist')]; assert all(p.is_dir() and not p.is_symlink() and p.resolve()==p for p in roots); [shutil.rmtree(p) for p in roots]"
+RUN python -I -B -c "import pathlib,shutil; roots=[pathlib.Path('/app/fox'),pathlib.Path('/app/dist')]; optional=[pathlib.Path('/app/forms2apex'),pathlib.Path('/app/fox_source_contract'),pathlib.Path('/app/defusedxml'),pathlib.Path('/app/defusedxml-0.7.1.dist-info')]; roots += [p for p in optional if p.exists() or p.is_symlink()]; assert all(p.is_dir() and not p.is_symlink() and p.resolve()==p for p in roots); [shutil.rmtree(p) for p in roots]"
 COPY --chown=1000:1000 fox /app/fox
 COPY --chown=1000:1000 dist /app/dist
+# fox-prototype-renderer-closure-v1
+COPY --chown=1000:1000 renderer /app
 WORKDIR /app
 USER 1000:1000
-RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; assert fox.project_conversion.PROFILE_ID=='native-project-v1'"
+RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; from forms2apex.native_blueprint import context; assert fox.project_conversion.PROFILE_ID=='native-project-v1'; assert context()['profile_id']=='native-blueprint-prototype-v1'"
 """
     converter = f"""FROM {BASE_IMAGES['converter']}
 USER root
@@ -220,6 +272,7 @@ def materialize(*, files, ui, converter, output_root, build_evidence):
     output_root = Path(output_root)
     need(not output_root.exists() and not output_root.is_symlink(), "OUTPUT_ALREADY_EXISTS")
     need(all('fox/fox/'+name in files for name in QA_CONTRACT_FILES), 'COMPLETE_QA_CONTRACT_SOURCE_REQUIRED')
+    renderer = app_renderer_payload(converter)
     bundle = dict(files)
     bundle.update({"converter/" + name: raw for name, raw in converter.items()})
     bundle.update({"fox/dist/" + name: raw for name, raw in ui.items()})
@@ -236,6 +289,7 @@ def materialize(*, files, ui, converter, output_root, build_evidence):
     archive_files.update({"build/fox/fox/" + name.removeprefix("fox/fox/"): raw
                           for name, raw in files.items() if name.startswith("fox/fox/")})
     archive_files.update({"build/fox/dist/" + name: raw for name, raw in ui.items()})
+    archive_files.update({"build/fox/renderer/" + name: raw for name, raw in renderer.items()})
     archive_files.update({"build/converter/converter/" + name: raw for name, raw in converter.items()})
     archive_files.update({'build/converter/qa-contract/'+name:files['fox/fox/'+name] for name in QA_CONTRACT_FILES})
     archive_files["source-inventory.json"] = inventory_raw
