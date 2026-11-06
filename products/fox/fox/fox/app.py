@@ -61,16 +61,23 @@ def history_assessment_summary(sources: list[dict]) -> dict:
     profile = os.getenv('FOX_CONVERSION_PROFILE', LEGACY_PROFILE).strip()
     profile = profile if profile in {LEGACY_PROFILE, NATIVE_PROFILE, PROJECT_PROFILE} else 'unconfigured'
     native = assess_native_source(sources) if profile == NATIVE_PROFILE else None
-    project_plan = (assess_project_conversion(sources, project_id='source-history',
-                    project_name='Source version', source_hash=assessed['source_hash'])
-                    if profile == PROJECT_PROFILE else None)
+    project_plan, project_error = None, None
+    if profile == PROJECT_PROFILE:
+        try:
+            project_plan = assess_project_conversion(sources, project_id='source-history',
+                              project_name='Source version', source_hash=assessed['source_hash'])
+        except ProjectConversionInputError as error:
+            # Validated analysis-only sources may be intentionally outside the
+            # strict DDL-backed renderer. Keep their project/history readable;
+            # this is a blocked summary, never relaxed generation admission.
+            project_error = error.code
     blockers = (project_plan['project_findings'] + [finding for form in project_plan['forms']
                  for finding in form['findings']] if project_plan else
                 assessed['conversion_blockers'] + (native['blockers'] if native else []))
-    codes = sorted({item['code'] for item in blockers})
+    codes = sorted({item['code'] for item in blockers} | ({project_error} if project_error else set()))
     if len(codes) > 64 or any(not isinstance(code, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}', code) for code in codes):
         raise source_history.SourceHistoryError('Assessment summary is unavailable.')
-    native_state = (('READY' if project_plan['can_generate'] else 'BLOCKED') if project_plan else
+    native_state = ('BLOCKED' if project_error else ('READY' if project_plan['can_generate'] else 'BLOCKED') if project_plan else
                     native['state'] if native else None)
     if native_state not in {None, 'READY', 'BLOCKED'}:
         raise source_history.SourceHistoryError('Assessment summary is unavailable.')
@@ -84,7 +91,7 @@ def history_assessment_summary(sources: list[dict]) -> dict:
         'max_conversion_files': assessed['max_conversion_files'],
         'missing_dependency_count': assessed['missing_count'],
         'assessment_finding_count': len(assessed['issues']),
-        'conversion_blocker_count': len(blockers), 'blocker_codes': codes,
+        'conversion_blocker_count': len(blockers) + int(project_error is not None), 'blocker_codes': codes,
         'native_state': native_state,
     }
 
@@ -596,7 +603,9 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 # Existing projects remain readable even if a new renderer's
                 # project-name/input bounds need attention. No run is created.
                 p['project_plan'] = None
-                p['project_plan_error'] = {'code': error.code, 'message': str(error)}
+                p['project_plan_error'] = {'code': error.code, 'message':
+                    ('These sources are saved for analysis. Use Review prototype scope under Convert to continue; the strict table-definition conversion route does not accept this source set.'
+                     if error.code == 'SOURCE_INTAKE_REJECTED' else str(error))}
             p['source_requests'] = build_source_requests(p['project_plan']) if p['project_plan'] else None
             p['draft_scope'] = saved_draft_scope(c, pid, p['inventory']['source_hash'])
             configuration = configured_conversion()
@@ -1040,6 +1049,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 VerificationRecovery(database, enabled=True).admission_allowed(connection))
     attach_prototype_project_routes(app, root=root, db=db, project=project,
         current_sources=current_sources, admission_allowed=prototype_admission_allowed)
+    from .hosted_forms_routes import attach_hosted_forms_routes
+    attach_hosted_forms_routes(app, db=db, project=project, current_sources=current_sources)
     if enable_local_preparation:
         # Trusted localhost startup only. Reuse the exact existing session owner
         # check; HTTP requests and environment settings cannot enable this route.

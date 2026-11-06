@@ -547,11 +547,35 @@ def main() -> int:
     cli.add_argument('--output', type=Path, default=Path('work/extractions'))
     cli.add_argument('--job', type=Path)
     cli.add_argument('--job-id')
+    cli.add_argument('--backend', choices=['readable', 'windows', 'linux'],
+        help='Extraction on this selected host; no network upload or database connection. '
+             'Omit to retain automatic Windows selection from --oracle-home and --java. '
+             'Not needed for verify.')
     cli.add_argument('--oracle-home', type=Path)
-    cli.add_argument('--java', type=Path)
+    cli.add_argument('--java', type=Path, help='Windows Java executable; not a Java-home directory.')
+    cli.add_argument('--java-home', type=Path, help='Linux JDK home directory; requires --backend linux.')
     args = cli.parse_args()
-    native = OracleFormsBackend(args.oracle_home, args.java) if args.oracle_home and args.java else None
     try:
+        native = None
+        if args.backend == 'readable' and (args.oracle_home or args.java or args.java_home):
+            cli.error('--backend readable does not accept Oracle runtime options')
+        # Verification is portable and does not require any installed runtime.
+        if args.command != 'verify' and args.backend != 'readable':
+            if args.backend == 'linux':
+                if args.java:
+                    cli.error('--backend linux uses --java-home, not --java')
+                if not args.oracle_home or not args.java_home:
+                    cli.error('--backend linux requires --oracle-home and --java-home')
+                # Lazy import avoids changing the portable/readable startup path.
+                from .linux_forms import LinuxOracleFormsBackend
+                native = LinuxOracleFormsBackend(args.oracle_home, args.java_home)
+            else:
+                if args.java_home:
+                    cli.error('--java-home requires --backend linux')
+                if args.backend == 'windows' and (not args.oracle_home or not args.java):
+                    cli.error('--backend windows requires --oracle-home and --java')
+                if args.oracle_home and args.java:
+                    native = OracleFormsBackend(args.oracle_home, args.java)
         if args.command == 'check':
             result = native.check() if native else {'backend': 'readable-v1', 'formats': sorted(ALLOWED)}
         elif args.command == 'verify':

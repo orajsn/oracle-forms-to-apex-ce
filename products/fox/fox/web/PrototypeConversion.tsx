@@ -67,7 +67,7 @@ export default function PrototypeConversion({projectId,source,busy,unknownOutcom
   });
  }
  return <section className="fw-surface" aria-label="Native APEX prototype"><h2>Generate native APEX prototype</h2><p>This separate prototype uses synthetic storage. Missing dependencies and unsupported behavior remain for remediation. It is not a complete conversion, technical verification or business acceptance.</p>
-  <div className="fw-surface"><h3>Add prepared redacted Forms</h3><p>Keep original FMB files and credentials on your computer. Choose one to four locally prepared, redacted Forms XML files and the matching redaction receipt for each. Uploading saves sources only; it does not start a run or model processing.</p>
+  <div className="fw-surface"><h3>Or add locally prepared redacted Forms</h3><p>Keep credentials out of uploaded files. Choose one to four locally prepared, redacted Forms XML files and the matching redaction receipt for each. Uploading saves sources only; it does not start a run or model processing.</p>
    <label>Redacted Forms XML files <input type="file" multiple accept=".xml" disabled={busy||unknownOutcome} onChange={e=>{setXmlFiles(Array.from(e.target.files??[]));e.target.value='';setUploadError('');}}/></label>
    <label>Matching redaction receipts <input type="file" multiple accept=".json" disabled={busy||unknownOutcome} onChange={e=>{setReceipts(Array.from(e.target.files??[]));e.target.value='';setUploadError('');}}/></label>
    <p className="fw-small">For multiple XML files, each receipt must be named exactly like its XML file followed by .redaction.json. For one XML file, you may select receipt.json.</p>

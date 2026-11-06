@@ -28,7 +28,7 @@ const upload=load(sources['preparedUpload.ts'],'preparedUpload.ts');
 const requestApi=load(sources['sourceRequests.ts'],'sourceRequests.ts');
 const requestPanel=load(sources['SourceRequestPanel.tsx'],'SourceRequestPanel.tsx',{'./sourceRequests':requestApi});
 const draftPanel=load(sources['PartialDraftPanel.tsx'],'PartialDraftPanel.tsx');
-const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel,'./PartialDraftPanel':draftPanel,'./PrototypeConversion':{default:()=>null}});
+const components=load(sources['ProjectWorkbench.tsx']+'\nexport {ReviewForms,OutputRun,RunProgress,Finding,FormDetails};','ProjectWorkbench.tsx',{'./projectConversion':api,'./preparedUpload':upload,'./SourceRequestPanel':requestPanel,'./PartialDraftPanel':draftPanel,'./PrototypeConversion':{default:()=>null},'./HostedFormsPreparation':{__esModule:true,default:()=>null}});
 const render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
 const clone=value=>JSON.parse(JSON.stringify(value));
 
@@ -370,8 +370,9 @@ test('retry is absent unless server confirms a safe failed-step action',()=>{
 });
 test('raw input guidance does not pretend the browser converts Forms binaries',()=>{
  const html=render(components.default,{...common,source:binding(fixtures.empty),plan:fixtures.empty});
- assert.match(html,/binary files need approved Oracle tooling/);
- assert.match(html,/hosted browser does not perform that conversion or upload raw binaries/);
+ assert.match(html,/server-side option above accepts one FMB when enabled/);
+ assert.match(html,/MMB, OLB and PLL files still need the supported Oracle preparation tool/);
+ assert.match(html,/not silently skipped or treated as converted/);
  assert.doesNotMatch(html,/python -m|frmf2xml\.bat|Codex must/);
  assert.match(html,/One APEX application/);
 });

@@ -4,6 +4,40 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.9.0] - 2026-11-07
+
+### Server-side FMB preparation
+
+- Add a Linux Oracle Forms adapter with headless JDAPI initialization, private
+  byte-identical input copies and explicit OVERRIDDEN/ALL exports.
+- Compose native extraction, effective metadata and redaction into a retained,
+  hash-bound preparation result. Raw files and unredacted outputs stay private;
+  source code is not executed or sent to a model by preparation.
+- Add a private host queue and authenticated project upload/status/adoption
+  routes. Each request binds the owner and selected source version. Unconfirmed
+  submissions keep their identity; claimed jobs are never automatically replayed.
+- Add raw-FMB controls to the project upload screen, with clear queued, uncertain,
+  blocked and prepared states. Adding the result is explicit and does not approve
+  AI processing, import an application or accept business behavior.
+- Keep the secondary prepared-XML route and existing source history. A previously
+  adopted result cannot falsely report that it was added to an older selection.
+
+Verification includes local queue/native-policy regression tests, authenticated
+API tests, a canonical local browser journey with a labelled synthetic native
+exporter, and an actual OCI real-FMB container-to-host preparation/result check.
+That real check preserved the original and independently validated the redacted
+result. The source release does not establish deployed browser upload, OPAF
+generation, APEX import or a downloadable converted real application.
+
+The browser check exposed and verified a repair for strict-renderer assessment
+blocking the project page after redacted-source adoption. Such sources remain
+readable for prototype review; the strict generation gate remains unchanged.
+
+Initial hosted scope is **one FMB per request, up to 20 MiB**. MMB/OLB/PLL and
+linked dependency preparation are not silently included in that claim. Oracle
+tools are separately installed, licensed prerequisites, not redistributed here.
+See [operator setup](docs/server-side-fmb-preparation.md).
+
 ## [0.8.1] - 2026-11-06
 
 - Package the exact native renderer, source contracts, XML dependency and

@@ -1,18 +1,17 @@
 {
-  "version": "0.8.1",
-  "released_on": "2026-11-06",
-  "title": "Matched renderer packaging and guarded upgrade recovery",
+  "version": "0.9.0",
+  "released_on": "2026-11-07",
+  "title": "Server-side FMB preparation and guided source adoption",
   "changes": [
-    "Include the deterministic native renderer and its exact templates in the app image.",
-    "Preserve and close retained pre-business verification failures without replay or success claims.",
-    "Upload prepared redacted Forms XML with exact matching receipts through a dedicated project path.",
-    "Retain immutable redaction provenance and revalidate sources when reading their history.",
-    "Review code-unit selection and explicit synthetic-prototype permissions in the project UI.",
-    "Queue source-bound prototype work separately from the existing strict native-project workflow.",
-    "Negotiate runtime/export adapters without treating exported bytes as full technical or business acceptance."
+    "Prepare one raw FMB on a configured private Oracle Forms host from the project upload screen.",
+    "Preserve the original, both native exports, effective metadata and validated redaction evidence.",
+    "Bind preparation to the project owner and selected source version without starting AI processing.",
+    "Check preparation status and explicitly add the redacted result to project source history.",
+    "Retain uncertain requests without automatic replay or duplicate source publication."
   ],
   "limitations": [
-    "Verified checkpoint: local prepared-source intake, assessment and UI. Hosted activation remains pending.",
+    "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
+    "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The prototype processing profile and trusted converter/browser adapters require explicit operator configuration.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
