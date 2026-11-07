@@ -712,7 +712,7 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 
 
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
-                                     analysis_epoch_failure=False):
+                                     analysis_epoch_failure=False, clause_repair_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge also loads this
@@ -722,6 +722,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     The opt-in analysis family proves only a sealed, pre-database stop after an
     immutable v1 continuation. Historical AI approval is NOT source-fact truth.
     New epoch eligibility and processing consent must be checked separately.
+    The separate clause-repair family accepts only epoch two's sealed mapper
+    deleting both defective claims without replacing their required behavior.
+    It validates the immutable consent/baseline chain, never calls epoch runtime
+    helpers, and grants no execution, retry, reuse, export or success authority.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -779,6 +783,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
 
     try:
+        need(all(type(value) is bool for value in
+                 (claim_owner_failure, analysis_epoch_failure, clause_repair_failure))
+             and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure)) <= 1)
+        analysis_family = analysis_epoch_failure or clause_repair_failure
         need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
              and type(run.get('id')) is str and re.fullmatch(r'fox-[a-f0-9]{20}', run['id'])
              and sha(run.get('source_hash')) and type(run.get('project')) is str)
@@ -801,7 +809,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         snapshot = document(job / 'source-snapshot.json', 20_000_000)
         snapshot_keys = {'project', 'project_id', 'project_name', 'source_hash', 'conversion_profile',
                          'selected_source_set_id', 'files', 'prototype', 'approvals'}
-        if (claim_owner_failure or analysis_epoch_failure) and 'retry_of' in snapshot:
+        if (claim_owner_failure or analysis_family) and 'retry_of' in snapshot:
             snapshot_keys.update(('retry_of', 'mapping_recovery'))
             parent, metadata = snapshot['retry_of'], snapshot['mapping_recovery']
             need(type(parent) is str and re.fullmatch(r'fox-[a-f0-9]{20}', parent)
@@ -914,10 +922,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         need(len(chunks) == len(packet['chunks']) and all(key in chunks and chunks[key]['sha256'] == value
              for key, value in selected['approved_chunk_hashes'].items()))
         focuses = [path for path in pipeline.iterdir() if path.name.startswith('focus-')]
-        if claim_owner_failure or analysis_epoch_failure:
+        if claim_owner_failure or analysis_family:
             need(1 <= len(focuses) <= 256)
             continuation = None
-            if analysis_epoch_failure:
+            if analysis_family:
                 need(version == 2 and len(focuses) == 8)
                 continuation = document(job / 'mapping-continuation.json')
                 need(set(continuation) == {'schema_version', 'scope', 'strategy', 'job_id', 'project_id',
@@ -943,8 +951,9 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_continuation',
                     run['id'], run['id'] + ':%')).fetchall()
                 need([tuple(row) for row in events] == [(owner[0], run['id'] + ':' + hashed(continuation), continuation['approved_at'])])
-                need(db.execute('SELECT 1 FROM events WHERE action=? AND (object_id=? OR object_id LIKE ?) LIMIT 1',
-                    ('approved_prototype_mapping_epoch', run['id'], run['id'] + ':%')).fetchone() is None)
+                if not clause_repair_failure:
+                    need(db.execute('SELECT 1 FROM events WHERE action=? AND (object_id=? OR object_id LIKE ?) LIMIT 1',
+                        ('approved_prototype_mapping_epoch', run['id'], run['id'] + ':%')).fetchone() is None)
             ordered = []
             for entry in packet['sources']:
                 groups = {}
@@ -1060,7 +1069,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
 
             cursor, failure, rooms = 0, False, set()
             prefix, checkpoint_files, resolution_count = [], set(), 0
-            if analysis_epoch_failure:
+            if analysis_family:
                 checkpoint_files = set(observed) - {'mapping-continuation.json'}
                 # Request files have already been read while ordering focuses;
                 # only the first six existed at the immutable v1 checkpoint.
@@ -1087,7 +1096,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                          and len(chunk['text'].encode()) == chunk['bytes'] and hashlib.sha256(chunk['text'].encode()).hexdigest() == chunk['sha256'])
                 candidate, mapper_room = role_output(directory, 'mapper', request)
                 need(mapper_room not in rooms); rooms.add(mapper_room)
-                if analysis_epoch_failure:
+                if analysis_family:
                     if number < 6:
                         checkpoint_files.update('prototype-pipeline/' + directory.name + '/' + name for name in
                             ('mapper.json', 'mapper-target.json', 'mapper-intent.json'))
@@ -1131,14 +1140,14 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         'candidate_sha256': hashed(candidate), 'source_binding': selected['source_binding'],
                         'focus_binding': request['focus_binding'], 'approved_structured_design': True,
                         **{key: False for key in ('generation_ready', 'native_apex_generated', 'native_apex_validity_verified', 'import_verified', 'business_behavior_accepted')}})
-                    if analysis_epoch_failure:
+                    if analysis_family:
                         need(number < 7)
                         # This is historical provenance, not a fact-validity
                         # gate. The new epoch must freshly diagnose/repair7.
                         prefix.append(candidate)
                 else:
                     need(number == len(requests) - 1)
-                    if analysis_epoch_failure:
+                    if analysis_family:
                         need(number == 7 and len(prefix) == 7 and resolution_count > 0)
                         # Recognize only the retained context/alias stop. This
                         # in-memory structural projection grants no resume or
@@ -1197,11 +1206,120 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                  and assessment['source_binding'] == selected['source_binding'] and assessment['source_count'] == len(files)
                  and assessment['source_objects'] == len(all_objects) and type(assessment['focus_count']) is int
                  and len(requests) <= assessment['focus_count'] <= 256)
-            if analysis_epoch_failure:
+            if analysis_family:
                 need(set(continuation['files']) == checkpoint_files)
                 same(continuation['files'], {name: hashlib.sha256(observed[name]).hexdigest() for name in checkpoint_files})
+            epoch_directories = set()
+            if clause_repair_failure:
+                # Freeze the complete validated historical closure BEFORE reading
+                # any epoch-selected descriptor. Unknown paths are never opened.
+                baseline = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                epoch_name = 'epoch-000002'
+                epoch_prefix = 'prototype-pipeline/epochs/' + epoch_name
+                repair_request = requests[6][0]
+                projection_request = requests[7][0]
+                epoch_directories = {'mapping-epochs', 'prototype-pipeline/epochs', epoch_prefix,
+                    epoch_prefix + '/source-facts', epoch_prefix + '/' + repair_request['focus_id']}
+                # Check every selected ancestor before reading epoch proof bytes.
+                for name in sorted(epoch_directories, key=lambda value: (value.count('/'), value)):
+                    path = job / name
+                    need(path.is_dir()); protected(path)
+                historical = prefix[6]
+                bad_claims = [row for row in historical['blueprint']['claims'] if row['status'] == 'source_fact']
+                need(len(bad_claims) == 2 and {row['kind'] for row in bad_claims} == {'block.where', 'block.order'}
+                     and not any(row['status'] == 'source_fact' for value in prefix[:6]
+                                 for row in value['blueprint']['claims']))
+                diagnostics, required = [], []
+                attributes = {'block.where': 'WhereClause', 'block.order': 'OrderByClause'}
+                selected_units = {chunk['code_unit_id']: chunk for chunk in repair_request['chunks']}
+                for index, claim in enumerate(historical['blueprint']['claims']):
+                    if claim['status'] != 'source_fact':
+                        continue
+                    diagnostic = {'claim_index': index, 'claim_id': claim['id'], 'claim_sha256': hashed(claim),
+                        'kind': claim['kind'], 'code': 'SOURCE_FACT_NOT_EXACT_WHITELISTED_EVIDENCE'}
+                    diagnostics.append(diagnostic)
+                    units = [unit for unit in repair_request['code_units'] if unit['owner_id'] == claim['source_object_id']
+                        and unit['source_attribute'] == attributes[claim['kind']] and unit['id'] in selected_units]
+                    need(len(units) == 1)
+                    unit = units[0]; chunk = selected_units[unit['id']]
+                    need(unit['sha256'] == chunk['sha256'] and 'FOX_REDACTED_' not in chunk['text']
+                         and not any(row['kind'] == 'behavior.intent' and unit['id'] in row['evidence_refs']
+                                     for row in historical['blueprint']['claims']))
+                    required.append({'unit_id': unit['id'], 'owner_id': unit['owner_id'],
+                        'source_attribute': unit['source_attribute'], 'unit_sha256': unit['sha256'],
+                        'defective_claim_id': claim['id']})
+                need(len({unit['unit_id'] for unit in required}) == 2)
+                requirements = {'schema_version': 1, 'scope': 'fox-focus-clause-repair-requirements-v1',
+                    'diagnostics': diagnostics, 'required_behavior_units': required,
+                    'preserve_objects_screens_and_unrelated_design': True, 'exact_source_fact_whitelist_required': True,
+                    'simple_status_relabeling_forbidden': True, 'each_required_unit_needs_behavior_intent_and_action': True,
+                    'external_semantics_must_remain_uncertain': True, 'automatic_repair_loop_permitted': False}
+                policy = {'source_facts': 'exact-existing-whitelist-v1',
+                    'legacy_owner_resolution': 'resolve-code-unit-owners-v1-immutable',
+                    'new_context_alias_projection': 'exact-active-owner-context-v2',
+                    'future_mapper_repairs_permitted': False, 'continue_remaining_run': True}
+                plan = {'ai_approved_focuses': 7, 'source_checked_focuses': 6,
+                    'repair_focus_id': repair_request['focus_id'], 'projection_focus_id': projection_request['focus_id'],
+                    'source_fact_violations': 2, 'planned_corrective_operations': ['mapper_repair', 'repair_review', 'projection_review'],
+                    'remaining_focus_count': assessment['focus_count'] - 8, 'continue_remaining_run': True,
+                    'repair_requirements': requirements, 'repair_raw_candidate_sha256': hashed(historical),
+                    'projection_raw_candidate_sha256': hashed(candidate)}
+                epoch = document(job / 'mapping-epochs' / (epoch_name + '.json'))
+                expected = {'schema_version': 1, 'scope': 'fox-prototype-mapping-epoch-v1',
+                    'strategy': 'repair-source-facts-and-project-context-v1', 'epoch_number': 2,
+                    'predecessor_sha256': hashed(continuation),
+                    'checkpoint_sha256': hashed({'epoch_number': 2, 'predecessor_sha256': hashed(continuation),
+                        'before_files': baseline, 'plan': plan, 'normalization_policy': policy}),
+                    'job_id': run['id'], 'project_id': run['project'],
+                    'snapshot_sha256': hashlib.sha256(observed['source-snapshot.json']).hexdigest(),
+                    'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                    'target_profile_sha256': selected['target_profile_sha256'], 'owner': owner[0],
+                    'approved_at': epoch['approved_at'], 'approvals': {'redacted_source': True,
+                        'external_ai': True, 'synthetic_prototype': True},
+                    'before_files': baseline, 'plan': plan, 'normalization_policy': policy}
+                need(type(epoch['approved_at']) in (int, float) and math.isfinite(epoch['approved_at'])
+                     and epoch['approved_at'] >= continuation['approved_at']
+                     and type(epoch['schema_version']) is int and type(epoch['epoch_number']) is int)
+                same(epoch, expected)
+                events = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
+                    '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_epoch',
+                    run['id'], run['id'] + ':%')).fetchall()
+                need([tuple(row) for row in events] == [(owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])])
+                event_actions = db.execute('SELECT action FROM events WHERE object_id=? OR object_id LIKE ?',
+                    (run['id'], run['id'] + ':%')).fetchall()
+                need(sorted(row[0] for row in event_actions) == sorted((origin,
+                    'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch')))
+                epoch_root = job / epoch_prefix
+                same(document(epoch_root / 'epoch-record.json'), epoch)
+                same(document(epoch_root / 'predecessor-record.json'), continuation)
+                # The successful six unchanged prefixes acquired only fresh
+                # deterministic source-fact receipts, not new model invocations.
+                for (request, _), value in zip(requests[:6], prefix[:6]):
+                    same(document(epoch_root / 'source-facts' / (request['focus_id'] + '.json')),
+                        {'schema_version': 1, 'scope': 'fox-focus-source-fact-check-v1',
+                         'source_binding': selected['source_binding'], 'request_sha256': hashed(request),
+                         'candidate_sha256': hashed(value), 'source_facts_checked': True,
+                         'source_fact_claims': 0, 'business_behavior_accepted': False})
+                directory = epoch_root / repair_request['focus_id']
+                payload = {**repair_request, 'repair_context': {'schema_version': 1,
+                    'scope': 'fox-one-focus-mapper-repair-v1', 'original_request_sha256': hashed(repair_request),
+                    'raw_candidate': historical, 'raw_candidate_sha256': hashed(historical), 'requirements': requirements,
+                    'task': 'Return a replacement for this focus only. Analyze the supplied clauses; do not relabel invented facts. Preserve all unrelated design exactly.'}}
+                same(document(directory / 'mapper-request.json'), payload)
+                repaired, room = role_output(directory, 'mapper', payload)
+                need(room not in rooms)
+                shape(repaired, repair_request, {row['id'] for row in repair_request['owned_objects']})
+                # Exact known failure, not arbitrary invalid repair: only those
+                # two claims disappeared. All other bytes/fields/order survive.
+                omitted = {row['defective_claim_id'] for row in required}
+                expected_candidate = json.loads(canonical(historical))
+                expected_candidate['blueprint']['claims'] = [row for row in historical['blueprint']['claims']
+                    if row['id'] not in omitted]
+                same(repaired, expected_candidate)
+                need(len(omitted) == 2 and not any(ref in omitted for category in ('actions', 'relationships')
+                    for row in repaired['blueprint'][category] for ref in row['claim_ids']))
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
-                'prototype-pipeline/' + directory.name for _, directory in requests}
+                'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
             while pending:
                 for path in pending.pop().iterdir():
@@ -1302,6 +1420,11 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         return True
     except Exception:
         return False
+
+
+def terminal_prototype_clause_repair(database, db, run):
+    """Read-only epoch-two deletion-only failure; no continuation authority."""
+    return terminal_empty_prototype_mapping(database, db, run, clause_repair_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -2436,6 +2559,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_empty_prototype_mapping(self.database, db, dict(run), analysis_epoch_failure=True)):
             return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_analysis_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_clause_repair(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_clause_repair_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

@@ -196,6 +196,9 @@ def authorize_current(root, db, profile_path, request):
             or binding.get('focus_plan_sha256') != snapshot['prototype']['focus_plan_sha256']):
         raise ValueError('Reviewed roles or focus changed')
     authorize_prototype_request(job, request)
+    # Current DB/event authority additionally rechecks the operator's fixed
+    # outside-job clause pins when an explicit epoch three is active. The
+    # converter's copied descriptor is never an independent consent grant.
     _retained_request(job, request)
     from .prototype_mapping_epochs import converter_phase
     from .prototype_mapping_continuation import validate_job_continuation

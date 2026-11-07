@@ -45,6 +45,33 @@ _PRIVATE_KEY = re.compile(r'(?:password|passwd|pwd|api[_-]?key|client[_-]?secret
 _ABSOLUTE = re.compile(r'(?i)(?:\b[A-Z]:[\\/]|/(?:Users|home|root|opt|var|tmp)/)')
 
 
+def _epoch_authority_member(name, *, clause_epoch):
+    """Exact inert epoch two/three paths, mirrored by the private receiver."""
+    from .prototype_clause_proof import JSON_FILES
+    if type(name) is not str or '\\' in name or ':' in name:
+        return False
+    if name in {*_ROOT_FILES, 'assessment.json'} or re.fullmatch(r'sources/source-00[0-3]\.xml', name):
+        return True
+    pieces = name.split('/')
+    basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json'}
+    if len(pieces) == 2 and _FOCUS.fullmatch(pieces[0]) and pieces[1] in basic:
+        return True
+    if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003'):
+        return False
+    if pieces[1] == 'epoch-000003' and not clause_epoch:
+        return False
+    tail = '/'.join(pieces[2:])
+    if tail in {'epoch-record.json', 'predecessor-record.json'}:
+        return True
+    if pieces[1] == 'epoch-000003' and (tail == 'clause-proof-descriptor.json'
+            or tail in {'clause-proof/' + item for item in JSON_FILES}):
+        return True
+    if re.fullmatch(r'source-facts/focus-[a-f0-9]{24}\.json', tail):
+        return True
+    return len(pieces) == 4 and bool(_FOCUS.fullmatch(pieces[2])) and pieces[3] in basic | {
+        'mapper-request.json', 'reviewer-request.json', 'projection-candidate.json', 'projection-receipt.json'}
+
+
 def _screen_text(raw):
     """Reuse intake's secret checks; reject credential keys/private paths too."""
     try:
@@ -109,6 +136,11 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
     if review_index.get('schema_version') == 2:
         names.extend(row['path'] for row in review_index['provenance_files'])
         names = sorted(set(names))
+        # Evidence source code is archive-only, never converter transport.
+        clause_epoch = ('epochs/epoch-000003/epoch-record.json' in names
+                        and 'epochs/epoch-000002/epoch-record.json' in names)
+        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch) for name in names):
+            raise OpafError('Prototype authority provenance path is not an inert allowed member.')
     else:
         names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)
         for row in review_index['focuses']:

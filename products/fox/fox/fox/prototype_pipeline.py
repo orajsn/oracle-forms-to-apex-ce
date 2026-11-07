@@ -169,7 +169,7 @@ def _review_index(checkpoints, plan):
         # Include exact historical and active technical provenance, not owner
         # consent claims. The original FOX callback separately checks its DB.
         names = {name[len('prototype-pipeline/'):] for name in epoch['before_files'] if name.startswith('prototype-pipeline/')}
-        base = checkpoints / 'epochs' / 'epoch-000002'
+        base = checkpoints / 'epochs' / f"epoch-{epoch['epoch_number']:06d}"
         names.update(path.relative_to(checkpoints).as_posix() for path in base.rglob('*') if path.is_file())
         for name in sorted(names):
             path = checkpoints / name

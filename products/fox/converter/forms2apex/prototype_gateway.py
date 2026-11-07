@@ -48,6 +48,18 @@ _AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}
     + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + ('mapper-intent', 'reviewer-intent')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
     r'(?:epoch-record|predecessor-record)\.json|source-facts/focus-[a-f0-9]{24}\.json|focus-[a-f0-9]{24}/(?:'
     + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES + ('mapper-intent', 'reviewer-intent')) + r')\.json))\Z')
+# Explicit epoch three adds ONLY its reviewed fixed JSON contract. It never
+# accepts staged Python, arbitrary epoch numbers or recursive proof paths.
+_CLAUSE_JSON = {'diagnostic-intent.json', 'clause-request.json', 'derived-candidate.json',
+    'derived-assembly.json', 'assembly-binding.json', 'review-receipt.json', 'result.json',
+    'analysis/mapper-intent.json', 'analysis/mapper-target.json', 'analysis/mapper.json',
+    'review/reviewer-intent.json', 'review/reviewer-target.json', 'review/reviewer.json'}
+_CLAUSE_FIXED_PATHS = {'epochs/epoch-000003/' + name for name in (
+    'epoch-record.json', 'predecessor-record.json', 'clause-proof-descriptor.json')} | {
+    'epochs/epoch-000003/clause-proof/' + name for name in _CLAUSE_JSON}
+_CLAUSE_FOCUS_PATH = re.compile(r'epochs/epoch-000003/(?:source-facts/focus-[a-f0-9]{24}\.json|'
+    r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES
+    + ('mapper-intent', 'reviewer-intent')) + r')\.json)\Z')
 
 
 def _authority_json(raw):
@@ -81,6 +93,8 @@ def _authority_descriptor(bundle, *, encoded):
     # every byte and the original owner DB authority are validated separately.
     epoch_format = any(type(row) is dict and row.get('path') == 'epochs/epoch-000002/epoch-record.json'
                        for row in bundle['files'])
+    clause_format = epoch_format and any(type(row) is dict and row.get('path') == 'epochs/epoch-000003/epoch-record.json'
+                                         for row in bundle['files'])
     path_format = _AUTHORITY_PATH if epoch_format else _LEGACY_AUTHORITY_PATH
     rows, names, total = [], [], 0
     for row in bundle["files"]:
@@ -88,7 +102,8 @@ def _authority_descriptor(bundle, *, encoded):
                                               else {"path", "sha256", "bytes"}),
               "PROTOTYPE_AUTHORITY_FILE_FIELDS_INVALID")
         name = row["path"]
-        _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)),
+        _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)
+              or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))),
               "PROTOTYPE_AUTHORITY_PATH_NOT_ALLOWED")
         _need(type(row["bytes"]) is int and 0 < row["bytes"] <= 20_000_000
               and type(row["sha256"]) is str and _SHA.fullmatch(row["sha256"]),

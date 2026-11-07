@@ -160,6 +160,17 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                       and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?', (job_id,)).fetchone() is None,
                       'RETIREMENT_REMOTE_QUEUED_WORK_NOT_ADMISSIBLE')
                 waiting.append({'binding': binding.payload(), 'record_sha256': row['record_sha256']})
+            elif value['recovery_state'] == 'prototype_clause_repair_terminal':
+                # A label cannot close, replay, export or authorize this run.
+                # Independently re-read the exact sealed pre-database failure;
+                # missing helpers in an older namespace fail closed as well.
+                run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+                classifier = getattr(recovery_module, 'terminal_prototype_clause_repair', None)
+                _need(value == {'blocks_admission': False,
+                    'recovery_state': 'prototype_clause_repair_terminal', 'retry_eligible': False}
+                    and run is not None and callable(classifier)
+                    and classifier(root / 'fox.sqlite3', db, dict(run)) is True,
+                    'RETIREMENT_REMOTE_CLAUSE_TERMINAL_UNCONFIRMED')
             elif value['recovery_state'] in {'precheck_failed_closed','qa_stage_failed_closed',
                     'project_prewrite_failed_closed', 'prototype_mapping_incomplete',
                     'prototype_mapping_owner_resolution_pending', 'prototype_mapping_analysis_terminal'}:

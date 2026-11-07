@@ -4,6 +4,38 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.14.0] - 2026-11-08
+
+### Continue with reviewed results
+
+- Add a bounded OPAF contract for interpreting supplied Forms WhereClause and
+  OrderByClause text, with source-bound limitations instead of invented facts.
+- Reconstruct an explicitly derived candidate from retained analysis, verify
+  the exact independent review, and preserve both original responses and history.
+- Offer **Continue with reviewed result** for the recognized stopped repair.
+  Reuse the completed clause analysis and review; review the next saved section's
+  projection once, then continue unfinished sections using the original target.
+- Append a third same-run continuation record with exact predecessor, source,
+  target and saved-proof bindings plus fresh processing confirmations. Unknown
+  outcomes, missing proof and later database work remain blocking.
+- Transfer only the required JSON evidence to the converter. Evidence code is
+  never executed or transferred, and SQLcl/import/runtime/export gates remain.
+- Recognize the narrowly proven sealed repair failure for upgrade admission
+  without granting retry, proof adoption, conversion success or business acceptance.
+
+Verification includes retained-proof reconstruction and tamper tests, actual local
+API/worker/authority/transport tests with authored external responses, repeated
+and concurrent submission checks, modelled browser tests and independent reviews.
+A bounded real-source OPAF clause analysis and independent review passed; read-only
+checks on the retained OCI job confirmed the saved-proof continuation plan and
+preserved its existing files. Separate Linux test copies verified permission and
+link rejection without changing the original job.
+
+These checks do not establish a deployed release or a complete real FMB-to-APEX
+conversion. Remaining analysis, SQLcl validation, unique import, authenticated
+runtime verification and downloadable export acceptance are still required.
+See [reviewed-result continuation](docs/reviewed-result-continuation.md).
+
 ## [0.13.0] - 2026-11-07
 
 ### Source-checked repair and append-only continuation
