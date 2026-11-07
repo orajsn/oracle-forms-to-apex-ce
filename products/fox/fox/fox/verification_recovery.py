@@ -712,10 +712,11 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 
 
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
-                                     analysis_epoch_failure=False, clause_repair_failure=False):
+                                     analysis_epoch_failure=False, clause_repair_failure=False,
+                                     container_review_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
-    Deliberately self-contained stdlib: the transition bridge also loads this
+    Deliberately self-contained stdlib: the transition bridge loads this
     reviewed module in the serving legacy namespace, which has no new prototype
     modules. Producer-held durable bindings are checked here; fresh XML semantic
     reconstruction and current processing consent remain the recovery API's job.
@@ -726,6 +727,9 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     deleting both defective claims without replacing their required behavior.
     It validates the immutable consent/baseline chain, never calls epoch runtime
     helpers, and grants no execution, retry, reuse, export or success authority.
+    The epoch-three branch checks sealed structural provenance, not clause
+    semantics or approval for reuse/adoption. Those remain later semantic gates.
+    No mutable epoch-head selector, runtime client or archived Python is used.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -784,9 +788,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
 
     try:
         need(all(type(value) is bool for value in
-                 (claim_owner_failure, analysis_epoch_failure, clause_repair_failure))
-             and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure)) <= 1)
-        analysis_family = analysis_epoch_failure or clause_repair_failure
+                 (claim_owner_failure, analysis_epoch_failure, clause_repair_failure, container_review_failure))
+             and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure, container_review_failure)) <= 1)
+        clause_family = clause_repair_failure or container_review_failure
+        analysis_family = analysis_epoch_failure or clause_family
         need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
              and type(run.get('id')) is str and re.fullmatch(r'fox-[a-f0-9]{20}', run['id'])
              and sha(run.get('source_hash')) and type(run.get('project')) is str)
@@ -951,7 +956,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_continuation',
                     run['id'], run['id'] + ':%')).fetchall()
                 need([tuple(row) for row in events] == [(owner[0], run['id'] + ':' + hashed(continuation), continuation['approved_at'])])
-                if not clause_repair_failure:
+                if not clause_family:
                     need(db.execute('SELECT 1 FROM events WHERE action=? AND (object_id=? OR object_id LIKE ?) LIMIT 1',
                         ('approved_prototype_mapping_epoch', run['id'], run['id'] + ':%')).fetchone() is None)
             ordered = []
@@ -984,11 +989,12 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 expected_binding['max_owned_objects'] = 32
             same(binding, expected_binding)
 
-            def role_output(directory, name, payload):
-                same(document(directory / (name + '-target.json')), target)
+            def role_output(directory, name, payload, role_target=None):
+                effective_target = target if role_target is None else role_target
+                same(document(directory / (name + '-target.json')), effective_target)
                 saved = document(directory / (name + '.json'))
                 need(set(saved) == {'binding', 'output', 'output_sha256', 'invocation', 'model_environment', 'model_environment_sha256'})
-                role = roles[name]
+                role = effective_target['opaf']['roles'][name]
                 need(set(role) == {'workflow_id', 'model', 'graph_sha256'} and sha(role['graph_sha256'])
                      and type(role['workflow_id']) is str and re.fullmatch(r'[A-Fa-f0-9]{16,64}', role['workflow_id'])
                      and type(role['model']) is str and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', role['model']))
@@ -1007,9 +1013,9 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 same(environment, {'schema_version': 1, 'scope': 'opaf-model-environment-v1',
                     'trust_boundary': 'authenticated_fox_executor_not_vendor_attestation', 'job_id': run['id'],
                     'role': name, 'source_manifest_sha256': selected['source_binding'],
-                    'target_profile_sha256': selected['target_profile_sha256'], 'observed_at_utc': environment['observed_at_utc'],
-                    'opaf': {key: target['opaf'][key] for key in ('base_url', 'certificate_sha256', 'model_authentication', 'version_number', 'build_id')},
-                    'workflow': {**role, 'published': True}, 'opaf_version': target['tested_versions']['opaf']})
+                    'target_profile_sha256': hashed(effective_target), 'observed_at_utc': environment['observed_at_utc'],
+                    'opaf': {key: effective_target['opaf'][key] for key in ('base_url', 'certificate_sha256', 'model_authentication', 'version_number', 'build_id')},
+                    'workflow': {**role, 'published': True}, 'opaf_version': effective_target['tested_versions']['opaf']})
                 started, finished, at = (timestamp(value) for value in
                     (invocation['started_at_utc'], invocation['completed_at_utc'], environment['observed_at_utc']))
                 need(finished >= started and -5 <= started - at <= 120)
@@ -1210,7 +1216,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 need(set(continuation['files']) == checkpoint_files)
                 same(continuation['files'], {name: hashlib.sha256(observed[name]).hexdigest() for name in checkpoint_files})
             epoch_directories = set()
-            if clause_repair_failure:
+            if clause_family:
                 # Freeze the complete validated historical closure BEFORE reading
                 # any epoch-selected descriptor. Unknown paths are never opened.
                 baseline = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
@@ -1284,11 +1290,16 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 events = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
                     '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_epoch',
                     run['id'], run['id'] + ':%')).fetchall()
-                need([tuple(row) for row in events] == [(owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])])
+                epoch_two_event = (owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])
+                if container_review_failure:
+                    need(len(events) == 2 and sum(tuple(row) == epoch_two_event for row in events) == 1)
+                else:
+                    need([tuple(row) for row in events] == [epoch_two_event])
                 event_actions = db.execute('SELECT action FROM events WHERE object_id=? OR object_id LIKE ?',
                     (run['id'], run['id'] + ':%')).fetchall()
                 need(sorted(row[0] for row in event_actions) == sorted((origin,
-                    'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch')))
+                    'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
+                    *(['approved_prototype_mapping_epoch'] if container_review_failure else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
                 same(document(epoch_root / 'predecessor-record.json'), continuation)
@@ -1318,6 +1329,284 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 same(repaired, expected_candidate)
                 need(len(omitted) == 2 and not any(ref in omitted for category in ('actions', 'relationships')
                     for row in repaired['blueprint'][category] for ref in row['claim_ids']))
+            if container_review_failure:
+                # Admission-only structural provenance. Full semantic clause
+                # reconstruction remains mandatory for any later adoption.
+                # No additional runtime module/import/manifest closure is used.
+                assembler_sha = 'b722fb5c851ca79da314d6a0412e06fe8190b09670e63b524fdb1c0c5780715a'
+                json_names = {'diagnostic-intent.json', 'clause-request.json', 'derived-candidate.json',
+                    'derived-assembly.json', 'assembly-binding.json', 'review-receipt.json', 'result.json',
+                    *{folder + '/' + name + suffix for folder, name in (('analysis', 'mapper'), ('review', 'reviewer'))
+                      for suffix in ('-intent.json', '-target.json', '.json')}}
+
+                def gate(value, request, count):
+                    return {'schema_version': 1, 'scope': 'fox-focus-source-fact-check-v1',
+                        'source_binding': selected['source_binding'], 'request_sha256': hashed(request),
+                        'candidate_sha256': hashed(value), 'source_facts_checked': True,
+                        'source_fact_claims': count, 'business_behavior_accepted': False}
+
+                def review_receipt(value, request, verdict):
+                    return {'verdict': verdict, 'candidate_sha256': hashed(value),
+                        'source_binding': selected['source_binding'], 'focus_binding': request['focus_binding'],
+                        'approved_structured_design': verdict == 'APPROVED', **{key: False for key in
+                        ('generation_ready', 'native_apex_generated', 'native_apex_validity_verified',
+                         'import_verified', 'business_behavior_accepted')}}
+                baseline_three = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                third_prefix = 'prototype-pipeline/epochs/epoch-000003'
+                third_dirs = {third_prefix, third_prefix + '/clause-proof',
+                    third_prefix + '/clause-proof/analysis', third_prefix + '/clause-proof/review',
+                    third_prefix + '/source-facts', third_prefix + '/' + projection_request['focus_id'],
+                    'prototype-results'}
+                for name in sorted(third_dirs, key=lambda value: (value.count('/'), value)):
+                    path = job / name
+                    need(path.is_dir()); protected(path)
+                third_root = job / third_prefix
+                descriptor = document(third_root / 'clause-proof-descriptor.json', 65_536)
+                same({key: value for key, value in descriptor.items() if key not in
+                      ('analysis_role', 'original_manifest', 'original_manifest_sha256', 'candidate_sha256')},
+                    {'schema_version': 1, 'scope': 'fox-prototype-clause-proof-staging-v1',
+                     'job_id': run['id'], 'project_id': run['project'], 'owner': owner[0],
+                     'snapshot_sha256': hashlib.sha256(observed['source-snapshot.json']).hexdigest(),
+                     'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                     'original_target_sha256': selected['target_profile_sha256'], 'assembler_sha256': assembler_sha})
+                need(type(descriptor['schema_version']) is int
+                     and hashed(descriptor['original_manifest']) == descriptor['original_manifest_sha256'])
+                manifest = descriptor['original_manifest']
+                need(type(manifest) is dict and set(manifest) == json_names | {'prototype_clause_analysis.py'})
+                for pin in manifest.values():
+                    need(type(pin) is dict and set(pin) == {'sha256', 'bytes'} and sha(pin['sha256'])
+                         and type(pin['bytes']) is int and 0 < pin['bytes'] <= 2_000_000)
+                need(manifest['prototype_clause_analysis.py']['sha256'] == assembler_sha
+                     and sum(pin['bytes'] for pin in manifest.values()) <= 8_000_000)
+                proof_root = third_root / 'clause-proof'
+                values = {name: document(proof_root / name) for name in sorted(json_names)}
+                for name in json_names:
+                    raw = observed[(proof_root / name).relative_to(job).as_posix()]
+                    need(len(raw) == manifest[name]['bytes'] and hashlib.sha256(raw).hexdigest() == manifest[name]['sha256'])
+                analysis_role = descriptor['analysis_role']
+                need(type(analysis_role) is dict and set(analysis_role) == {'workflow_id', 'model', 'graph_sha256'}
+                     and type(analysis_role['workflow_id']) is str and re.fullmatch(r'[A-Fa-f0-9]{16,64}', analysis_role['workflow_id'])
+                     and analysis_role['model'] == roles['mapper']['model'] and sha(analysis_role['graph_sha256'])
+                     and len({row['workflow_id'].upper() for row in (analysis_role, roles['mapper'], roles['reviewer'])}) == 3)
+                compact = {'schema_version': 1, 'scope': 'fox-forms-clause-analysis-v1-request', 'clauses': []}
+                for attribute in ('WhereClause', 'OrderByClause'):
+                    required_unit = next(row for row in required if row['source_attribute'] == attribute)
+                    unit = unit_metadata[required_unit['unit_id']]
+                    chunk = selected_units[unit['id']]
+                    source = next(entry['source'] for entry in packet['sources']
+                                  if any(row['id'] == unit['id'] for row in entry['facts']['code_units']))
+                    compact['clauses'].append({'source_attribute': attribute, 'text': chunk['text'], 'unit': unit,
+                                              'owner': all_objects[unit['owner_id']], 'source': source})
+                same(values['clause-request.json'], compact)
+                analysis_target = json.loads(canonical(target))
+                analysis_target['opaf']['roles']['mapper'] = analysis_role
+                analysis, analysis_room = role_output(proof_root / 'analysis', 'mapper', compact, analysis_target)
+                need(set(analysis) == {'schema_version', 'scope', 'analyses'} and type(analysis['schema_version']) is int
+                     and analysis['schema_version'] == 1 and analysis['scope'] == 'fox-forms-clause-analysis-v1'
+                     and type(analysis['analyses']) is list and len(analysis['analyses']) == 2
+                     and {row['source_attribute'] for row in analysis['analyses']} == {'WhereClause', 'OrderByClause'})
+                for row in analysis['analyses']:
+                    need(set(row) == {'source_attribute', 'intent', 'status', 'limitations'}
+                         and row['status'] in ('proposal', 'unresolved') and type(row['limitations']) is list
+                         and len(row['limitations']) <= 4 and (row['status'] != 'unresolved' or row['limitations']))
+                    text(row['intent'], 512)
+                    for limitation in row['limitations']: text(limitation, 1000)
+                derived, assembly = values['derived-candidate.json'], values['derived-assembly.json']
+                shape(derived, repair_request, {row['id'] for row in repair_request['owned_objects']})
+                need(descriptor['candidate_sha256'] == hashed(derived) and type(assembly['changes']) is list
+                     and len(assembly['changes']) == 2)
+                expected_derived = json.loads(canonical(historical))
+                changed_attributes = []
+                for change, item in zip(assembly['changes'], compact['clauses']):
+                    need(set(change) == {'source_attribute', 'unit_id', 'unit_sha256', 'claim_index', 'before',
+                        'after', 'analysis', 'added_action', 'added_questions'} and type(change['claim_index']) is int)
+                    unit = item['unit']; attribute = item['source_attribute']; changed_attributes.append(attribute)
+                    interpreted = next(row for row in analysis['analyses'] if row['source_attribute'] == attribute)
+                    index = change['claim_index']
+                    same({key: change[key] for key in ('source_attribute', 'unit_id', 'unit_sha256', 'before', 'analysis')},
+                        {'source_attribute': attribute, 'unit_id': unit['id'], 'unit_sha256': unit['sha256'],
+                         'before': historical['blueprint']['claims'][index], 'analysis': interpreted})
+                    need(change['before']['id'] == next(row['defective_claim_id'] for row in required
+                         if row['source_attribute'] == attribute))
+                    same(change['after'], {'id': change['before']['id'], 'source_object_id': unit['owner_id'],
+                        'kind': 'behavior.intent', 'value': interpreted['intent'], 'status': interpreted['status'],
+                        'evidence_refs': [unit['id']], 'reason': 'Derived model interpretation of ' + attribute +
+                        '; not a source fact. Independent source-grounded review required.'})
+                    action = change['added_action']
+                    need(set(action) == {'id', 'claim_ids'} and action['claim_ids'] == [change['after']['id']])
+                    identifier(action['id'])
+                    need(type(change['added_questions']) is list and len(change['added_questions']) == len(interpreted['limitations']))
+                    for question, limitation in zip(change['added_questions'], interpreted['limitations']):
+                        need(set(question) == {'id', 'source_object_id', 'text'}
+                             and question['source_object_id'] == unit['owner_id'] and question['text'] == limitation)
+                        identifier(question['id'])
+                    expected_derived['blueprint']['claims'][index] = change['after']
+                    expected_derived['blueprint']['actions'].append(action)
+                    expected_derived['blueprint']['questions'].extend(change['added_questions'])
+                same(derived, expected_derived)
+                same(assembly, {'schema_version': 1, 'scope': 'fox-forms-clause-analysis-v1-derived-assembly',
+                    'assembler_version': 1, 'source_binding': selected['source_binding'],
+                    'focus_request_sha256': hashed(repair_request), 'analysis_request_sha256': hashed(compact),
+                    'analysis_response_sha256': hashed(analysis), 'original_candidate_sha256': hashed(historical),
+                    'derived_candidate_sha256': hashed(derived), 'changes': assembly['changes'],
+                    'repair_check': gate(derived, repair_request, 0), 'source_fact_check': gate(derived, repair_request, 0),
+                    'raw_model_output': False, 'independent_review_required': True,
+                    'generation_ready': False, 'business_behavior_accepted': False})
+                analysis_invocation = values['analysis/mapper.json']['invocation']
+                assembly_binding = {'schema_version': 1, 'scope': 'fox-clause-diagnostic-invocation-assembly-v1',
+                    'analysis_checkpoint_sha256': manifest['analysis/mapper.json']['sha256'],
+                    'analysis_invocation_sha256': hashed(analysis_invocation), 'assembly_sha256': hashed(assembly),
+                    'candidate_sha256': hashed(derived), 'analysis_request_sha256': hashed(compact),
+                    'source_binding': selected['source_binding'], 'raw_model_output': False}
+                same(values['assembly-binding.json'], assembly_binding)
+                review_payload = {'request': repair_request, 'candidate': derived, 'candidate_sha256': hashed(derived),
+                    'review_context': {'schema_version': 1, 'scope': 'fox-dedicated-clause-derived-review-v1',
+                        'trusted_requirements': {'compare_each_literal_clause_with_its_intent_and_limitations': True,
+                            'reject_missing_conditions_ordering_or_invented_external_meaning': True,
+                            'original_false_facts_are_historical_not_authority': True,
+                            'require_both_clauses_and_action_references': True,
+                            'assembly_is_derived_not_a_raw_blueprint_model_response': True,
+                            'do_not_execute_or_accept_business_behavior': True},
+                        'original_candidate': historical, 'clause_request': compact, 'raw_clause_analyses': analysis,
+                        'assembly': assembly, 'assembly_binding': assembly_binding}}
+                approved, clause_review_room = role_output(proof_root / 'review', 'reviewer', review_payload)
+                need(len(rooms | {room, analysis_room, clause_review_room}) == len(rooms) + 3)
+                same(approved, {'source_binding': selected['source_binding'], 'focus_binding': repair_request['focus_binding'],
+                    'candidate_sha256': hashed(derived), 'verdict': 'APPROVED', 'findings': []})
+                same(values['review-receipt.json'], review_receipt(derived, repair_request, 'APPROVED'))
+                basis = values['diagnostic-intent.json']['approval_basis']; text(basis)
+                summary = {'scope': 'one-source-bound-clause-analysis-diagnostic-not-conversion', 'job_id': run['id'],
+                    'maximum_analysis_calls': 1, 'maximum_review_calls': 1, 'automatic_retry': False,
+                    'source_binding': selected['source_binding'], 'focus_request_sha256': hashed(repair_request),
+                    'original_candidate_sha256': hashed(historical), 'analysis_request_sha256': hashed(compact),
+                    'module_sha256': assembler_sha, 'original_target_sha256': hashed(target),
+                    'analysis_target_sha256': hashed(analysis_target), 'clause_count': 2,
+                    'whole_clause_bytes': [item['unit']['bytes'] for item in compact['clauses']],
+                    'production_profile_activated': False, 'production_run_resumed': False, 'apex_imported': False,
+                    'approval_basis': basis}
+                same(values['diagnostic-intent.json'], summary)
+                unchanged = values['result.json']['original_job_files_unchanged']
+                need(type(unchanged) is int and 0 < unchanged <= 100000)
+                same(values['result.json'], {**summary, 'status': 'CLAUSE_DIAGNOSTIC_COMPLETED',
+                    'analysis_room_id': analysis_room, 'analysis_output_sha256': hashed(analysis),
+                    'derived_candidate_sha256': hashed(derived),
+                    'analysis_statuses': {row['source_attribute']: row['status'] for row in analysis['analyses']},
+                    'review_room_id': clause_review_room, 'review_verdict': 'APPROVED', 'approved_structured_design': True,
+                    'finding_count': 0, 'finding_codes': [], 'original_job_files_unchanged': unchanged,
+                    'business_behavior_accepted': False, 'diagnostic_not_production_continuation': True})
+                third_policy = {**policy, 'clause_proof': 'retained-clause-diagnostic-v1',
+                    'new_clause_analysis_calls': 0, 'repeated_clause_review_calls': 0,
+                    'corrective_projection_review_calls': 1}
+                third_plan = {**plan, 'source_checked_focuses': 7, 'planned_corrective_operations': ['projection_review'],
+                    'new_clause_analysis_calls': 0, 'repeated_clause_review_calls': 0,
+                    'corrective_projection_review_calls': 1, 'clause_proof_sha256': hashed(descriptor),
+                    'analysis_role': descriptor['analysis_role']}
+                third = document(job / 'mapping-epochs/epoch-000003.json')
+                same(third, {**epoch, 'epoch_number': 3, 'strategy': 'retained-clause-diagnostic-v1',
+                    'predecessor_sha256': hashed(epoch), 'approved_at': third['approved_at'],
+                    'before_files': baseline_three, 'plan': third_plan, 'normalization_policy': third_policy,
+                    'clause_proof_sha256': hashed(descriptor),
+                    'checkpoint_sha256': hashed({'epoch_number': 3, 'predecessor_sha256': hashed(epoch),
+                        'before_files': baseline_three, 'plan': third_plan, 'normalization_policy': third_policy})})
+                need(type(third['epoch_number']) is int and type(third['approved_at']) in (int, float)
+                     and math.isfinite(third['approved_at']) and third['approved_at'] > epoch['approved_at'])
+                expected_events = {epoch_two_event,
+                    (owner[0], run['id'] + ':epoch:000003:' + hashed(third), third['approved_at'])}
+                need({tuple(row) for row in events} == expected_events)
+                same(document(third_root / 'epoch-record.json'), third)
+                same(document(third_root / 'predecessor-record.json'), epoch)
+                derived_proof = {'focus_id': repair_request['focus_id'], 'kind': 'DERIVED_CLAUSE_DIAGNOSTIC',
+                    'candidate_sha256': hashed(derived), 'source_fact_check': gate(derived, repair_request, 0),
+                    'active_directory': 'epochs/epoch-000003/clause-proof', 'clause_proof_sha256': hashed(descriptor),
+                    'analysis_invocation': analysis_invocation, 'reviewer_invocation': values['review/reviewer.json']['invocation'],
+                    'review_request_sha256': hashed(review_payload), 'assembly_binding': assembly_binding,
+                    'file_manifest_sha256': hashed(manifest)}
+                projected = json.loads(canonical(candidate)); blueprint = projected['blueprint']
+                owned_ids = {obj['id'] for obj in projection_request['owned_objects']}
+                extras = [row for row in blueprint['objects'] if row['source_object_id'] not in owned_ids]
+                need(len(extras) == 1)
+                shared = extras[0]
+                prior_objects = [row for row in derived['blueprint']['objects'] if row['source_object_id'] == shared['source_object_id']]
+                need(len(prior_objects) == 1)
+                same({key: value for key, value in shared.items() if key != 'reason'},
+                     {key: value for key, value in prior_objects[0].items() if key != 'reason'})
+                excluded_screens = [row for row in blueprint['screens'] if row['id'] == shared['screen_id']]
+                same(excluded_screens, [row for row in derived['blueprint']['screens'] if row['id'] == shared['screen_id']])
+                excluded_claims = [row for row in blueprint['claims'] if row['source_object_id'] not in owned_ids]
+                need(len(excluded_claims) == 1 and not any(excluded_claims[0]['id'] in row['claim_ids']
+                    for value in [candidate, *prefix[:6], derived] for category in ('actions', 'relationships')
+                    for row in value['blueprint'][category]))
+                blueprint['objects'] = [row for row in blueprint['objects'] if row['source_object_id'] in owned_ids]
+                blueprint['screens'] = [row for row in blueprint['screens'] if row['id'] != shared['screen_id']]
+                blueprint['claims'] = [row for row in blueprint['claims'] if row['source_object_id'] in owned_ids]
+                aliases = []
+                for row in blueprint['claims']:
+                    if row['kind'] == 'object.item_type' and row['status'] == 'source_fact':
+                        before = json.loads(canonical(row)); row['kind'] = 'item.item_type'
+                        aliases.append({'before': before, 'after': json.loads(canonical(row))})
+                need(len(aliases) == 2); shape(projected, projection_request, owned_ids)
+                projection = {'schema_version': 1, 'scope': 'fox-focus-context-projection-v1',
+                    'strategy': 'repair-source-facts-and-project-context-v1', 'source_binding': selected['source_binding'],
+                    'request_sha256': hashed(projection_request), 'raw_candidate_sha256': hashed(candidate),
+                    'candidate_sha256': hashed(projected), 'prior_active_proof_sha256': hashed(derived_proof),
+                    'excluded_objects': extras, 'prior_objects': prior_objects, 'excluded_screens': excluded_screens,
+                    'excluded_claims': excluded_claims, 'aliases': aliases, 'rationale_semantic_equivalence_asserted': False,
+                    'source_fact_check': gate(projected, projection_request, 2)}
+                shared = projection['excluded_objects'][0]
+                need(projected['blueprint']['screens'] == [] and len(projected['blueprint']['objects']) == 32
+                     and all(row['disposition'] == 'proposed' and row.get('screen_id') == shared['screen_id']
+                         and all_objects[row['source_object_id']]['block_id'] == shared['source_object_id']
+                         and all_objects[row['source_object_id']]['kind'] in ('Item', 'Trigger')
+                         for row in projected['blueprint']['objects']))
+                evidence = {'projection': projection, 'prior_active_proof': derived_proof}
+                directory = third_root / projection_request['focus_id']
+                same(document(directory / 'projection-candidate.json'), projected)
+                same(document(directory / 'projection-receipt.json'), evidence)
+                payload = {'request': projection_request, 'candidate': projected, 'candidate_sha256': hashed(projected),
+                    'review_context': {'schema_version': 1, 'scope': 'fox-focus-extended-review-v1',
+                        'operation': 'projection_review', 'raw_candidate': candidate, 'raw_candidate_sha256': hashed(candidate),
+                        'evidence': evidence, 'trusted_requirements': {
+                            'source_fact_values_and_every_ref_must_match_exact_whitelist': True,
+                            'old_ai_approval_is_not_source_validation': True,
+                            'review_every_required_clause_body_conditions_effects_and_action_refs': True,
+                            'generic_or_relabelled_unsupported_facts_must_be_changes_required': True,
+                            'compare_both_rationales_no_semantic_equivalence_from_machine_match': True,
+                            'external_semantics_must_remain_uncertain': True,
+                            'never_repair_candidate_or_accept_business_behavior': True}}}
+                same(document(directory / 'reviewer-request.json'), payload)
+                rejection, review_room = role_output(directory, 'reviewer', payload)
+                need(review_room not in rooms | {room, analysis_room, clause_review_room}
+                     and set(rejection) == {'source_binding', 'focus_binding', 'candidate_sha256', 'verdict', 'findings'}
+                     and rejection['source_binding'] == selected['source_binding']
+                     and rejection['focus_binding'] == projection_request['focus_binding']
+                     and rejection['candidate_sha256'] == hashed(projected) and rejection['verdict'] == 'CHANGES_REQUIRED'
+                     and type(rejection['findings']) is list and [finding['code'] for finding in rejection['findings']] ==
+                         ['MISSING_SCREEN_DECLARATION', 'INVALID_OBJECT_SCREEN_REF']
+                     and all(finding['source_object_id'] is None for finding in rejection['findings']))
+                for finding in rejection['findings']:
+                    need(set(finding) == {'source_object_id', 'code', 'detail'}); text(finding['detail'])
+                receipt = review_receipt(projected, projection_request, 'CHANGES_REQUIRED')
+                same(document(directory / 'review-receipt.json'), receipt)
+                same(document(third_root / 'source-facts' / (projection_request['focus_id'] + '.json')),
+                     gate(projected, projection_request, 2))
+                result = document(job / 'prototype-result.json')
+                checkpoint = result['artifacts']['checkpoint_directory']
+                need(type(checkpoint) is str and 0 < len(checkpoint) <= 1024)
+                portable = checkpoint.replace('\\', '/')
+                need(re.match(r'(?:/|[A-Za-z]:/)', portable) and '//' not in portable
+                     and all(part not in ('.', '..') for part in portable.split('/'))
+                     and portable.endswith('/jobs/' + run['id'] + '/prototype-pipeline'))
+                # This retained display path is never opened or used as authority.
+                same(result, {'schema_version': 1, 'scope': 'fox-prototype-pipeline-v1',
+                    'job_id': run['id'], 'source_binding': selected['source_binding'],
+                    'status': 'CHANGES_REQUIRED', 'stage': 'reviewing', 'blocked_focus_id': projection_request['focus_id'],
+                    'assessment': assessment, 'artifacts': {'checkpoint_directory': checkpoint},
+                    'facts': {key: False for key in ('native_source_rendered', 'sqlcl_validated', 'schema_prepared',
+                        'import_verified', 'runtime_verified', 'native_apex_generated', 'package_reimport_passed',
+                        'clean_schema_install_passed', 'technically_verified', 'business_behavior_accepted', 'download_ready')}})
+                need(type(result['schema_version']) is int)
+                same(document(job / 'prototype-results' / (hashed(result) + '.json')), result)
+                epoch_directories |= third_dirs
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
@@ -1425,6 +1714,11 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
 def terminal_prototype_clause_repair(database, db, run):
     """Read-only epoch-two deletion-only failure; no continuation authority."""
     return terminal_empty_prototype_mapping(database, db, run, clause_repair_failure=True)
+
+
+def terminal_prototype_container_review(database, db, run):
+    """Only epoch three's sealed projection rejection, never epoch-four authority."""
+    return terminal_empty_prototype_mapping(database, db, run, container_review_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -2562,6 +2856,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_prototype_clause_repair(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_clause_repair_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_container_review(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_container_review_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

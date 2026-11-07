@@ -24,6 +24,12 @@ def configured_download_client(target_sha256, *, installation_projection=None):
 
 def retained_export_request(job, snapshot, target):
     """Reconstruct the exact export request from retained worker-owned artifacts."""
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
+        return _retained_export_request(job, snapshot, target)
+
+
+def _retained_export_request(job, snapshot, target):
     from .prototype_job import validate_prototype_snapshot
     job = Path(job)
     if not re.fullmatch(r'fox-[a-f0-9]{20}', job.name) or job.is_symlink():
@@ -70,6 +76,13 @@ def retained_export_request(job, snapshot, target):
             raise OpafError('Prototype stage completion is missing or uncertain.')
         prior[stage] = receipt
     result = _json(job / 'prototype-result.json')
+    from .prototype_mapping_epochs import technical_record
+    from .prototype_container_epoch import NUMBER
+    epoch = technical_record(root)
+    if epoch is not None and epoch['epoch_number'] == NUMBER:
+        from .prototype_result_publication import validate_publication
+        if validate_publication(job, epoch) is None:
+            raise OpafError('Prototype result publication is incomplete.')
     if (result.get('scope') != 'fox-prototype-pipeline-v1' or result.get('schema_version') != 1
             or result.get('status') != 'APEX_GENERATED' or result.get('stage') != 'complete'
             or result.get('job_id') != job.name or result.get('source_binding') != selected['source_binding']

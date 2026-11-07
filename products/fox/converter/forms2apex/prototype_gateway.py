@@ -60,6 +60,15 @@ _CLAUSE_FIXED_PATHS = {'epochs/epoch-000003/' + name for name in (
 _CLAUSE_FOCUS_PATH = re.compile(r'epochs/epoch-000003/(?:source-facts/focus-[a-f0-9]{24}\.json|'
     r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES
     + ('mapper-intent', 'reviewer-intent')) + r')\.json)\Z')
+_CONTAINER_JSON = {'container-proposal.json', 'derived-root-candidate.json', 'diagnostic-intent.json',
+    'original-files.json', 'prefix-check.json', 'result.json', 'review-receipt.json', 'review-request.json',
+    'review/reviewer-intent.json', 'review/reviewer-target.json', 'review/reviewer.json'}
+_CONTAINER_FIXED_PATHS = {'epochs/epoch-000004/' + name for name in (
+    'epoch-record.json', 'predecessor-record.json', 'container-proof-descriptor.json')} | {
+    'epochs/epoch-000004/container-proof/' + name for name in _CONTAINER_JSON}
+_CONTAINER_FOCUS_PATH = re.compile(r'epochs/epoch-000004/(?:source-facts/focus-[a-f0-9]{24}\.json|'
+    r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES
+    + ('mapper-intent', 'reviewer-intent')) + r')\.json)\Z')
 
 
 def _authority_json(raw):
@@ -95,6 +104,8 @@ def _authority_descriptor(bundle, *, encoded):
                        for row in bundle['files'])
     clause_format = epoch_format and any(type(row) is dict and row.get('path') == 'epochs/epoch-000003/epoch-record.json'
                                          for row in bundle['files'])
+    container_format = clause_format and any(type(row) is dict and row.get('path') == 'epochs/epoch-000004/epoch-record.json'
+                                             for row in bundle['files'])
     path_format = _AUTHORITY_PATH if epoch_format else _LEGACY_AUTHORITY_PATH
     rows, names, total = [], [], 0
     for row in bundle["files"]:
@@ -103,7 +114,8 @@ def _authority_descriptor(bundle, *, encoded):
               "PROTOTYPE_AUTHORITY_FILE_FIELDS_INVALID")
         name = row["path"]
         _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)
-              or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))),
+              or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))
+              or container_format and (name in _CONTAINER_FIXED_PATHS or _CONTAINER_FOCUS_PATH.fullmatch(name))),
               "PROTOTYPE_AUTHORITY_PATH_NOT_ALLOWED")
         _need(type(row["bytes"]) is int and 0 < row["bytes"] <= 20_000_000
               and type(row["sha256"]) is str and _SHA.fullmatch(row["sha256"]),

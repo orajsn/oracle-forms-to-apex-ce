@@ -109,11 +109,16 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     """Exact known producer files; unknown files and unsealed calls block."""
     names = {}
     from . import prototype_clause_epoch as clause
-    clause_epoch = record is not None and record.get('epoch_number') == clause.NUMBER
-    prefixes = '(?:' + PREFIX + '|' + clause.PREFIX + ')' if clause_epoch else PREFIX
+    from . import prototype_container_epoch as container
+    container_epoch = record is not None and record.get('epoch_number') == container.NUMBER
+    clause_epoch = record is not None and record.get('epoch_number') in (clause.NUMBER, container.NUMBER)
+    prefixes = '(?:' + '|'.join([PREFIX, clause.PREFIX] + ([container.PREFIX] if container_epoch else [])) + ')' if clause_epoch else PREFIX
     root_files = {'source-snapshot.json', 'mapping-continuation.json', 'prototype-result.json', RECORD}
     if clause_epoch:
         root_files.add(clause.RECORD)
+    if container_epoch:
+        root_files.add(container.RECORD)
+        root_files.update(container.RESULT_FILES)
     pipeline_files = {'binding.json', 'sources-manifest.json', 'packet.json', 'assessment.json',
         'merged-blueprint.json', 'native-plan.json', 'review-index.json', 'rendered.json', 'candidate-apexlang.zip',
         *{stage + suffix for stage in ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
@@ -135,12 +140,18 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or clause_epoch and rel in {'prototype-pipeline/' + clause.PREFIX,
                         'prototype-pipeline/' + clause.PREFIX + '/source-facts',
                         *{'prototype-pipeline/' + clause.PREFIX + '/clause-proof' + suffix for suffix in ('', '/analysis', '/review')}}
+                    or container_epoch and rel in container.DIRECTORIES
                     or re.fullmatch(r'prototype-pipeline/(?:' + prefixes + r'/)?focus-[a-f0-9]{24}', rel))
                 if not valid or initial and rel.startswith(('mapping-epochs', 'prototype-pipeline/epochs')):
                     raise OpafError('Unknown epoch directory or competing head requires reconciliation.')
                 match = re.fullmatch(r'prototype-pipeline/(?:' + prefixes + r'/)?(focus-[a-f0-9]{24})', rel)
                 if clause_epoch and rel == 'prototype-pipeline/' + clause.PREFIX + '/' + record['plan']['repair_focus_id']:
                     raise OpafError('Derived clause proof cannot masquerade as a new mapper/reviewer focus.')
+                if container_epoch and match and rel.startswith('prototype-pipeline/' + container.PREFIX + '/'):
+                    original_prefix = 'prototype-pipeline/' + match[1] + '/'
+                    if (match[1] != record['plan']['projection_focus_id']
+                            and any(name.startswith(original_prefix) for name in record['before_files'])):
+                        raise OpafError('Retained container and prefix proofs cannot masquerade as new calls.')
                 if match and known_focuses is not None and match[1] not in known_focuses:
                     raise OpafError('Foreign focus directory is outside the bound source plan.')
                 pending.append(path)
@@ -154,6 +165,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or re.fullmatch(r'(?:' + prefixes + r'/)?focus-[a-f0-9]{24}/(?:' + '|'.join(re.escape(name) for name in focus_files) + ')', tail)
                     or tail in {PREFIX + '/epoch-record.json', PREFIX + '/predecessor-record.json'}
                     or clause_epoch and tail in {clause.PREFIX + '/' + name for name in clause.TECHNICAL_FILES}
+                    or container_epoch and tail in {container.PREFIX + '/' + name for name in container.TECHNICAL_FILES}
                     or re.fullmatch(prefixes + r'/source-facts/focus-[a-f0-9]{24}\.json', tail))
             elif rel.startswith('prototype-results/'):
                 valid = re.fullmatch(r'prototype-results/[a-f0-9]{64}\.json', rel) is not None
@@ -167,7 +179,8 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
             raw = path.read_bytes()
             if path.suffix == '.json':
                 read(path)
-            diagnostic_summary = clause_epoch and rel == 'prototype-pipeline/' + clause.PREFIX + '/clause-proof/diagnostic-intent.json'
+            diagnostic_summary = (clause_epoch and rel == 'prototype-pipeline/' + clause.PREFIX + '/clause-proof/diagnostic-intent.json'
+                or container_epoch and rel == 'prototype-pipeline/' + container.PREFIX + '/container-proof/diagnostic-intent.json')
             if path.name.endswith('-intent.json') and not diagnostic_summary and not path.with_name(path.name.replace('-intent.json', '.json')).is_file():
                 if (type(phase) is not _ConverterPhase or phase.seal is not _PHASE_SEAL
                         or phase.job != str(job.absolute())
@@ -188,6 +201,9 @@ def _model_fence(job, snapshot, record):
     This reads caches through the production role validator; it never invokes.
     """
     from . import prototype_clause_epoch as clause
+    from . import prototype_container_epoch as container
+    if record.get('epoch_number') == container.NUMBER:
+        return container.model_fence(job, snapshot, record)
     if record.get('epoch_number') == clause.NUMBER:
         return clause.model_fence(job, snapshot, record)
     from .prototype_job import validate_prototype_snapshot
@@ -260,10 +276,13 @@ def _before_unchanged(job, files):
             raise OpafError('An original epoch checkpoint changed.')
 
 
-def _validated_epoch_record(job, snapshot, original, db=None, *, historical=False):
+def _validated_epoch_record(job, snapshot, original, db=None, *, historical=False, historical_head=3):
     """Validate root record/event and copied technical record; never repair loss."""
     job = Path(job)
     from . import prototype_clause_epoch as clause
+    from . import prototype_container_epoch as container
+    if not historical and ((job / container.RECORD).exists() or (job / container.RECORD).is_symlink()):
+        return container.validate_record(job, snapshot, original, db)
     if not historical and (job / clause.RECORD).exists():
         return clause.validate_record(job, snapshot, original, db)
     path = _safe_path(job, RECORD)
@@ -285,6 +304,8 @@ def _validated_epoch_record(job, snapshot, original, db=None, *, historical=Fals
                 raise OpafError('Epoch event or technical head lost its durable record.')
             return None
         expected_names = {NAME + '.json', clause.NAME + '.json'} if historical else {NAME + '.json'}
+        if historical and historical_head == container.NUMBER:
+            expected_names.add(container.NAME + '.json')
         if root_dir.is_symlink() or {item.name for item in root_dir.iterdir()} != expected_names:
             raise OpafError('Epoch chain is noncontiguous or has a competing head.')
         if historical:
@@ -330,6 +351,12 @@ def _validated_epoch_record(job, snapshot, original, db=None, *, historical=Fals
 
 
 def validate_epoch_chain(job, snapshot, original, db=None, *, phase=None):
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
+        return _validate_epoch_chain(job, snapshot, original, db, phase=phase)
+
+
+def _validate_epoch_chain(job, snapshot, original, db=None, *, phase=None):
     record = _validated_epoch_record(job, snapshot, original, db)
     if record is not None:
         if phase is not None and (type(phase) is not _ConverterPhase or phase.seal is not _PHASE_SEAL
@@ -434,6 +461,9 @@ def inspect_next_epoch(job, snapshot, original, target, db):
     record = validate_epoch_chain(job, snapshot, original, db)
     if record:
         from . import prototype_clause_epoch as clause
+        from . import prototype_container_epoch as container
+        if record.get('epoch_number') == container.NUMBER or container.staging_present(job):
+            return container.inspect_next(job, snapshot, original, target, db, record)
         if record.get('epoch_number') == clause.NUMBER or clause.staging_present(job):
             return clause.inspect_next(job, snapshot, original, target, db, record)
         _closure(job)
@@ -514,7 +544,15 @@ def _repair_context(request, historical, requirements):
 
 
 def technical_record(root):
+    from .prototype_read_scope import cached_read
+    return cached_read(root, 'technical_record', {}, lambda: _technical_record(root))
+
+
+def _technical_record(root):
     from . import prototype_clause_epoch as clause
+    from . import prototype_container_epoch as container
+    if (Path(root) / container.PREFIX).exists() or (Path(root) / container.PREFIX).is_symlink():
+        return container.technical_record(Path(root))
     if (Path(root) / clause.PREFIX).exists() or (Path(root) / clause.PREFIX).is_symlink():
         return clause.technical_record(Path(root))
     return _technical_epoch_two(root)
@@ -544,14 +582,27 @@ def _technical_epoch_two(root):
 
 def active_focus(root, packet, plan, request, target, previous, *, runtime=None):
     """Execute/read one active version; full envelopes are reconstruction inputs."""
+    from .prototype_read_scope import cached_read, forbid_execution
+    if runtime is not None:
+        forbid_execution()
+        return _dispatch_active_focus(root, packet, plan, request, target, previous, runtime=runtime)
+    return cached_read(root, 'active_focus', {'packet': packet, 'plan': plan, 'request': request,
+        'target': target, 'previous': previous},
+        lambda: _dispatch_active_focus(root, packet, plan, request, target, previous))
+
+
+def _dispatch_active_focus(root, packet, plan, request, target, previous, *, runtime=None):
     record = technical_record(root)
     from . import prototype_clause_epoch as clause
+    from . import prototype_container_epoch as container
+    if record is not None and record.get('epoch_number') == container.NUMBER:
+        return container.active_focus(root, packet, plan, request, target, previous, record, runtime=runtime)
     if record is not None and record.get('epoch_number') == clause.NUMBER:
         return clause.active_focus(root, packet, plan, request, target, previous, record, runtime=runtime)
     return _active_focus(root, packet, plan, request, target, previous, record, PREFIX, runtime=runtime)
 
 
-def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False):
+def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False, review_context=None):
     write = runtime is not None
     index = next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id'])
     repair = next(i for i, row in enumerate(plan['requests']) if record and row['focus_id'] == record['plan']['repair_focus_id']) if record else None
@@ -621,6 +672,8 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
             payload = extended_review(request, candidate, raw, 'projection_review', evidence)
         else:
             payload = {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)}
+        if review_context is not None:
+            payload = review_context(candidate, payload)
         save(directory / 'reviewer-request.json', payload, write)
         if preview:
             return {'review_request': payload}

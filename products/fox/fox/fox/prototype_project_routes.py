@@ -41,6 +41,7 @@ class PrototypeEpochInput(PrototypeContinuationInput):
     expected_epoch_number: StrictInt = Field(ge=1, le=1000000)
     expected_predecessor_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
     expected_clause_proof_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    expected_container_proof_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
 
 
 def source_documents(sources):
@@ -81,6 +82,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         from .prototype_download import configured_download_client, retained_export_request
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
         from .prototype_transport import PrototypeHttpConverterAdapter
+        from .prototype_read_scope import epoch_read_scope
         import re
         import zipfile
         p = project(request, pid)  # Authentication and owner check precede all job reads.
@@ -108,18 +110,22 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                             or inventory(current_sources(pid, c))['source_hash'] != snapshot['source_hash']
                             or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']):
                         raise OpafError('Prototype owner, source selection or run is no longer current.')
+                    from .prototype_mapping_epochs import validate_epoch_chain
+                    validate_epoch_chain(job, snapshot, original, c)
                 target = target_reader()
                 if target['target_profile_sha256'] != snapshot['prototype']['target_profile_sha256']:
                     raise OpafError('Prototype target changed.')
                 if read_prototype_snapshot(job)[1] != original:
                     raise OpafError('Prototype snapshot changed.')
                 return target
-            target = current()
-            export_request, receipt = retained_export_request(job, snapshot, target)
+            with epoch_read_scope(job / 'prototype-pipeline'):
+                target = current()
+                export_request, receipt = retained_export_request(job, snapshot, target)
+                if metadata_only:
+                    current()
             if metadata_only:
                 # Local retained-proof projection only. This does not fetch a
                 # package, execute a stage, or claim a clean reimport passed.
-                current()
                 return Response(json.dumps({
                     'schema_version': 1, 'scope': 'fox-generated-prototype-output-v1',
                     'project_id': pid, 'run_id': rid,
@@ -138,8 +144,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raw = PrototypeHttpConverterAdapter(job, client).read_package(export_request, receipt)
             # Recheck after HTTP, so a source/owner/profile change cannot serve
             # an export selected using stale authorization.
-            current()
-            retained_export_request(job, snapshot, target_reader())
+            with epoch_read_scope(job / 'prototype-pipeline'):
+                retained_export_request(job, snapshot, current())
             return Response(raw, media_type='application/zip', headers={
                 'Content-Disposition': f'attachment; filename="{rid}-generated-prototype.zip"',
                 'X-FOX-Output-Scope': 'generated-synthetic-prototype-not-business-accepted',
@@ -489,7 +495,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 raise ValueError('Later verification or acceptance work conflicts with this epoch.')
         plan, before, record, checkpoint, predecessor = inspect_next_epoch(job, snapshot, original, target['target_profile'], c)
         from . import prototype_clause_epoch as clause
-        number = clause.NUMBER if 'clause_proof_sha256' in plan else NUMBER
+        from . import prototype_container_epoch as container
+        number = container.NUMBER if 'container_proof_sha256' in plan else clause.NUMBER if 'clause_proof_sha256' in plan else NUMBER
         if record is None and run['state'] != 'ATTENTION':
             raise ValueError('Only a known terminal checkpoint can start this epoch.')
         if read_prototype_snapshot(job)[1] != original:
@@ -511,6 +518,14 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             if record is None:
                 projection['reason'] = ('Reuse the retained approved clause diagnostic without new clause analysis or repeat clause review; '
                     'review the adjacent technical projection once, then continue the remaining sections of this same run.')
+        if number == container.NUMBER:
+            projection.update(strategy=container.STRATEGY, expected_container_proof_sha256=plan['container_proof_sha256'],
+                **{key: plan[key] for key in ('container_corrections', 'new_container_review_calls',
+                    'repeated_root_mapper_calls', 'repeated_projection_mapper_calls', 'corrective_projection_review_calls')})
+            if record is None:
+                projection['reason'] = ('Reuse the retained independently approved container correction and clause proof without '
+                    'repeating root mapping, root review or projection mapping; review the unchanged projection once with '
+                    'validated screen and ancestor context, then continue the remaining sections of this same run.')
         return projection, snapshot, original, plan, before, record, run
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/mapping-epochs/next')
@@ -535,7 +550,9 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 c.execute('BEGIN IMMEDIATE')
                 projection, snapshot, original, plan, before, record, run = epoch_context(c, pid, rid, p['owner'])
                 from . import prototype_clause_epoch as clause
+                from . import prototype_container_epoch as container
                 clause_epoch = projection['epoch_number'] == clause.NUMBER
+                container_epoch = projection['epoch_number'] == container.NUMBER
                 if (body.expected_epoch_number != projection['epoch_number']
                         or body.expected_predecessor_sha256 != projection['predecessor_sha256']
                         or body.checkpoint_sha256 != projection['checkpoint_sha256']
@@ -544,6 +561,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                         or body.target_profile_sha256 != projection['target_profile_sha256']
                         or body.approved_chunk_hashes != projection['approved_chunk_hashes']
                         or body.expected_clause_proof_sha256 != projection.get('expected_clause_proof_sha256')
+                        or body.expected_container_proof_sha256 != projection.get('expected_container_proof_sha256')
                         or not all(value is True for value in (body.approved_redacted_source, body.approved_external_ai, body.approved_prototype_scope))):
                     raise ValueError('Epoch needs the exact plan and three fresh source-processing consents.')
                 result = {'id': rid, 'state': run['state'] if record else 'QUEUED', 'conversion_profile': PROFILE_ID,
@@ -554,15 +572,18 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     raise HTTPException(429, 'Other unresolved work blocks this epoch. Existing outcomes remain preserved.')
                 now = time.time()
                 record = {'schema_version': 1, 'scope': SCOPE,
-                    'strategy': clause.STRATEGY if clause_epoch else STRATEGY, 'epoch_number': projection['epoch_number'],
+                    'strategy': container.STRATEGY if container_epoch else clause.STRATEGY if clause_epoch else STRATEGY, 'epoch_number': projection['epoch_number'],
                     'predecessor_sha256': projection['predecessor_sha256'], 'checkpoint_sha256': projection['checkpoint_sha256'],
                     'job_id': rid, 'project_id': pid, 'snapshot_sha256': hashlib.sha256(original).hexdigest(),
                     'source_hash': snapshot['source_hash'], 'source_binding': snapshot['prototype']['source_binding'],
                     'target_profile_sha256': snapshot['prototype']['target_profile_sha256'], 'owner': p['owner'], 'approved_at': now,
                     'approvals': {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True},
-                    'before_files': before, 'plan': plan, 'normalization_policy': clause.POLICY if clause_epoch else POLICY}
+                    'before_files': before, 'plan': plan, 'normalization_policy': container.POLICY if container_epoch else clause.POLICY if clause_epoch else POLICY}
                 job = root / 'jobs' / rid
-                if clause_epoch:
+                if container_epoch:
+                    record['container_proof_sha256'] = projection['expected_container_proof_sha256']
+                    container.adopt(job, snapshot, original, record)
+                elif clause_epoch:
                     record['clause_proof_sha256'] = projection['expected_clause_proof_sha256']
                     clause.adopt(job, snapshot, original, record)
                 else:

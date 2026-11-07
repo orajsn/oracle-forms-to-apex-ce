@@ -149,6 +149,8 @@ def _save_result(job, result):
 
 def _configuration(approved_target_sha256, *, installation_projection=None):
     """Existing guarded clients/credential source, only at authorized execution."""
+    from .prototype_read_scope import forbid_execution
+    forbid_execution()
     try:
         profile_path = Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE'])
         def target_loader():
@@ -187,6 +189,12 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     documents = validate_prototype_snapshot(snapshot)
     from .prototype_mapping_continuation import validate_job_continuation
     validate_job_continuation(job, snapshot, raw)
+    from . import prototype_container_epoch as container
+    if (job / container.RECORD).exists():
+        from .prototype_result_publication import validate_publication
+        from .prototype_mapping_epochs import read
+        if validate_publication(job, read(job / container.RECORD)) is not None:
+            raise OpafError('This epoch already published its terminal result; no operation was replayed.')
     if 'retry_of' in snapshot:
         from .prototype_mapping_recovery import retry_run_id
         if job.name != retry_run_id(snapshot['retry_of']):
@@ -227,5 +235,12 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
         focus_schema_version=selected['schema_version'])
     still_approved()
-    _save_result(job, result)
+    from . import prototype_container_epoch as container
+    from .prototype_mapping_epochs import technical_record
+    record = technical_record(job / 'prototype-pipeline')
+    if record is not None and record['epoch_number'] == container.NUMBER:
+        from .prototype_result_publication import controlled_save_result
+        controlled_save_result(job, result, record)
+    else:
+        _save_result(job, result)
     return result

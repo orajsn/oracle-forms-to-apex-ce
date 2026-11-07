@@ -4,6 +4,42 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.15.0] - 2026-11-08
+
+### Continue with reviewed structure
+
+- Check the source-bound mapping prefix for omitted-parent conflicts, related
+  screen references and selected trigger coverage before further AI work.
+- Represent an eligible nonvisual container correction as a new, independently
+  reviewed proposal. Preserve the original response and reuse only its exact
+  approved replacement; do not infer missing business behavior.
+- Offer **Continue with corrected structure** for the recognized stopped run.
+  Reuse completed root/clause work and the next section's saved mapping. Review
+  that section with checked screen context before continuing unfinished work.
+- Append a fourth same-run continuation record with exact proof, source, target,
+  predecessor and fresh confirmation bindings. Preserve earlier failures and
+  byte-bound result history; interrupted publication cannot trigger a replay.
+- Recheck current approval events and historical proof before output metadata or
+  download, and again after the private package read.
+- Reuse technical proof reads only within one bounded operation, with filesystem
+  checks at entry and exit. No permission cache crosses requests, model calls or
+  package transfers.
+- Recognize the fully recorded pre-database rejection through the measured
+  upgrade checker, without new runtime dependencies, retry authority or success
+  claims.
+
+Verification includes source/context and tamper tests, local API/worker/authority
+checks, actual local HTTP route/gateway/ZIP checks with authored external
+responses, lost-response and desktop/mobile UI checks, generated upgrade-reader
+tests and independent reviews. A bounded real-source container proposal passed
+independent OPAF review; read-only checks against its retained OCI evidence
+preserved all existing job files. These are separate from deployment acceptance.
+
+Real-file remaining analysis, SQLcl validation, unique import, authenticated
+runtime verification and exact downloadable export still require live evidence.
+No business acceptance is implied. See
+[reviewed structure continuation](docs/reviewed-structure-continuation.md).
+
 ## [0.14.0] - 2026-11-08
 
 ### Continue with reviewed results

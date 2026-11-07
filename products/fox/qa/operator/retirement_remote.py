@@ -160,14 +160,16 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                       and db.execute('SELECT 1 FROM verification_retry_attempts WHERE job_id=?', (job_id,)).fetchone() is None,
                       'RETIREMENT_REMOTE_QUEUED_WORK_NOT_ADMISSIBLE')
                 waiting.append({'binding': binding.payload(), 'record_sha256': row['record_sha256']})
-            elif value['recovery_state'] == 'prototype_clause_repair_terminal':
+            elif value['recovery_state'] in {'prototype_clause_repair_terminal', 'prototype_container_review_terminal'}:
                 # A label cannot close, replay, export or authorize this run.
                 # Independently re-read the exact sealed pre-database failure;
                 # missing helpers in an older namespace fail closed as well.
                 run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
-                classifier = getattr(recovery_module, 'terminal_prototype_clause_repair', None)
+                classifier_name = ('terminal_prototype_clause_repair' if value['recovery_state'] ==
+                                   'prototype_clause_repair_terminal' else 'terminal_prototype_container_review')
+                classifier = getattr(recovery_module, classifier_name, None)
                 _need(value == {'blocks_admission': False,
-                    'recovery_state': 'prototype_clause_repair_terminal', 'retry_eligible': False}
+                    'recovery_state': value['recovery_state'], 'retry_eligible': False}
                     and run is not None and callable(classifier)
                     and classifier(root / 'fox.sqlite3', db, dict(run)) is True,
                     'RETIREMENT_REMOTE_CLAUSE_TERMINAL_UNCONFIRMED')

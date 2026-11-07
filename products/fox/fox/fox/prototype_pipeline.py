@@ -110,6 +110,9 @@ def _artifact_json(path):
 def _role(directory, name, client, role, request, identity, target_profile_loader,
           processing_approval_check, approval_context):
     """Observe identity separately without changing published model requests."""
+    if client is not None:
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
     complete, pending = directory / (name + '.json'), directory / (name + '-intent.json')
     if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode('utf-8')) > 650_000:
         raise OpafError('Prototype model request exceeds the transport bound; select a smaller explicit focus.')
@@ -202,6 +205,12 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
     reconstructs proofs from actual worker-owned artifacts; user booleans and
     claimed model approval are never authoritative.
     """
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
+        return _authorize_prototype_request(job, request)
+
+
+def _authorize_prototype_request(job: Path, request: dict) -> dict:
     job = Path(job)
     checkpoints = job / 'prototype-pipeline'
     if job.is_symlink() or checkpoints.is_symlink() or not checkpoints.is_dir():
@@ -387,6 +396,11 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
               'status': 'RUNNING', 'stage': 'mapping', 'facts': facts,
               'assessment': _json(checkpoints / 'assessment.json'),
               'artifacts': {'checkpoint_directory': str(checkpoints)}}
+    from .prototype_mapping_epochs import technical_record
+    from .prototype_container_epoch import NUMBER as CONTAINER_EPOCH
+    current_epoch = technical_record(checkpoints)
+    if current_epoch is not None and current_epoch['epoch_number'] == CONTAINER_EPOCH:
+        result['mapping_epoch_sha256'] = canonical_hash(current_epoch)
     candidates, reviews = [], []
     identity = {'job_id': job.name, 'source_hash': packet['source_binding']}
     approval_context = {**binding, 'selected_chunk_hashes': dict(approved_chunk_hashes)}

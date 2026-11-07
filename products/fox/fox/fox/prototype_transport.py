@@ -45,7 +45,7 @@ _PRIVATE_KEY = re.compile(r'(?:password|passwd|pwd|api[_-]?key|client[_-]?secret
 _ABSOLUTE = re.compile(r'(?i)(?:\b[A-Z]:[\\/]|/(?:Users|home|root|opt|var|tmp)/)')
 
 
-def _epoch_authority_member(name, *, clause_epoch):
+def _epoch_authority_member(name, *, clause_epoch, container_epoch=False):
     """Exact inert epoch two/three paths, mirrored by the private receiver."""
     from .prototype_clause_proof import JSON_FILES
     if type(name) is not str or '\\' in name or ':' in name:
@@ -56,9 +56,11 @@ def _epoch_authority_member(name, *, clause_epoch):
     basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json'}
     if len(pieces) == 2 and _FOCUS.fullmatch(pieces[0]) and pieces[1] in basic:
         return True
-    if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003'):
+    if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003', 'epoch-000004'):
         return False
     if pieces[1] == 'epoch-000003' and not clause_epoch:
+        return False
+    if pieces[1] == 'epoch-000004' and not (container_epoch and clause_epoch):
         return False
     tail = '/'.join(pieces[2:])
     if tail in {'epoch-record.json', 'predecessor-record.json'}:
@@ -66,6 +68,10 @@ def _epoch_authority_member(name, *, clause_epoch):
     if pieces[1] == 'epoch-000003' and (tail == 'clause-proof-descriptor.json'
             or tail in {'clause-proof/' + item for item in JSON_FILES}):
         return True
+    if pieces[1] == 'epoch-000004':
+        from .prototype_container_proof import JSON_FILES as CONTAINER_JSON
+        if tail == 'container-proof-descriptor.json' or tail in {'container-proof/' + item for item in CONTAINER_JSON}:
+            return True
     if re.fullmatch(r'source-facts/focus-[a-f0-9]{24}\.json', tail):
         return True
     return len(pieces) == 4 and bool(_FOCUS.fullmatch(pieces[2])) and pieces[3] in basic | {
@@ -139,7 +145,8 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
         # Evidence source code is archive-only, never converter transport.
         clause_epoch = ('epochs/epoch-000003/epoch-record.json' in names
                         and 'epochs/epoch-000002/epoch-record.json' in names)
-        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch) for name in names):
+        container_epoch = clause_epoch and 'epochs/epoch-000004/epoch-record.json' in names
+        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch, container_epoch=container_epoch) for name in names):
             raise OpafError('Prototype authority provenance path is not an inert allowed member.')
     else:
         names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)
@@ -221,6 +228,8 @@ class PrototypeHttpConverterAdapter:
         return stage in value['stages']
 
     def _get(self, path):
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
         try:
             return self.client.request('GET', path)
         except OpafError as error:
@@ -257,6 +266,8 @@ class PrototypeHttpConverterAdapter:
             raise OpafError('Prototype authority staging result is uncertain; reconcile with GET, without replay.') from None
 
     def run_stage(self, stage, request):
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
         if not self.supports(stage):
             raise OpafError('Prototype converter stage is not implemented by this adapter.')
         self._stage_authority(request)
@@ -278,6 +289,8 @@ class PrototypeHttpConverterAdapter:
 
     def read_package(self, request, export_receipt):
         """Fixed-path, bounded GET only; no staging, recovery POST or retry."""
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
         from .prototype_download import validate_generated_package
         if request.get('job_id') != self.job.name:
             raise OpafError('Prototype download job differs from the retained request.')

@@ -148,6 +148,14 @@ def authorize_current(root, db, profile_path, request):
     """No writes, model calls, SQLcl, HTTP or request-selected filesystem paths."""
     if not isinstance(request, dict) or not re.fullmatch(r'fox-[a-f0-9]{20}', request.get('job_id', '')):
         raise ValueError('Invalid job')
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(root) / 'jobs' / request['job_id'] / 'prototype-pipeline'):
+        return _authorize_current(root, db, profile_path, request)
+
+
+def _authorize_current(root, db, profile_path, request):
+    if not isinstance(request, dict) or not re.fullmatch(r'fox-[a-f0-9]{20}', request.get('job_id', '')):
+        raise ValueError('Invalid job')
     root = Path(root)
     jobs = root / 'jobs'
     job = jobs / request['job_id']

@@ -1,14 +1,15 @@
 {
-  "version": "0.14.0",
+  "version": "0.15.0",
   "released_on": "2026-11-08",
-  "title": "Continue with a reviewed result without repeating completed AI work",
+  "title": "Continue with reviewed structure and checked screen context",
   "changes": [
-    "Interpret two supplied Forms query clauses through a dedicated, bounded OPAF analysis contract.",
-    "Rebuild a derived candidate from retained analysis and verify its exact independent review before reuse.",
-    "Continue the same eligible run with an append-only proof record while preserving prior failures and approvals.",
-    "Reuse completed clause analysis and review; perform the next projection review before remaining sections continue.",
-    "Explain saved-result reuse in the UI and require the exact source, target, proof and fresh processing confirmations.",
-    "Transfer only the required JSON evidence to the converter; retain deterministic validation and non-overwriting import gates."
+    "Detect omitted-parent conflicts and check related screen references before further generation and review.",
+    "Reuse an independently reviewed, source-bound nonvisual container correction without repeating completed mapping or reviews.",
+    "Offer Continue with corrected structure with locked source selection and fresh processing confirmations.",
+    "Preserve previous results and all history while publishing a precisely bound new result for the same run.",
+    "Recheck current approval history before showing export availability and after reading the download package.",
+    "Avoid duplicate proof traversal within bounded read-only operations without caching processing permission.",
+    "Recognize a fully recorded pre-database rejection for upgrade admission without granting retry or conversion success."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
@@ -16,7 +17,7 @@
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
-    "Saved-proof continuation is limited to the recognized sealed clause-repair failure before database stages and requires operator-prepared evidence. It is not a generic retry or automatic corrective loop.",
+    "Saved-proof continuation is limited to recognized sealed failures before database stages and requires operator-prepared evidence. It is not a generic retry or automatic corrective loop.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
