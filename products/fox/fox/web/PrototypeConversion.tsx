@@ -1,6 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import type {SourceBinding} from './projectConversion';
 import type {WorkbenchActionResult} from './ProjectWorkbench';
+import type {ProjectRun} from './projectConversion';
 
 type Chunk={id:string;sha256:string;bytes:number;label?:string};
 type Assessment={source_hash:string;source_binding:string;selected_source_set_id:string;target_profile_sha256:string|null;conversion_configured:boolean;source_count:number;code_unit_count:number;chunks:Chunk[];scope_notice:string};
@@ -20,12 +21,27 @@ async function request(path:string,body?:unknown){
   return data;
  }finally{clearTimeout(timer);}
 }
-export default function PrototypeConversion({projectId,source,busy,unknownOutcome,hasRun,execute,onRefresh}:{projectId:string;source:SourceBinding;busy:boolean;unknownOutcome:boolean;hasRun:boolean;execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;onRefresh?:()=>Promise<WorkbenchActionResult>}){
+export default function PrototypeConversion({projectId,source,busy,unknownOutcome,hasRun,activeRun,execute,onRefresh}:{projectId:string;source:SourceBinding;busy:boolean;unknownOutcome:boolean;hasRun:boolean;activeRun?:ProjectRun|null;execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;onRefresh?:()=>Promise<WorkbenchActionResult>}){
  const [assessment,setAssessment]=useState<Assessment|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[selected,setSelected]=useState<string[]>([]),[consents,setConsents]=useState([false,false,false]),[submitted,setSubmitted]=useState(false);
  const [xmlFiles,setXmlFiles]=useState<File[]>([]),[receipts,setReceipts]=useState<File[]>([]),[uploadError,setUploadError]=useState('');
+ const [outputPath,setOutputPath]=useState(''),[outputSavedBinding,setOutputSavedBinding]=useState(''),[outputSavedRevision,setOutputSavedRevision]=useState(0),[outputError,setOutputError]=useState(''),[outputLoading,setOutputLoading]=useState(false);
  const binding=`${projectId}:${source.source_hash}:${source.selected_source_set_id}`;
+ const outputBinding=JSON.stringify([binding,activeRun?.id,activeRun?.state,activeRun?.project_id,activeRun?.source_hash,busy,unknownOutcome]);
  const currentBinding=useRef(binding);currentBinding.current=binding;
+ const currentOutputBinding=useRef(outputBinding),outputRevision=useRef(0);
+ if(currentOutputBinding.current!==outputBinding){currentOutputBinding.current=outputBinding;outputRevision.current++;}
  useEffect(()=>{setAssessment(null);setSelected([]);setConsents([false,false,false]);setError('');setLoading(false);setXmlFiles([]);setReceipts([]);setUploadError('');},[binding]);
+ useEffect(()=>{setOutputPath('');setOutputError('');setOutputLoading(false);},[outputBinding]);
+ const outputEligible=Boolean(!busy&&!unknownOutcome&&source.project_id===projectId&&source.selected_source_set_id&&activeRun?.project_id===projectId&&activeRun.source_hash===source.source_hash&&activeRun.state==='GENERATED'&&/^fox-[a-f0-9]{20}$/.test(activeRun.id));
+ async function viewOutput(){
+  if(!outputEligible||!activeRun)return;
+  const captured=outputBinding,revision=++outputRevision.current,base=`/api/projects/${encodeURIComponent(projectId)}/prototype-runs/${encodeURIComponent(activeRun.id)}`;
+  setOutputLoading(true);setOutputError('');setOutputPath('');
+  try{const value=await request(base+'/output');
+   if(!value||value.schema_version!==1||value.scope!=='fox-generated-prototype-output-v1'||value.project_id!==projectId||value.run_id!==activeRun.id||value.source_hash!==source.source_hash||value.selected_source_set_id!==source.selected_source_set_id||!hash(value.source_binding)||value.status!=='APEX_GENERATED'||value.download_path!==base+'/download'||value.business_behavior_accepted!==false||value.clean_schema_install_passed!==false||value.package_reimport_passed!==false)throw new Error('Prototype output details could not be verified. Refresh the project or ask your operator for help.');
+   if(currentOutputBinding.current===captured&&outputRevision.current===revision){setOutputPath(base+'/download');setOutputSavedBinding(captured);setOutputSavedRevision(revision);}
+  }catch(e){if(currentOutputBinding.current===captured&&outputRevision.current===revision)setOutputError(e instanceof Error?e.message:'Prototype output is unavailable. Refresh the project or ask your operator for help.');}finally{if(currentOutputBinding.current===captured&&outputRevision.current===revision)setOutputLoading(false);}
+ }
  function pairingError(){
   if(xmlFiles.length<1||xmlFiles.length>4||receipts.length!==xmlFiles.length)return 'Choose one to four redacted XML files and one receipt for each.';
   if(xmlFiles.some(f=>!f.name.toLowerCase().endsWith('.xml'))||new Set(xmlFiles.map(f=>f.name)).size!==xmlFiles.length)return 'Choose distinct redacted Forms XML files, not raw Forms binaries.';
@@ -67,6 +83,7 @@ export default function PrototypeConversion({projectId,source,busy,unknownOutcom
   });
  }
  return <section className="fw-surface" aria-label="Native APEX prototype"><h2>Generate native APEX prototype</h2><p>This separate prototype uses synthetic storage. Missing dependencies and unsupported behavior remain for remediation. It is not a complete conversion, technical verification or business acceptance.</p>
+  {activeRun?.state==='GENERATED'&&<div className="fw-notice"><h3>Generated prototype</h3><p>Run {activeRun.id}. This is a partial prototype; omissions and unsupported behavior require remediation and human review. Generation does not mean business acceptance.</p><button type="button" className="fw-secondary" disabled={!outputEligible||outputLoading} onClick={()=>void viewOutput()}>{outputLoading?'Checking prototype output…':'View prototype output'}</button>{!outputEligible&&<p>Output details do not match the current source or are unavailable. Refresh the project or ask your operator for help.</p>}{outputError&&<p role="alert">{outputError}</p>}{outputPath&&outputSavedBinding===outputBinding&&outputSavedRevision===outputRevision.current&&outputEligible&&<p><a className="button secondary" href={outputPath}>Download generated prototype</a></p>}</div>}
   <div className="fw-surface"><h3>Or add locally prepared redacted Forms</h3><p>Keep credentials out of uploaded files. Choose one to four locally prepared, redacted Forms XML files and the matching redaction receipt for each. Uploading saves sources only; it does not start a run or model processing.</p>
    <label>Redacted Forms XML files <input type="file" multiple accept=".xml" disabled={busy||unknownOutcome} onChange={e=>{setXmlFiles(Array.from(e.target.files??[]));e.target.value='';setUploadError('');}}/></label>
    <label>Matching redaction receipts <input type="file" multiple accept=".json" disabled={busy||unknownOutcome} onChange={e=>{setReceipts(Array.from(e.target.files??[]));e.target.value='';setUploadError('');}}/></label>

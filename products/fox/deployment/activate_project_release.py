@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import urllib.request
+from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
 
@@ -45,6 +46,8 @@ BASE_PROFILES = {
     'converter': '/home/opc/fox/releases/native-beta-20261017h/deployment/target-profile.jsn.json',
 }
 SHA = re.compile(r'[a-f0-9]{64}\Z')
+PROTOTYPE_SCOPE = 'fox-prototype-activation-v1'
+PROTOTYPE_PROFILE_ROOT = '/home/opc/fox/secure/opaf-client'
 
 
 class ActivationError(RuntimeError):
@@ -223,8 +226,9 @@ def plan_document(raw, expected_sha256):
          and value['schema_version'] in (1,2), 'PLAN_FIELDS_INVALID')
     upgrade = value['schema_version'] == 2
     queue_option = {'hosted_forms_queue'} if upgrade and 'hosted_forms_queue' in value else set()
+    prototype_option = {'prototype_authority'} if upgrade and 'prototype_authority' in value else set()
     need(set(value) == {'schema_version', 'scope', 'source_bundle_sha256',
-         'bundle_root', 'provider', 'release', 'helper_sha256'} | ({'current_installation'} if upgrade else set()) | queue_option
+         'bundle_root', 'provider', 'release', 'helper_sha256'} | ({'current_installation'} if upgrade else set()) | queue_option | prototype_option
          and value['scope'] == (UPGRADE_SCOPE if upgrade else SCOPE)
          and canonical(value) == raw, 'PLAN_FIELDS_INVALID')
     need(SHA.fullmatch(value['source_bundle_sha256']) and SHA.fullmatch(value['helper_sha256']), 'PLAN_DIGEST_INVALID')
@@ -242,6 +246,8 @@ def plan_document(raw, expected_sha256):
              'CURRENT_INSTALLATION_REFERENCE_COLLIDES')
     if queue_option:
         hosted_queue_path(value['hosted_forms_queue'])
+    if prototype_option:
+        prototype_configuration(value['prototype_authority'])
     return value
 
 
@@ -435,8 +441,164 @@ def validate_hosted_queue(plan, python):
     return observed
 
 
-def new_environment(role, old, release, profile, *, hosted_forms_queue=None):
+def prototype_configuration(value):
+    """Closed opt-in declaration, not arbitrary environment or mount injection."""
+    need(type(value) is dict and set(value) == {'schema_version', 'scope', 'origin', 'profile', 'runtime_worker_sha256'}
+         and type(value['schema_version']) is int and value['schema_version'] == 1
+         and value['scope'] == PROTOTYPE_SCOPE, 'PROTOTYPE_CONFIGURATION_INVALID')
+    origin = value['origin']
+    try:
+        url = urlsplit(origin) if type(origin) is str else None
+        valid = (url is not None and url.scheme == 'https' and bool(url.hostname)
+            and url.port in (None, 443) and not url.username and not url.password
+            and not url.path and not url.query and not url.fragment
+            and origin == 'https://' + url.netloc and len(origin) <= 2048 and '\\' not in origin
+            and all(33 <= ord(c) < 127 for c in origin))
+    except ValueError:
+        valid = False
+    need(valid, 'EXACT_PROTOTYPE_HTTPS_ORIGIN_REQUIRED')
+    ref = value['profile']
+    need(type(ref) is dict and set(ref) == {'path', 'sha256'}
+         and type(ref['sha256']) is str and SHA.fullmatch(ref['sha256'])
+         and type(ref['path']) is str and re.fullmatch(re.escape(PROTOTYPE_PROFILE_ROOT)
+            + r'/prototype-[a-z0-9][a-z0-9-]{0,63}\.json', ref['path']),
+         'PROTECTED_PROTOTYPE_PROFILE_REFERENCE_REQUIRED')
+    need(type(value['runtime_worker_sha256']) is str and SHA.fullmatch(value['runtime_worker_sha256']),
+         'MEASURED_PROTOTYPE_RUNTIME_WORKER_REQUIRED')
+    return value
+
+
+def prototype_environment(role, value):
+    need(role in ('fox', 'converter'), 'EXACT_CONTAINER_ROLE_REQUIRED')
+    if value is None:
+        return {}
+    value = prototype_configuration(value)
+    if role == 'fox':
+        return {'FOX_PROTOTYPE_AUTHORITY_ENABLED': '1',
+                'FOX_PROTOTYPE_PROFILE_FILE': '/run/fox-opaf/' + PurePosixPath(value['profile']['path']).name}
+    return {'FOX_PROTOTYPE_AUTHORITY_ENABLED': '1',
+            'FOX_PROTOTYPE_AUTHORITY_URL': value['origin'] + '/api/internal/prototype/authorize',
+            'FOX_PROTOTYPE_AUTHORITY_ORIGIN': value['origin'],
+            'FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED': '1',
+            'FOX_PROTOTYPE_RUNTIME_WORKER_SHA256': value['runtime_worker_sha256']}
+
+
+def prototype_execution_target(profile):
+    """Wire-v1 projection mirrored/parity-tested with the new converter client.
+
+    Current-pair transition deliberately retains the OLD runtime namespace. Do
+    not import new runtime modules here or replace that leased namespace.
+    """
+    for name, fields in {
+        'oci': {'compartment_id', 'database_id', 'instance_id', 'region'},
+        'database': {'db_name', 'session_user', 'parsing_schema'},
+        'apex': {'workspace', 'workspace_id', 'ords_origin', 'ords_base_path'},
+        'sqlcl': {'saved_connection'},
+        'tested_versions': {'apex', 'sqlcl', 'apexlang_mmd', 'opaf'},
+    }.items():
+        item = profile[name]
+        need(type(item) is dict and set(item) == fields
+             and all(type(value) is str and 0 < len(value) <= 2048 for value in item.values()),
+             'PROTOTYPE_EXECUTION_DESTINATION_INVALID')
+    scope = profile['scope']
+    need(profile['active'] is True and scope['data_mode'] == 'synthetic_test_only'
+         and scope['existing_resources_only'] is True and scope['customer_deployment_authorized'] is False
+         and scope['supported_operations'] == ['query', 'insert', 'update'],
+         'PROTOTYPE_EXECUTION_SCOPE_INVALID')
+    return {'schema_version': 1, 'active': True,
+            **{key: profile[key] for key in ('oci', 'database', 'apex', 'sqlcl')},
+            'tested_versions': {key: profile['tested_versions'][key]
+                                for key in ('apex', 'sqlcl', 'apexlang_mmd')},
+            'scope': {key: scope[key] for key in ('data_mode', 'existing_resources_only',
+                      'customer_deployment_authorized', 'supported_operations')}}
+
+
+PROTOTYPE_PROFILE_PROBE = r'''
+import hashlib,json,os,pathlib,re,stat,sys
+
+def read_profile(root,name,expected):
+    assert re.fullmatch(r'prototype-[a-z0-9][a-z0-9-]{0,63}\.json',name)
+    assert re.fullmatch(r'[a-f0-9]{64}',expected)
+    assert os.geteuid()==1000 and os.getegid()==1000
+    root=pathlib.Path(root);path=root/name
+    directory=root.lstat()
+    assert root.resolve(strict=True)==root and stat.S_ISDIR(directory.st_mode)
+    assert directory.st_uid==1000 and directory.st_gid==1000 and stat.S_IMODE(directory.st_mode)==0o700
+    info=path.lstat()
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink==1 and 0<info.st_size<=65536
+    assert info.st_uid==1000 and info.st_gid==1000 and stat.S_IMODE(info.st_mode)==0o600
+    fields=('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_mode','st_uid','st_gid','st_nlink')
+    def same(left,right):return all(getattr(left,key)==getattr(right,key) for key in fields)
+    def unique(rows):
+        value={}
+        for key,item in rows:
+            assert key not in value
+            value[key]=item
+        return value
+    with os.fdopen(os.open(path,os.O_RDONLY|os.O_NOFOLLOW),'rb') as stream:
+        assert same(info,os.fstat(stream.fileno()))
+        raw=stream.read(65537)
+        assert len(raw)==info.st_size and hashlib.sha256(raw).hexdigest()==expected
+        envelope=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:(_ for _ in ()).throw(ValueError()))
+        from fox.prototype_job import load_prototype_profile
+        assert load_prototype_profile(path)==envelope
+        assert same(info,os.fstat(stream.fileno())) and same(info,path.lstat()) and same(directory,root.lstat())
+        stream.seek(0)
+        assert stream.read(65537)==raw and same(info,os.fstat(stream.fileno())) and same(info,path.lstat())
+    return {'status':'PROTECTED_PROTOTYPE_PROFILE_READABLE','profile_sha256':expected,'envelope':envelope}
+
+if __name__=='__main__':
+    # This is the existing immutable FOX image's namespace, not a host swap.
+    sys.path.insert(0,'/app')
+    print(json.dumps(read_profile('/run/fox-opaf',sys.argv[1],sys.argv[2]),
+                     sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False))
+'''
+
+
+def validate_prototype_authority(plan, provider, fox):
+    """Read-only exact metadata/source/access checks; never start the worker.
+
+    The focused envelope is additive metadata in the existing protected RO bind.
+    Its execution destination must still equal the registered project-v2 target.
+    The existing FOX container proves mapped-UID/SELinux readability; no credential
+    file is opened and no new bind, listener or runtime service is introduced.
+    Never host-read this mapped-UID0700 directory or broaden its permissions.
+    """
+    if 'prototype_authority' not in plan:
+        return None
+    value = prototype_configuration(plan['prototype_authority'])
+    need(environment(fox).get('FOX_PUBLIC_ORIGIN') == value['origin'], 'PROTOTYPE_PUBLIC_ORIGIN_CHANGED')
+    need(sha(read(absolute(plan['bundle_root']) / 'qa/operator/prototype_runtime_worker.py'))
+         == value['runtime_worker_sha256'], 'PROTOTYPE_RUNTIME_WORKER_SOURCE_CHANGED')
+    path = PurePosixPath(value['profile']['path'])
+    cid = fox['Id']
+    need(type(cid) is str and SHA.fullmatch(cid) and fox['Config']['User'] == '1000:1000'
+         and fox['State']['Running'] is True and type(fox['State']['Pid']) is int and fox['State']['Pid'] > 0,
+         'EXACT_FOX_CONTAINER_REQUIRED')
+    need(mount_map(fox).get('/run/fox-opaf') == (PROTOTYPE_PROFILE_ROOT, False),
+         'EXACT_PROTOTYPE_PROFILE_MOUNT_REQUIRED')
+    observed = parse(command(['/usr/bin/podman', 'exec', cid, '/usr/local/bin/python', '-I', '-B', '-c',
+                              PROTOTYPE_PROFILE_PROBE, path.name, value['profile']['sha256']], maximum=131_072))
+    need(type(observed) is dict and set(observed) == {'status','profile_sha256','envelope'}
+         and observed['status'] == 'PROTECTED_PROTOTYPE_PROFILE_READABLE'
+         and observed['profile_sha256'] == value['profile']['sha256'], 'PROTOTYPE_PROFILE_ACCESS_UNCONFIRMED')
+    envelope = observed['envelope']
+    need(type(envelope) is dict and set(envelope) == {'target_profile','target_profile_sha256'}
+         and envelope['target_profile_sha256'] == sha(canonical(envelope['target_profile'])[:-1]),
+         'PROTOTYPE_PROFILE_CHANGED')
+    need(prototype_execution_target(envelope['target_profile']) == prototype_execution_target(provider['target_profile']),
+         'PROTOTYPE_EXECUTION_TARGET_CHANGED')
+    return {'status': 'PROTOTYPE_CONFIGURATION_CHECKED_NOT_ACTIVATED',
+            'profile_sha256': value['profile']['sha256'], 'runtime_worker_sha256': value['runtime_worker_sha256']}
+
+
+def new_environment(role, old, release, profile, *, hosted_forms_queue=None, prototype_authority=None):
+    need(role in ('fox', 'converter'), 'EXACT_CONTAINER_ROLE_REQUIRED')
     result = environment(old)
+    prototype = prototype_environment(role, prototype_authority)
+    inherited = {key for key in result if key.startswith('FOX_PROTOTYPE_')}
+    need(inherited <= set(prototype), 'EXPLICIT_ROLE_BOUND_PROTOTYPE_CONFIGURATION_REQUIRED')
+    result.update(prototype)
     if hosted_forms_queue is not None:
         hosted_queue_path(hosted_forms_queue)
     # Every upgrade must explicitly reauthorize this optional capability. Never
@@ -444,6 +606,8 @@ def new_environment(role, old, release, profile, *, hosted_forms_queue=None):
     need('FOX_HOSTED_FORMS_QUEUE' not in result or (role == 'fox' and hosted_forms_queue is not None),
          'EXPLICIT_HOSTED_FORMS_QUEUE_REQUIRED')
     if role == 'fox':
+        if prototype_authority is not None:
+            need(result.get('FOX_PUBLIC_ORIGIN') == prototype_authority['origin'], 'PROTOTYPE_PUBLIC_ORIGIN_CHANGED')
         result.update(FOX_CONVERSION_PROFILE='native-project-v1', FOX_VERIFIER_RELEASE_SHA256=release)
         if hosted_forms_queue is not None:
             result['FOX_HOSTED_FORMS_QUEUE'] = hosted_forms_queue
@@ -527,6 +691,14 @@ def candidate_argv(role, old, plan, release, stage, *, baseline_profiles=None):
 
 
 def check_candidate(item, role, plan, release, env, mounts, *, baseline_item):
+    prototype = prototype_environment(role, plan.get('prototype_authority'))
+    need({key: value for key, value in env.items() if key.startswith('FOX_PROTOTYPE_')} == prototype,
+         'CANDIDATE_PROTOTYPE_CONFIGURATION_CHANGED')
+    if prototype:
+        need((env.get('FOX_PUBLIC_ORIGIN') == plan['prototype_authority']['origin']
+              and env.get('FOX_NATIVE_PROFILE_FILE') == '/run/fox-native/profile.json') if role == 'fox'
+             else env.get('F2A_TARGET_PROFILE_PATH') == '/run/fox-target/profile.json',
+             'CANDIDATE_PROTOTYPE_TARGET_OR_ORIGIN_CHANGED')
     queue = hosted_queue_path(plan['hosted_forms_queue']) if 'hosted_forms_queue' in plan else None
     need(env.get('FOX_HOSTED_FORMS_QUEUE') == (queue if role == 'fox' else None),
          'CANDIDATE_HOSTED_FORMS_QUEUE_CHANGED')
@@ -622,6 +794,7 @@ def create_candidates(plan, *, expected_plan_sha256, apply=False):
     need(not (set(names(plan['release']['sha256']).values()) & existing_names), 'CANDIDATE_NAME_ALREADY_EXISTS')
     profile = parse(read(Path(release['opaf_profile']['host_path'])))
     validate_hosted_queue(plan, provider['python']['path'])
+    validate_prototype_authority(plan, provider, before['fox'])
     with held_stage(stage, create=True):
         create_file(stage / 'plan.json', canonical(plan))
         create_file(stage / 'before.private.json', canonical(before))
@@ -629,7 +802,8 @@ def create_candidates(plan, *, expected_plan_sha256, apply=False):
         for role, old_name in (('fox','fox'), ('converter','forms2apex-mcp')):
             old = before[old_name]
             env = new_environment(role, old, plan['release']['sha256'], profile,
-                                  hosted_forms_queue=plan.get('hosted_forms_queue'))
+                                  hosted_forms_queue=plan.get('hosted_forms_queue'),
+                                  prototype_authority=plan.get('prototype_authority'))
             create_file(stage / (role + '.env'), ('\n'.join(k+'='+v for k,v in sorted(env.items()))+'\n').encode())
             args, mounts = (candidate_argv(role,old,plan,release,stage) if current is None else
                 candidate_argv(role,old,plan,release,stage,baseline_profiles=current.profile_paths))

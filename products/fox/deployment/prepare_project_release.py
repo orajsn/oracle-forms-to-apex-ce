@@ -34,7 +34,7 @@ PROFILE_FILES = (
     "deployment/project-opaf-profile-v2.json", "deployment/target-profile.jsn-project-v2.json",
 )
 QA_FILES = (
-    "qa/package.json", "qa/package-lock.json", "qa/run-native.mjs", "qa/run-project.mjs",
+    "qa/package.json", "qa/package-lock.json", "qa/run-native.mjs", "qa/run-project.mjs", "qa/run-prototype.mjs",
     "qa/prepare-target.mjs", "qa/run-jsn-qa.sh", "qa/run-fox-journey.mjs",
     "qa/run-product-download.mjs", "qa/lib/contracts.mjs", "qa/lib/package-evidence.mjs",
     "qa/lib/assert-jsn-vm.sh", "qa/lib/project-profile.mjs", "qa/lib/project-runner-inputs.mjs",
@@ -49,6 +49,7 @@ QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conve
 APP_RENDERER_FILES = (
     'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
     'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
+    'forms2apex/prototype_package.py',
     'fox_source_contract/__init__.py', 'fox_source_contract/intake.py',
     'fox_source_contract/native_source.py', 'fox_source_contract/project_conversion.py',
     'fox_source_contract/source-manifest.json',

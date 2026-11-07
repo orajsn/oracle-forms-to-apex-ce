@@ -55,9 +55,12 @@ def test_v2_can_pin_candidate_plan_without_changing_legacy_transition_contract()
 
 
 @pytest.mark.parametrize('fault', ['none', 'missing', 'path', 'sha'])
-def test_opt_in_candidate_requires_exact_transition_reference(fault):
+@pytest.mark.parametrize('option', ['hosted_forms_queue', 'prototype_authority'])
+def test_opt_in_candidate_requires_exact_transition_reference(fault, option):
+    from test_activate_project_release import prototype_configuration
     path = Path('/home/opc/private/activation-plan.json')
-    candidate = {'hosted_forms_queue': '/data/native-preparations'}; raw = M.cb(candidate)
+    candidate = {option: '/data/native-preparations' if option == 'hosted_forms_queue' else prototype_configuration()}
+    raw = M.cb(candidate)
     value = v2_plan(); value['candidate_plan'] = {'path': str(path), 'sha256': M.sha(raw)}
     if fault == 'missing': del value['candidate_plan']
     elif fault == 'path': value['candidate_plan']['path'] = '/home/opc/other.json'
@@ -71,15 +74,26 @@ def test_opt_in_candidate_requires_exact_transition_reference(fault):
 
 @pytest.mark.parametrize('queue', [None, '/data/native-preparations'])
 @pytest.mark.parametrize('fault', ['none', 'missing', 'changed', 'unapproved'])
-def test_transition_preflight_rechecks_exact_planned_queue_before_service_actions(queue, fault, tmp_path, monkeypatch):
+@pytest.mark.parametrize('prototype', [False, True])
+def test_transition_preflight_rechecks_exact_planned_queue_before_service_actions(queue, fault, prototype, tmp_path, monkeypatch):
     """Real environment/candidate gates with synthetic host observations only."""
-    from test_activate_project_release import M as A, prepared, profile, upgrade_plan
+    from test_activate_project_release import M as A, prepared, profile, upgrade_plan, prototype_configuration
     context = object.__new__(M.Transition); context.A = A
     context.p = {'old_unit': {'sha256': A.sha(b'synthetic unit')},
                  'new_unit': {'path': '/private/new.service'}}
     context.R = 'e' * 64; context.candidate_plan = upgrade_plan(queue)
     context.cfg = {'python': {'path': '/usr/bin/python3'}, 'state_root': str(tmp_path)}
     rows = {role: prepared(role) for role in ('fox', 'converter')}
+    option = prototype_configuration() if prototype else None
+    if prototype:
+        context.candidate_plan['prototype_authority'] = option
+        for role in rows:
+            new_env = A.environment(rows[role][6]); new_env.update(A.prototype_environment(role, option))
+            if role == 'fox':
+                new_env['FOX_PUBLIC_ORIGIN'] = option['origin']
+                old_env = A.environment(rows[role][5]); old_env['FOX_PUBLIC_ORIGIN'] = option['origin']
+                rows[role][5]['Config']['Env'] = [key + '=' + val for key, val in sorted(old_env.items())]
+            rows[role][6]['Config']['Env'] = [key + '=' + val for key, val in sorted(new_env.items())]
     old = {name: rows[role][5] for role, name in (('fox', 'fox'), ('converter', 'forms2apex-mcp'))}
     old['oracle-applied-ai-label'] = {'Id': '3' * 64, 'State': {'Running': True}}
     context.old = SimpleNamespace(preflight=lambda: None)
@@ -104,6 +118,7 @@ def test_transition_preflight_rechecks_exact_planned_queue_before_service_action
     monkeypatch.setattr(A, 'inspect_container', lambda name: old[name] if name in old else candidates[name])
     monkeypatch.setattr(A, 'read', lambda path, **kwargs: b'synthetic unit' if path == M.UNIT else A.canonical(profile()))
     monkeypatch.setattr(A, 'validate_hosted_queue', lambda plan, python: calls.append(('private-queue', plan.get('hosted_forms_queue'))))
+    monkeypatch.setattr(A, 'validate_prototype_authority', lambda plan, cfg, fox: calls.append(('prototype', plan.get('prototype_authority'))))
     monkeypatch.setattr(A, 'command', lambda argv: (calls.append(('host-observation', argv)) or
         (b'enabled\n' if 'is-enabled' in argv else b'')))
     monkeypatch.setattr(M.os, 'getxattr', lambda *_: b'system_u:object_r:container_file_t:s0:c75,c812', raising=False)
@@ -111,10 +126,11 @@ def test_transition_preflight_rechecks_exact_planned_queue_before_service_action
     if fails:
         with pytest.raises(A.ActivationError, match='STOPPED_CANDIDATE_CONFIGURATION_CHANGED'):
             context.preflight()
-        assert calls == [('private-queue', queue)]
+        assert calls == [('private-queue', queue), ('prototype', option)]
     else:
         context.preflight()
         assert calls[0] == ('private-queue', queue)
+        assert calls[1] == ('prototype', option)
 
 
 @pytest.mark.parametrize('fault',['path','sha','no-measured-file'])

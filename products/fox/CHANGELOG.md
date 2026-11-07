@@ -4,6 +4,36 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.10.0] - 2026-11-07
+
+### Generated prototype output and connected verification adapters
+
+- Add current-project authority checks for every protected prototype stage;
+  owner, selected source, consent, retained review and target must still match.
+- Connect opt-in converter startup and private host browser verification through
+  bounded, expiring requests. Claims and uncertain outcomes are retained without
+  automatic model/import/browser replay. No public QA endpoint or Podman socket.
+- Add a separate generated-prototype output view and exact package download.
+  Stale sources, changed targets or incomplete evidence block download without
+  promoting the run to human accepted or strict clean-install verified.
+- Include the pure package validator in the app payload. Historical stage proof
+  is verified locally; downloading does not reauthorize or replay earlier stages.
+- Bind focused OPAF metadata, HTTPS authority and measured worker source into the
+  explicit upgrade plan, retaining the existing target and private Forms queue.
+- Handle bare/prefixed Podman image IDs, expired queue entries and the measured
+  rootless-cgroups-v1 diagnostic. CPU/memory/pids limits are not claimed enforced
+  on cgroups v1; the container lifetime remains independently bounded.
+- Permit the two standard APEX script endpoints only for the exact application,
+  preserving foreign-app, password-change and expired-request rejection.
+
+Verification includes isolated source/package tests, authenticated local API and
+simulated UI checks, actual installed-dependency server startup, OCI namespace
+handoff/container-lifetime checks, and a separate existing-app login prerequisite.
+These do **not** establish a deployed end-to-end real-FMB conversion. A successful
+prototype remains synthetic/partial, with explicit remediation; clean reimport,
+customer compatibility and business acceptance are separate. See
+[prototype output and operator wiring](docs/generated-prototype-output.md).
+
 ## [0.9.1] - 2026-11-07
 
 - Add an explicit private-queue option to the guarded upgrade plan. Candidate

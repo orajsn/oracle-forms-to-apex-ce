@@ -117,13 +117,13 @@ def validate_profile_access_labels(old_label,new_label,old_process,new_process):
 
 
 def validate_candidate_plan_reference(p,path,raw,candidate):
-    """New queue authority must be in the reviewed transition digest as well.
+    """Queue/prototype authority must be in the reviewed transition digest too.
 
     Legacy transitions remain unchanged. An opt-in candidate is never authorized
     merely by hashing whichever configuration happens to be present on disk.
     """
     reference=p.get('candidate_plan')
-    need('hosted_forms_queue' not in candidate or reference is not None,
+    need(not {'hosted_forms_queue','prototype_authority'} & set(candidate) or reference is not None,
          'EXPLICIT_CANDIDATE_PLAN_REFERENCE_REQUIRED')
     if reference is not None:
         need(reference=={'path':str(path),'sha256':sha(raw)},'CANDIDATE_PLAN_REFERENCE_CHANGED')
@@ -354,12 +354,14 @@ class Transition:
             and tls['State']['Running'] is True and tls['State']['Pid']>0,'CURRENT_TLS_CHANGED')
         profile=document(A.read(absolute(self.candidate_plan['bundle_root'])/'deployment/project-opaf-profile-v2.json'))
         A.validate_hosted_queue(self.candidate_plan,self.cfg['python']['path'])
+        A.validate_prototype_authority(self.candidate_plan,self.cfg,old['fox'])
         signatures={'old':{},'new':{}}
         for role,name in (('fox','fox'),('converter','forms2apex-mcp')):
             signatures['old'][role]=self.M.configuration_signature(A,old[name])
             candidate=A.inspect_container(self.pins[name]['id']);self.M.require_never_started(candidate)
             env=A.new_environment(role,old[name],self.R,profile,
-                hosted_forms_queue=self.candidate_plan.get('hosted_forms_queue'))
+                hosted_forms_queue=self.candidate_plan.get('hosted_forms_queue'),
+                prototype_authority=self.candidate_plan.get('prototype_authority'))
             profiles={'fox':A.mount_map(old['fox'])['/run/fox-native/profile.json'][0],
                 'converter':A.mount_map(old['forms2apex-mcp'])['/run/fox-target/profile.json'][0]}
             _,mounts=A.candidate_argv(role,old[name],self.candidate_plan,self.release,self.root,baseline_profiles=profiles)

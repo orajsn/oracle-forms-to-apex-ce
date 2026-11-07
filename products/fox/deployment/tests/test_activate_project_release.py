@@ -92,6 +92,329 @@ def upgrade_plan(queue=None):
     return value
 
 
+def prototype_configuration():
+    """Synthetic metadata references; never live installation proof."""
+    return {'schema_version': 1, 'scope': M.PROTOTYPE_SCOPE, 'origin': 'https://fox.example.test',
+            'profile': {'path': '/home/opc/fox/secure/opaf-client/prototype-focus-test.json', 'sha256': '3' * 64},
+            'runtime_worker_sha256': '4' * 64}
+
+
+def test_prototype_opt_in_is_upgrade_only_hash_bound_and_not_environment_injection():
+    value = upgrade_plan('/data/native-preparations'); value['prototype_authority'] = prototype_configuration()
+    raw = M.canonical(value)
+    assert M.plan_document(raw, M.sha(raw)) == value
+    changed = deepcopy(value); changed['prototype_authority']['profile']['sha256'] = '5' * 64
+    with pytest.raises(M.ActivationError, match='EXACT_PLAN_REQUIRED'):
+        M.plan_document(M.canonical(changed), M.sha(raw))
+    legacy = plan(); legacy['prototype_authority'] = prototype_configuration(); raw = M.canonical(legacy)
+    with pytest.raises(M.ActivationError, match='PLAN_FIELDS_INVALID'):
+        M.plan_document(raw, M.sha(raw))
+
+
+@pytest.mark.parametrize('fault', ['null', 'extra', 'bool', 'scope', 'http', 'origin-path', 'userinfo', 'port',
+    'origin-newline', 'origin-control', 'origin-backslash', 'origin-fragment', 'origin-query',
+    'profile-missing', 'profile-extra', 'profile-secret', 'profile-other-root',
+    'profile-traversal', 'profile-nested', 'profile-case', 'profile-sha', 'worker-sha', 'worker-bool'])
+def test_malformed_or_unbounded_prototype_plan_rejected_offline(fault):
+    option = prototype_configuration()
+    if fault == 'null': option = None
+    elif fault == 'extra': option['environment'] = {'ARBITRARY': '1'}
+    elif fault == 'bool': option['schema_version'] = True
+    elif fault == 'scope': option['scope'] = 'other'
+    elif fault == 'http': option['origin'] = 'http://fox.example.test'
+    elif fault == 'origin-path': option['origin'] += '/'
+    elif fault == 'userinfo': option['origin'] = 'https://user@fox.example.test'
+    elif fault == 'port': option['origin'] += ':444'
+    elif fault == 'origin-newline': option['origin'] += '\n'
+    elif fault == 'origin-control': option['origin'] += '\x7f'
+    elif fault == 'origin-backslash': option['origin'] += '\\other'
+    elif fault == 'origin-fragment': option['origin'] += '#other'
+    elif fault == 'origin-query': option['origin'] += '?other'
+    elif fault == 'profile-missing': del option['profile']['sha256']
+    elif fault == 'profile-extra': option['profile']['mount'] = '/arbitrary'
+    elif fault == 'profile-secret': option['profile']['path'] = '/home/opc/fox/secure/opaf-client/credentials.json'
+    elif fault == 'profile-other-root': option['profile']['path'] = '/tmp/prototype-focus-test.json'
+    elif fault == 'profile-traversal': option['profile']['path'] = '/home/opc/fox/secure/opaf-client/../prototype-focus-test.json'
+    elif fault == 'profile-nested': option['profile']['path'] = '/home/opc/fox/secure/opaf-client/child/prototype-focus-test.json'
+    elif fault == 'profile-case': option['profile']['path'] = '/home/opc/fox/secure/opaf-client/prototype-UPPER.json'
+    elif fault == 'profile-sha': option['profile']['sha256'] = 'short'
+    elif fault == 'worker-sha': option['runtime_worker_sha256'] = 'A' * 64
+    else: option['runtime_worker_sha256'] = True
+    value = upgrade_plan(); value['prototype_authority'] = option; raw = M.canonical(value)
+    with pytest.raises(M.ActivationError):
+        M.plan_document(raw, M.sha(raw))
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+def test_explicit_prototype_settings_are_role_separated_without_mount_or_target_changes(role, monkeypatch):
+    value, release, env, argv, mounts, old, item = prepared(role)
+    option = prototype_configuration()
+    if role == 'fox':
+        env['FOX_PUBLIC_ORIGIN'] = option['origin']
+        old['Config']['Env'] = [key + '=' + val for key, val in sorted(env.items())]
+    monkeypatch.setenv('FOX_PROTOTYPE_AUTHORITY_ENABLED', '1')
+    assert not any(key.startswith('FOX_PROTOTYPE_') for key in M.new_environment(role, old, 'e' * 64, profile()))
+    value = upgrade_plan('/data/native-preparations'); value['prototype_authority'] = option
+    selected = M.new_environment(role, old, value['release']['sha256'], profile(),
+        hosted_forms_queue=value['hosted_forms_queue'], prototype_authority=option)
+    assert selected['FOX_PROTOTYPE_AUTHORITY_ENABLED'] == '1'
+    if role == 'fox':
+        assert selected['FOX_PROTOTYPE_PROFILE_FILE'] == '/run/fox-opaf/prototype-focus-test.json'
+        assert selected['FOX_NATIVE_PROFILE_FILE'] == '/run/fox-native/profile.json'
+        assert selected['FOX_HOSTED_FORMS_QUEUE'] == value['hosted_forms_queue']
+        assert not {'FOX_PROTOTYPE_AUTHORITY_URL', 'FOX_PROTOTYPE_AUTHORITY_ORIGIN',
+                    'FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED', 'FOX_PROTOTYPE_RUNTIME_WORKER_SHA256'} & set(selected)
+    else:
+        assert selected['FOX_PROTOTYPE_AUTHORITY_URL'] == option['origin'] + '/api/internal/prototype/authorize'
+        assert selected['FOX_PROTOTYPE_AUTHORITY_ORIGIN'] == option['origin']
+        assert selected['FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED'] == '1'
+        assert selected['FOX_PROTOTYPE_RUNTIME_WORKER_SHA256'] == option['runtime_worker_sha256']
+        assert selected['F2A_TARGET_PROFILE_PATH'] == '/run/fox-target/profile.json'
+        assert 'FOX_PROTOTYPE_PROFILE_FILE' not in selected and 'FOX_HOSTED_FORMS_QUEUE' not in selected
+    args, selected_mounts = M.candidate_argv(role, old, value, release, PurePosixPath('/private/stage'))
+    assert args == argv and selected_mounts == mounts
+    item['Config']['Env'] = [key + '=' + val for key, val in sorted(selected.items())]
+    M.check_candidate(item, role, value, release, selected, mounts, baseline_item=old)
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+@pytest.mark.parametrize('key', ['FOX_PROTOTYPE_AUTHORITY_ENABLED', 'FOX_PROTOTYPE_UNKNOWN',
+    'FOX_PROTOTYPE_PROFILE_FILE', 'FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED'])
+def test_inherited_prototype_settings_need_explicit_role_bound_reauthorization(role, key):
+    old = baseline_item(role); old['Config']['Env'].append(key + '=1')
+    with pytest.raises(M.ActivationError, match='EXPLICIT_ROLE_BOUND_PROTOTYPE_CONFIGURATION_REQUIRED'):
+        M.new_environment(role, old, 'e' * 64, profile())
+    if key not in M.prototype_environment(role, prototype_configuration()):
+        with pytest.raises(M.ActivationError, match='EXPLICIT_ROLE_BOUND_PROTOTYPE_CONFIGURATION_REQUIRED'):
+            M.new_environment(role, old, 'e' * 64, profile(), prototype_authority=prototype_configuration())
+
+
+def test_prototype_origin_must_match_the_existing_fox_origin():
+    with pytest.raises(M.ActivationError, match='PROTOTYPE_PUBLIC_ORIGIN_CHANGED'):
+        M.new_environment('fox', baseline_item('fox'), 'e' * 64, profile(), prototype_authority=prototype_configuration())
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+def test_existing_role_settings_require_a_fresh_explicit_measurement_on_upgrade(role):
+    old = baseline_item(role); option = prototype_configuration()
+    old_env = M.environment(old); old_env.update(M.prototype_environment(role, option))
+    if role == 'fox': old_env['FOX_PUBLIC_ORIGIN'] = option['origin']
+    old['Config']['Env'] = [key + '=' + val for key, val in sorted(old_env.items())]
+    with pytest.raises(M.ActivationError, match='EXPLICIT_ROLE_BOUND_PROTOTYPE_CONFIGURATION_REQUIRED'):
+        M.new_environment(role, old, 'e' * 64, profile())
+    fresh = deepcopy(option); fresh['runtime_worker_sha256'] = '5' * 64
+    fresh['profile']['path'] = '/home/opc/fox/secure/opaf-client/prototype-next.json'
+    env = M.new_environment(role, old, 'e' * 64, profile(), prototype_authority=fresh)
+    assert {key: val for key, val in env.items() if key.startswith('FOX_PROTOTYPE_')} == M.prototype_environment(role, fresh)
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+def test_candidate_cannot_replace_the_project_target_with_the_focused_metadata_envelope(role):
+    value, release, env, argv, mounts, old, item = prepared(role)
+    option = prototype_configuration(); value = upgrade_plan(); value['prototype_authority'] = option
+    env.update(M.prototype_environment(role, option))
+    if role == 'fox':
+        env['FOX_PUBLIC_ORIGIN'] = option['origin']
+        env['FOX_NATIVE_PROFILE_FILE'] = env['FOX_PROTOTYPE_PROFILE_FILE']
+    else:
+        env['F2A_TARGET_PROFILE_PATH'] = '/run/fox-opaf/prototype-focus-test.json'
+    item['Config']['Env'] = [key + '=' + val for key, val in sorted(env.items())]
+    with pytest.raises(M.ActivationError, match='CANDIDATE_PROTOTYPE_TARGET_OR_ORIGIN_CHANGED'):
+        M.check_candidate(item, role, value, release, env, mounts, baseline_item=old)
+
+
+@pytest.mark.parametrize('role', ['fox', 'converter'])
+@pytest.mark.parametrize('fault', ['unapproved', 'missing', 'changed', 'wrong-role'])
+def test_candidate_prototype_cannot_be_adopted_from_a_matching_but_unplanned_env(role, fault):
+    value, release, env, argv, mounts, old, item = prepared(role)
+    value = upgrade_plan(); option = prototype_configuration()
+    if fault != 'unapproved': value['prototype_authority'] = option
+    if fault != 'missing': env.update(M.prototype_environment(role, option))
+    if fault == 'changed': env['FOX_PROTOTYPE_AUTHORITY_ENABLED'] = '0'
+    if fault == 'wrong-role':
+        env.update(M.prototype_environment('converter' if role == 'fox' else 'fox', option))
+    item['Config']['Env'] = [key + '=' + val for key, val in sorted(env.items())]
+    with pytest.raises(M.ActivationError, match='CANDIDATE_PROTOTYPE_CONFIGURATION_CHANGED'):
+        M.check_candidate(item, role, value, release, env, mounts, baseline_item=old)
+
+
+def mapped_metadata_reader(root, monkeypatch):
+    """Actual probe/parser/file reads with modelled POSIX UID/mode on Windows.
+
+    This does not claim actual mapped UID or kernel O_NOFOLLOW proof on Windows.
+    The serialized production program is executed unchanged, outside __main__.
+    """
+    import stat
+    from types import SimpleNamespace
+    namespace = {'__name__': 'profile_probe_under_test'}
+    exec(compile(M.PROTOTYPE_PROFILE_PROBE, '<prototype-profile-probe>', 'exec'), namespace)
+    actual_lstat, actual_fstat = Path.lstat, os.fstat
+    fields = ('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns','st_mode','st_uid','st_gid','st_nlink')
+    def mapped(info, directory=False):
+        result = {key: getattr(info, key) for key in fields}
+        result.update(st_uid=1000, st_gid=1000, st_mode=stat.S_IFMT(info.st_mode) | (0o700 if directory else 0o600))
+        if os.name == 'nt':
+            # Windows lstat/fstat expose different ctime semantics; model the
+            # POSIX comparison while retaining real file-content/mtime drift.
+            result['st_ctime_ns'] = info.st_mtime_ns
+        return SimpleNamespace(**result)
+    def lstat(path, **kwargs):
+        info = actual_lstat(path, **kwargs)
+        return mapped(info, path == root) if path == root or path.parent == root else info
+    monkeypatch.setattr(Path, 'lstat', lstat)
+    monkeypatch.setattr(os, 'fstat', lambda fd: mapped(actual_fstat(fd)))
+    monkeypatch.setattr(os, 'geteuid', lambda: 1000, raising=False)
+    monkeypatch.setattr(os, 'getegid', lambda: 1000, raising=False)
+    if not hasattr(os, 'O_NOFOLLOW'):
+        monkeypatch.setattr(os, 'O_NOFOLLOW', 0, raising=False)
+    return namespace['read_profile']
+
+
+@pytest.mark.parametrize('fault', ['none', 'file-hash', 'worker-hash', 'destination', 'envelope',
+    'roles', 'duplicate', 'malformed-json', 'drift', 'origin', 'access', 'response-hash',
+    'mount-source', 'mount-writable', 'mount-missing', 'old-runtime-without-new-client'])
+def test_prototype_full_envelope_source_projection_and_mapped_access_guards(fault, tmp_path, monkeypatch):
+    """Real serialized reader/metadata validators; container/mapped UID are modelled."""
+    from fox.opaf import canonical_hash
+    from fox import prototype_job
+    if fault == 'old-runtime-without-new-client':
+        # The 0.9.1 namespace already provides this real metadata loader but has
+        # no new authority client. Fence that absent import without changing
+        # sys.path, clearing modules or substituting a successful validator.
+        import builtins
+        from fox.prototype_job import load_prototype_profile
+        original_import = builtins.__import__
+        def old_namespace_import(name, *args, **kwargs):
+            if name == 'forms2apex.prototype_authority_client':
+                raise ModuleNotFoundError('Absent from the retained old runtime namespace')
+            return original_import(name, *args, **kwargs)
+        monkeypatch.setattr(builtins, '__import__', old_namespace_import)
+        with pytest.raises(ModuleNotFoundError):
+            __import__('forms2apex.prototype_authority_client', fromlist=['execution_target'])
+    target = json.loads((ROOT / 'deployment/target-profile.jsn-project-v2.json').read_bytes())
+    focused = deepcopy(target)
+    focused['profile_id'] = 'synthetic-focused-profile'
+    focused['opaf']['roles']['mapper']['workflow_id'] = 'A' * 32
+    focused['opaf']['roles']['reviewer']['workflow_id'] = 'B' * 32
+    if fault == 'destination': focused['database']['parsing_schema'] = 'OTHER'
+    if fault == 'roles': focused['opaf']['roles']['reviewer'] = focused['opaf']['roles']['mapper']
+    envelope = {'target_profile': focused, 'target_profile_sha256': canonical_hash(focused)}
+    if fault == 'envelope': envelope = focused
+    raw = M.canonical(envelope)
+    if fault == 'duplicate': raw = raw.rstrip()[:-1] + b',"target_profile_sha256":"' + canonical_hash(focused).encode() + b'"}\n'
+    if fault == 'malformed-json': raw = b'{"target_profile":'
+    file = tmp_path / 'prototype-focus-test.json'; file.write_bytes(raw)
+    reader = mapped_metadata_reader(tmp_path, monkeypatch)
+    if fault == 'drift':
+        original_loader = prototype_job.load_prototype_profile
+        def changed_while_loading(path):
+            loaded = original_loader(path)
+            path.write_bytes(raw + b' ')
+            return loaded
+        monkeypatch.setattr(prototype_job, 'load_prototype_profile', changed_while_loading)
+    option = prototype_configuration(); option['profile']['sha256'] = M.sha(raw)
+    worker = b'synthetic measured worker source'; option['runtime_worker_sha256'] = M.sha(worker)
+    if fault == 'file-hash': option['profile']['sha256'] = '0' * 64
+    if fault == 'worker-hash': option['runtime_worker_sha256'] = '0' * 64
+    value = upgrade_plan(); value['prototype_authority'] = option
+    old = baseline_item('fox'); old['Config']['Env'] = ['FOX_PUBLIC_ORIGIN=' + (
+        option['origin'] if fault != 'origin' else 'https://different.example.test')]
+    mounted = next(row for row in old['Mounts'] if row['Destination'] == '/run/fox-opaf')
+    if fault == 'mount-source': mounted['Source'] = '/unbound/opaf-client'
+    elif fault == 'mount-writable': mounted['RW'] = True
+    elif fault == 'mount-missing': old['Mounts'].remove(mounted)
+    host_reads = []
+    def host_read(path, **kwargs):
+        if path.as_posix().startswith(M.PROTOTYPE_PROFILE_ROOT):
+            raise PermissionError('Mapped host UID100999 directory is not host-readable')
+        host_reads.append(path)
+        return worker
+    monkeypatch.setattr(M, 'read', host_read)
+    calls = []
+    def observe(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs == {'maximum': 131_072}
+        observed = reader(tmp_path, argv[8], argv[9])
+        if fault == 'access': observed['status'] = 'other'
+        if fault == 'response-hash': observed['profile_sha256'] = '0' * 64
+        return M.canonical(observed)
+    monkeypatch.setattr(M, 'command', observe)
+    before = deepcopy((value, target, old))
+    if fault in ('none', 'old-runtime-without-new-client'):
+        result = M.validate_prototype_authority(value, {'target_profile': target}, old)
+        assert result['status'] == 'PROTOTYPE_CONFIGURATION_CHECKED_NOT_ACTIVATED'
+        argv = calls[0]
+        assert argv[:7] == ['/usr/bin/podman', 'exec', old['Id'], '/usr/local/bin/python', '-I', '-B', '-c']
+        assert argv[8:] == [file.name, option['profile']['sha256']]
+        compile(argv[7], '<read-only-profile-access>', 'exec')
+        assert not any(action in argv[7] for action in ('chmod', 'chown', 'mkdir', 'write', 'converter_token'))
+        assert (value, target, old) == before
+    else:
+        with pytest.raises(Exception): M.validate_prototype_authority(value, {'target_profile': target}, old)
+        assert len(calls) == (0 if fault in ('worker-hash','origin','mount-source','mount-writable','mount-missing') else 1)
+    assert len(host_reads) == (0 if fault == 'origin' else 1)
+    assert M.validate_prototype_authority(upgrade_plan(), {}, {}) is None
+
+
+@pytest.mark.parametrize('fault', ['uid', 'gid', 'root-owner', 'root-group', 'root-mode', 'file-owner',
+    'file-group', 'file-mode', 'hardlink', 'symlink', 'oversized', 'opened-inode'])
+def test_serialized_metadata_reader_rejects_unprotected_or_unstable_mapped_inputs(fault, tmp_path, monkeypatch):
+    import stat
+    from fox.opaf import canonical_hash
+    target = json.loads((ROOT / 'deployment/target-profile.jsn-project-v2.json').read_bytes())
+    raw = M.canonical({'target_profile': target, 'target_profile_sha256': canonical_hash(target)})
+    path = tmp_path / 'prototype-focus-test.json'; path.write_bytes(raw)
+    reader = mapped_metadata_reader(tmp_path, monkeypatch)
+    mapped_lstat = Path.lstat
+    def unsafe_lstat(selected, **kwargs):
+        info = mapped_lstat(selected, **kwargs)
+        if selected == tmp_path:
+            if fault == 'root-owner': info.st_uid = 0
+            if fault == 'root-group': info.st_gid = 0
+            if fault == 'root-mode': info.st_mode = stat.S_IFDIR | 0o755
+        elif selected == path:
+            if fault == 'file-owner': info.st_uid = 0
+            if fault == 'file-group': info.st_gid = 0
+            if fault == 'file-mode': info.st_mode = stat.S_IFREG | 0o644
+            if fault == 'hardlink': info.st_nlink = 2
+            if fault == 'symlink': info.st_mode = stat.S_IFLNK | 0o600
+            if fault == 'oversized': info.st_size = 65537
+        return info
+    monkeypatch.setattr(Path, 'lstat', unsafe_lstat)
+    if fault == 'uid': monkeypatch.setattr(os, 'geteuid', lambda: 0)
+    if fault == 'gid': monkeypatch.setattr(os, 'getegid', lambda: 0)
+    if fault == 'opened-inode':
+        mapped_fstat = os.fstat
+        def changed_inode(fd):
+            info = mapped_fstat(fd); info.st_ino += 1
+            return info
+        monkeypatch.setattr(os, 'fstat', changed_inode)
+    with pytest.raises(AssertionError): reader(tmp_path, path.name, M.sha(raw))
+
+
+@pytest.mark.parametrize('mutation', ['none', 'focus-roles', 'extra-field', 'missing-field', 'empty-value',
+    'bool-value', 'oversized-value', 'inactive', 'customer-scope', 'operations'])
+def test_deployment_execution_projection_matches_new_converter_contract(mutation):
+    from forms2apex.prototype_authority_client import execution_target
+    target = json.loads((ROOT / 'deployment/target-profile.jsn-project-v2.json').read_bytes())
+    if mutation == 'focus-roles':
+        target['opaf']['roles']['mapper']['workflow_id'] = 'A' * 32
+        target['profile_id'] = 'synthetic-focused-profile'
+    elif mutation == 'extra-field': target['database']['other'] = 'unsupported'
+    elif mutation == 'missing-field': del target['apex']['workspace_id']
+    elif mutation == 'empty-value': target['oci']['region'] = ''
+    elif mutation == 'bool-value': target['sqlcl']['saved_connection'] = True
+    elif mutation == 'oversized-value': target['database']['db_name'] = 'a' * 2049
+    elif mutation == 'inactive': target['active'] = False
+    elif mutation == 'customer-scope': target['scope']['customer_deployment_authorized'] = True
+    elif mutation == 'operations': target['scope']['supported_operations'] = ['delete']
+    if mutation in ('none', 'focus-roles'):
+        assert M.prototype_execution_target(target) == execution_target(target)
+    else:
+        with pytest.raises(Exception): M.prototype_execution_target(target)
+        with pytest.raises(Exception): execution_target(target)
+
+
 @pytest.mark.parametrize('queue', ['/data/native-preparations', '/data/native-preparations-20261107a'])
 def test_queue_opt_in_is_hash_bound_and_only_in_upgrade_plans(queue):
     value = upgrade_plan(queue); raw = M.canonical(value)

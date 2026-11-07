@@ -200,10 +200,10 @@ export function runBelongsToProject(value:unknown,projectId:string):value is Pro
 
 export function presentProjectRun(run:ProjectRun,sourceHash:string,projectId:string):RunPresentation{
  if(!record(run))return {label:'Status unavailable',tone:'attention',earlierSource:true,generated:false,technicalVerified:false,humanAccepted:false,canPreview:false,canReview:false,canDownload:false,downloadReason:'The run status could not be established.',message:'Run details are unavailable.',stageMessage:null,error:null,steps:[],forms:[],detailsIncomplete:true};
- const states:Record<string,[string,RunPresentation['tone']]>={QUEUED:['Waiting to start','neutral'],PROCESSING:['Converting project','active'],ATTENTION:['Action needed','attention'],FAILED:['Conversion stopped','attention'],QA_REQUIRED:['Technical checks pending','active'],REVIEW_REQUIRED:['Review required','attention'],VERIFIED:['Technical checks passed','success'],ACCEPTED:['Human review recorded','success']};
+ const states:Record<string,[string,RunPresentation['tone']]>={QUEUED:['Waiting to start','neutral'],PROCESSING:['Converting project','active'],GENERATED:['Generated prototype','neutral'],ATTENTION:['Action needed','attention'],FAILED:['Conversion stopped','attention'],QA_REQUIRED:['Technical checks pending','active'],REVIEW_REQUIRED:['Review required','attention'],VERIFIED:['Technical checks passed','success'],ACCEPTED:['Human review recorded','success']};
  const valid=opaque(run.id)&&opaque(projectId)&&run.project_id===projectId&&hash(run.source_hash)&&hash(sourceHash)&&Object.hasOwn(states,run.state);
  const earlierSource=run.source_hash!==sourceHash;
- const generated=valid&&run.artifact_generated===true;
+ const generated=valid&&(run.state==='GENERATED'||run.artifact_generated===true);
  const technicalVerified=generated&&run.technical_verified===true&&['VERIFIED','ACCEPTED'].includes(run.state);
  const humanAccepted=technicalVerified&&run.human_accepted===true&&run.state==='ACCEPTED';
  const steps=Array.isArray(run.steps)?run.steps.filter(item=>record(item)&&opaque(item.id)&&text(item.label,200)&&oneOf(item.state,['pending','running','complete','blocked'])&&(item.message===undefined||text(item.message))):[];
@@ -231,7 +231,7 @@ export function presentProjectRun(run:ProjectRun,sourceHash:string,projectId:str
  const downloadReason=canDownload?'':!generated?'The APEX package has not been reported as generated.':!technicalVerified?'Technical verification must pass before review and release.':!humanAccepted?'Genuine human review is still required for the accepted-package download. A development draft may be available separately.':'The server has not enabled download for this package.';
  const missingEvidence=run.state==='VERIFIED'&&!technicalVerified||run.state==='ACCEPTED'&&!humanAccepted;
  return {label:missingEvidence?'Verification evidence unavailable':technicalAttention?'Technical checks need attention':valid?states[run.state][0]:'Status unavailable',tone:missingEvidence||technicalAttention?'attention':valid?states[run.state][1]:'attention',earlierSource,generated,technicalVerified,humanAccepted,
-  canPreview:generated&&run.preview_available===true,canReview:technicalVerified&&!humanAccepted&&!earlierSource&&run.review_available===true,
+  canPreview:generated&&run.state!=='GENERATED'&&run.preview_available===true,canReview:technicalVerified&&!humanAccepted&&!earlierSource&&run.review_available===true,
   canDownload,downloadReason,message:technicalAttention&&error?error.message:message,stageMessage:technicalAttention?null:stageMessage,error,
   steps:!valid||duplicateSteps?[]:steps.map(item=>technicalAttention&&item.id==='technical'?{...item,state:'blocked' as const}:item),forms:duplicateForms?[]:forms,
   detailsIncomplete:!valid||missingEvidence||malformedDetails||malformedFormIdentity||duplicateSteps||duplicateForms||(Array.isArray(run.steps)&&steps.length!==run.steps.length)||(Array.isArray(run.forms)&&forms.length!==run.forms.length)};

@@ -130,6 +130,7 @@ def test_rehashed_changed_build_context_still_blocked(tmp_path, member):
 
 @pytest.mark.parametrize('member', [
     'build/fox/renderer/forms2apex/native_blueprint.py',
+    'build/fox/renderer/forms2apex/prototype_package.py',
     'build/fox/renderer/forms2apex/templates/blueprint-prototype-v1/control.apx.tmpl',
     'build/fox/renderer/forms2apex/templates/native-table-v1/.apex/apexlang.json',
     'build/fox/renderer/fox_source_contract/intake.py',
@@ -318,6 +319,7 @@ def reject_external(event,args):
   raise AssertionError('External operation forbidden during pure app render')
 sys.addaudithook(reject_external)
 from fox.prototype_pipeline import NativeBlueprintRenderer
+from forms2apex.prototype_package import validate_prototype_package
 from fox.forms_understanding_packet import local_packet
 from fox.forms_native_plan import POLICY_ID,build_native_prototype_plan
 documents=[('first.xml',b'<FormModule Name="FIRST"><Block Name="BUSINESS" DatabaseBlock="true"><Item Name="VALUE" ItemType="Text Item" DataType="Char" MaximumLength="80" DatabaseItem="true" Prompt="Value"/></Block></FormModule>'),
@@ -349,11 +351,17 @@ for name,module in tuple(sys.modules.items()):
  if name.split('.')[0] in ('fox','forms2apex','fox_source_contract','defusedxml') and getattr(module,'__file__',None):
   assert pathlib.Path(module.__file__).resolve().is_relative_to(app),(name,module.__file__)
 assert 'fastapi' not in sys.modules and 'oci' not in sys.modules and 'forms2apex.server' not in sys.modules
+try:
+ validate_prototype_package(b'not a ZIP',request={},runtime_receipt={},imported={},artifact_binding={})
+except (RuntimeError,ValueError,zipfile.BadZipFile):pass
+else:raise AssertionError('Invalid prototype package was accepted')
+assert 'forms2apex.sqlcl' not in sys.modules and 'forms2apex.runtime_preflight' not in sys.modules
 (app/'candidate-apexlang.zip').write_bytes(raw)
 proof={'scope':'isolated-frozen-app-renderer','source_bundle_sha256':sys.argv[2],
  'zip_sha256':hashlib.sha256(raw).hexdigest(),'zip_bytes':len(raw),
  'application_count':trace['application_count'],'block_count':trace['block_count'],
  'site_packages_disabled':True,'development_paths_used':False,'sqlcl_or_oracle_run':False}
+proof['pure_prototype_package_validator_loaded']=True
 (app/'renderer-proof.json').write_text(json.dumps(proof,sort_keys=True))
 print(json.dumps(proof,sort_keys=True))
 '''

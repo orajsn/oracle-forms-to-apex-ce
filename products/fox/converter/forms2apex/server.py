@@ -6,6 +6,7 @@ from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
 from .config import Settings
 from .workflow_router import WorkflowRouter
 from .fox_gateway import attach_routes
+from .prototype_startup import configured_prototype_gateway
 
 
 settings = Settings.from_env()
@@ -20,7 +21,7 @@ auth = StaticTokenVerifier(
 )
 mcp = FastMCP(name="JSN Forms-to-APEX Converter", auth=auth)
 workflow = WorkflowRouter(settings)
-attach_routes(mcp,workflow,settings)
+attach_routes(mcp,workflow,settings, prototype_gateway=configured_prototype_gateway(settings))
 
 
 @mcp.tool

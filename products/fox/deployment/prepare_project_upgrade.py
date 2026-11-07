@@ -7,6 +7,9 @@ service, model, SQL or OCI state-changing operation is exposed.
 
 --hosted-forms-queue explicitly authorizes a private queue on the existing /data
 mount. Repeat the option on later upgrades; no environment variable enables it.
+The four --prototype-* options likewise require explicit reauthorization. They
+bind an existing metadata-only protected envelope and new-bundle worker digest;
+they do not install/start a worker or replace the converter's project-v2 target.
 """
 from __future__ import annotations
 import argparse
@@ -53,10 +56,11 @@ def compose(configuration,root,images):
     return raw,A.canonical(manifest)
 
 
-def prepare(bundle_sha256,current_installation,*,apply=False,hosted_forms_queue=None):
+def prepare(bundle_sha256,current_installation,*,apply=False,hosted_forms_queue=None,prototype_authority=None):
     A.need(type(apply)is bool and type(bundle_sha256)is str and A.SHA.fullmatch(bundle_sha256),
            'EXACT_SOURCE_BUNDLE_REQUIRED')
     if hosted_forms_queue is not None:A.hosted_queue_path(hosted_forms_queue)
+    if prototype_authority is not None:A.prototype_configuration(prototype_authority)
     A.host_identity()
     root=Path('/home/opc/.local/share/fox-project-builds')/bundle_sha256/'bundle'
     root,runtime,bridge,verifier=A.source_namespace(root,bundle_sha256)
@@ -86,6 +90,9 @@ def prepare(bundle_sha256,current_installation,*,apply=False,hosted_forms_queue=
         'release':{'path':str(destination/'release.json'),'sha256':A.sha(r)},
         'current_installation':dict(current_installation),'helper_sha256':A.sha(helper)}
     if hosted_forms_queue is not None:plan['hosted_forms_queue']=hosted_forms_queue
+    if prototype_authority is not None:
+        plan['prototype_authority']=deepcopy(prototype_authority)
+        A.validate_prototype_authority(plan,A.parse(c),before['fox'])
     raw=A.canonical(plan);digest=A.sha(raw);A.plan_document(raw,digest)
     A.need(not destination.exists() and not destination.is_symlink(),'CONFIGURATION_ATTEMPT_EXISTS_INSPECT_NO_REPLAY')
     current.scope()
@@ -96,6 +103,7 @@ def prepare(bundle_sha256,current_installation,*,apply=False,hosted_forms_queue=
         'target_profile_sha256':A.parse(c)['target_profile_sha256'],'images':images,
         'files_written':False,'containers_started':False,'services_changed':False,'automatic_replay_permitted':False}
     if hosted_forms_queue is not None:result['hosted_forms_queue']=hosted_forms_queue
+    if prototype_authority is not None:result['prototype_authority']=deepcopy(prototype_authority)
     if not apply:return result
     A.host_identity();current.scope()
     if not CONFIG_ROOT.exists():
@@ -120,10 +128,23 @@ def main():
     parser.add_argument('--current-installation',required=True)
     parser.add_argument('--current-installation-sha256',required=True)
     parser.add_argument('--hosted-forms-queue',help='Explicit private /data/native-preparations[-suffix] queue; requires a separately configured host processor')
+    parser.add_argument('--prototype-authority-origin',help='Explicit exact current HTTPS FOX origin; requires all prototype options')
+    parser.add_argument('--prototype-profile',help='Metadata-only prototype-*.json direct child of existing protected opaf-client bind')
+    parser.add_argument('--prototype-profile-sha256',help='Exact full metadata-envelope file SHA-256, not the embedded target hash')
+    parser.add_argument('--prototype-runtime-worker-sha256',help='Exact measured new bundle runtime worker source SHA-256; does not install/start it')
     parser.add_argument('--apply',action='store_true')
     args=parser.parse_args()
+    options=(args.prototype_authority_origin,args.prototype_profile,args.prototype_profile_sha256,
+             args.prototype_runtime_worker_sha256)
+    A.need(not any(option is not None for option in options) or all(option is not None for option in options),
+           'COMPLETE_EXPLICIT_PROTOTYPE_OPTIONS_REQUIRED')
+    prototype=None if options==(None,None,None,None) else A.prototype_configuration({
+        'schema_version':1,'scope':A.PROTOTYPE_SCOPE,'origin':args.prototype_authority_origin,
+        'profile':{'path':args.prototype_profile,'sha256':args.prototype_profile_sha256},
+        'runtime_worker_sha256':args.prototype_runtime_worker_sha256})
     value=prepare(args.source_bundle_sha256,{'path':args.current_installation,
-        'sha256':args.current_installation_sha256},apply=args.apply,hosted_forms_queue=args.hosted_forms_queue)
+        'sha256':args.current_installation_sha256},apply=args.apply,hosted_forms_queue=args.hosted_forms_queue,
+        prototype_authority=prototype)
     print(json.dumps(value,sort_keys=True))
 
 

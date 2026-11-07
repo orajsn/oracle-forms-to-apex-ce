@@ -7,7 +7,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 import pytest
-from test_activate_project_release import BINDING_PROBE
+from test_activate_project_release import BINDING_PROBE, baseline_item, prototype_configuration
 
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('project_upgrade_config_test',ROOT/'deployment/prepare_project_upgrade.py')
@@ -29,7 +29,8 @@ def test_invalid_queue_does_not_probe_host_or_write(queue, monkeypatch):
 
 @pytest.mark.parametrize('queue', [None, '/data/native-preparations'])
 @pytest.mark.parametrize('apply', [False, True])
-def test_preparation_carries_only_explicit_queue_in_hashed_plan_and_report(queue, apply, tmp_path, monkeypatch):
+@pytest.mark.parametrize('prototype', [False, True])
+def test_preparation_carries_only_explicit_queue_in_hashed_plan_and_report(queue, apply, prototype, tmp_path, monkeypatch):
     """Model the existing host observations; no host or Podman call is made."""
     writes = {}; plans = []; images = {'fox': 'sha256:' + '7' * 64, 'converter': 'sha256:' + '8' * 64}
     monkeypatch.setattr(M, 'CONFIG_ROOT', tmp_path)
@@ -37,7 +38,10 @@ def test_preparation_carries_only_explicit_queue_in_hashed_plan_and_report(queue
     monkeypatch.setattr(M.A, 'source_namespace', lambda root, _: (root, None, None, None))
     current = SimpleNamespace(scope=lambda: None, configuration={})
     monkeypatch.setattr(M.A, 'CurrentBaseline', lambda _: current)
-    monkeypatch.setattr(M.A, 'baseline', lambda _: {})
+    before = {'fox': baseline_item('fox')}
+    monkeypatch.setattr(M.A, 'baseline', lambda _: before)
+    checked = []
+    monkeypatch.setattr(M.A, 'validate_prototype_authority', lambda *args: checked.append(args))
     monkeypatch.setattr(M.A, 'validate_bound_sources', lambda _: None)
     monkeypatch.setattr(M.A, 'private_dir', lambda _: None)
     monkeypatch.setattr(M.A, 'sync', lambda _: None)
@@ -53,17 +57,38 @@ def test_preparation_carries_only_explicit_queue_in_hashed_plan_and_report(queue
     monkeypatch.setattr(M.A, 'command', lambda args: M.A.canonical([{'Id': args[-1], 'Architecture': 'amd64',
         'Os': 'linux', 'Labels': {'com.oracle.jsn.fox.source-bundle': 'a' * 64}}]))
     monkeypatch.setattr(M, 'compose', lambda *_: (M.A.canonical({'target_profile_sha256': 'b' * 64}), M.A.canonical({})))
+    option = prototype_configuration() if prototype else None
     result = M.prepare('a' * 64, {'path': '/private/old.json', 'sha256': 'c' * 64},
-                       apply=apply, hosted_forms_queue=queue)
+                       apply=apply, hosted_forms_queue=queue, prototype_authority=option)
     raw, digest = plans[0]; plan = M.A.parse(raw)
     assert M.A.sha(raw) == digest == result['plan_sha256']
     assert plan.get('hosted_forms_queue') == queue and result.get('hosted_forms_queue') == queue
+    assert plan.get('prototype_authority') == option and result.get('prototype_authority') == option
+    assert checked == ([(plan, {'target_profile_sha256': 'b' * 64}, before['fox'])] if prototype else [])
+    if not prototype:
+        assert 'prototype_authority' not in plan and 'prototype_authority' not in result
     if queue is None:
         assert 'hosted_forms_queue' not in plan and 'hosted_forms_queue' not in result
     if apply:
         assert writes['activation-plan.json'] == raw and result['files_written'] is True
     else:
         assert writes == {} and result['files_written'] is False
+
+
+@pytest.mark.parametrize('option', [True, {}, {'environment': {'FOX_PROTOTYPE_AUTHORITY_ENABLED': '1'}}])
+def test_invalid_prototype_does_not_probe_host_or_write(option, monkeypatch):
+    monkeypatch.setattr(M.A, 'host_identity', lambda: pytest.fail('Invalid prototype reached host'))
+    with pytest.raises(M.A.ActivationError, match='PROTOTYPE_CONFIGURATION_INVALID'):
+        M.prepare('a' * 64, {}, apply=True, prototype_authority=option)
+
+
+def test_incomplete_cli_prototype_options_stop_before_host_observation():
+    result = subprocess.run([sys.executable, '-B', str(ROOT / 'deployment/prepare_project_upgrade.py'),
+        '--source-bundle-sha256', 'a' * 64, '--current-installation', '/private/old.json',
+        '--current-installation-sha256', 'b' * 64,
+        '--prototype-authority-origin', 'https://fox.example.test'], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)['code'] == 'COMPLETE_EXPLICIT_PROTOTYPE_OPTIONS_REQUIRED'
 
 
 PROBE=BINDING_PROBE.split(" for name in tuple(sys.modules):",1)[0]+r'''

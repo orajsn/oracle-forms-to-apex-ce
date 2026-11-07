@@ -1048,7 +1048,16 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         return (not verifier_config.enabled or
                 VerificationRecovery(database, enabled=True).admission_allowed(connection))
     attach_prototype_project_routes(app, root=root, db=db, project=project,
-        current_sources=current_sources, admission_allowed=prototype_admission_allowed)
+        current_sources=current_sources, admission_allowed=prototype_admission_allowed,
+        installation_projection=(fresh.projection if fresh is not None else None))
+    from .prototype_authority import attach_prototype_authority
+    authority_mode = os.getenv('FOX_PROTOTYPE_AUTHORITY_ENABLED', '')
+    if authority_mode not in ('', '0', '1'):
+        raise ValueError('Prototype authority requires an explicit enabled setting.')
+    attach_prototype_authority(app, root=root, db=db, enabled=authority_mode == '1',
+        profile_path=os.getenv('FOX_PROTOTYPE_PROFILE_FILE') or None,
+        credential_path=os.getenv('FOX_OPAF_CREDENTIAL_FILE') or None,
+        allowed_origin=origin)
     from .hosted_forms_routes import attach_hosted_forms_routes
     attach_hosted_forms_routes(app, db=db, project=project, current_sources=current_sources)
     if enable_local_preparation:

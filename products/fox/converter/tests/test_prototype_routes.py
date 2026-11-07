@@ -28,6 +28,10 @@ class Gateway:
         return {'stage':stage}
     def recover_stage_for_job(self,job,stage):
         self.calls.append(('read',job,stage));return self.saved
+    def read_package(self,job):
+        self.calls.append(('package_read',job))
+        if self.failure:raise RuntimeError('private package details')
+        return self.saved
 
 def setup():
     mcp=MCP();gateway=Gateway()
@@ -76,3 +80,21 @@ def test_capabilities_require_auth_and_do_not_execute():
     assert result.json()=={'schema_version':1,'scope':'fox-prototype-capabilities-v1',
                            'stages':['validate','prepare_schema','import']}
     assert gateway.calls==[]
+
+
+def test_package_get_is_bearer_protected_read_only_and_labelled():
+    client,gateway=setup(); path=f'/fox/prototype/jobs/{JOB}/package'
+    assert client.get(path).status_code==401
+    assert gateway.calls==[]
+    headers={'Authorization':'Bearer '+TOKEN}
+    assert client.get(path,headers=headers).status_code==404
+    gateway.saved=b'synthetic-package-bytes'
+    for _ in range(2):
+        result=client.get(path,headers=headers)
+        assert result.status_code==200 and result.content==gateway.saved
+        assert 'generated-prototype.zip' in result.headers['content-disposition']
+        assert result.headers['cache-control']=='no-store'
+    gateway.failure=True
+    result=client.get(path,headers=headers)
+    assert result.status_code==409 and 'private package details' not in result.text
+    assert all(row[0]=='package_read' for row in gateway.calls)

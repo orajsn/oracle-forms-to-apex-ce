@@ -236,3 +236,14 @@ class PrototypeHttpConverterAdapter:
         if value is None:
             return None
         return _check_converter_receipt(stage, request, value)
+
+    def read_package(self, request, export_receipt):
+        """Fixed-path, bounded GET only; no staging, recovery POST or retry."""
+        from .prototype_download import validate_generated_package
+        if request.get('job_id') != self.job.name:
+            raise OpafError('Prototype download job differs from the retained request.')
+        authorize_prototype_request(self.job, request)
+        raw = self.client.request('GET', self.path + '/package', binary=True)
+        validate_generated_package(raw, request=request, export_receipt=export_receipt)
+        authorize_prototype_request(self.job, request)
+        return raw

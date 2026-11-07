@@ -1,22 +1,23 @@
 {
-  "version": "0.9.1",
+  "version": "0.10.0",
   "released_on": "2026-11-07",
-  "title": "Guarded activation of private host preparation",
+  "title": "Source-bound prototype output and runtime verification",
   "changes": [
-    "Bind the private Forms queue setting to the reviewed deployment plan and recheck it at activation.",
-    "Prepare one raw FMB on a configured private Oracle Forms host from the project upload screen.",
-    "Preserve the original, both native exports, effective metadata and validated redaction evidence.",
-    "Bind preparation to the project owner and selected source version without starting AI processing.",
-    "Check preparation status and explicitly add the redacted result to project source history.",
-    "Retain uncertain requests without automatic replay or duplicate source publication."
+    "Connect explicit prototype converter stages to current project, source, consent and target authorization.",
+    "Add a private host browser worker with source-bound requests, expiry, exclusive claims and no automatic replay.",
+    "Show generated prototype output separately from technical verification and human acceptance.",
+    "Download the exact retained prototype package only after its source and stage evidence are checked.",
+    "Bind focused workflow metadata and measured runtime worker settings to the guarded upgrade plan.",
+    "Keep the five existing MCP interfaces and strict accepted-output download rules unchanged."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
-    "The prototype processing profile and trusted converter/browser adapters require explicit operator configuration.",
+    "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
+    "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
     "Release notes describe software changes, not proof of a successful conversion."
   ]
 }

@@ -1,9 +1,11 @@
 """Internal bearer-protected prototype handoff; caller supplies trusted gateway."""
 import asyncio
 import hmac
+import hashlib
 import json
+import zipfile
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from .security import validate_job_id
 
 
@@ -36,6 +38,22 @@ def attach_prototype_routes(mcp, gateway, settings):
         stages = ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
         return JSONResponse({'schema_version': 1, 'scope': 'fox-prototype-capabilities-v1',
                              'stages': [stage for stage in stages if gateway.supports(stage)]})
+
+    @mcp.custom_route('/fox/prototype/jobs/{job_id}/package', methods=['GET'], include_in_schema=False)
+    async def package(request):
+        if not authorized(request):
+            return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+        try:
+            job_id = request.path_params['job_id']; validate_job_id(job_id)
+            raw = await asyncio.to_thread(gateway.read_package, job_id)
+            if raw is None:
+                return JSONResponse({'error': 'Not found'}, status_code=404)
+            return Response(raw, media_type='application/zip', headers={
+                'Content-Disposition': f'attachment; filename="{job_id}-generated-prototype.zip"',
+                'X-Content-SHA256': hashlib.sha256(raw).hexdigest(),
+                'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError, zipfile.BadZipFile):
+            return JSONResponse({'error': 'Generated prototype export is unavailable or could not be verified. Existing evidence is preserved.'}, status_code=409)
 
     @mcp.custom_route('/fox/prototype/jobs/{job_id}/authority', methods=['POST', 'GET'], include_in_schema=False)
     async def authority(request):

@@ -46,6 +46,7 @@ QA_CONTRACT_FILES = LEGACY_QA_CONTRACT_FILES + ('native_verification.py',
 APP_RENDERER_FILES = (
     'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
     'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
+    'forms2apex/prototype_package.py',
     'fox_source_contract/__init__.py', 'fox_source_contract/intake.py',
     'fox_source_contract/native_source.py', 'fox_source_contract/project_conversion.py',
     'fox_source_contract/source-manifest.json',

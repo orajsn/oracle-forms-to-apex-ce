@@ -249,6 +249,8 @@ test('action context binds project, selected version, plan and historical run so
  assert.throws(()=>api.actionContext({...binding(),project_id:'other'},plan));
 });
 test('generated, verified and accepted are distinct facts',()=>{
+ const prototype=api.presentProjectRun(baseRun({state:'GENERATED',artifact_generated:false,technical_verified:true,human_accepted:true,downloadable:true,preview_available:true}),binding().source_hash,project.id);
+ assert.equal(prototype.label,'Generated prototype');assert.equal(prototype.generated,true);assert.equal(prototype.technicalVerified,false);assert.equal(prototype.humanAccepted,false);assert.equal(prototype.canDownload,false);assert.equal(prototype.canPreview,false);
  const generated=api.presentProjectRun(baseRun({state:'QA_REQUIRED',technical_verified:false}),binding().source_hash,project.id);
  assert.equal(generated.generated,true);assert.equal(generated.technicalVerified,false);assert.equal(generated.humanAccepted,false);assert.equal(generated.canDownload,false);
  const verified=api.presentProjectRun(baseRun(),binding().source_hash,project.id);

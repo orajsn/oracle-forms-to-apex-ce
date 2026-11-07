@@ -9,6 +9,7 @@ import time
 import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, StrictBool
 
 from . import source_history
@@ -52,7 +53,8 @@ def configured_target():
 
 
 def attach_prototype_project_routes(app, *, root, db, project, current_sources,
-                                    admission_allowed, target_reader=configured_target):
+                                    admission_allowed, target_reader=configured_target,
+                                    installation_projection=None, download_client_factory=None):
     def target_hash():
         try:
             envelope = target_reader()
@@ -62,6 +64,88 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             return digest
         except (ValueError, OSError, KeyError, TypeError, ImportError, OpafError):
             raise HTTPException(503, 'The prototype workflow is not configured. Your source files remain saved.') from None
+
+    def generated_prototype(pid: str, rid: str, request: Request, *, metadata_only=False):
+        from .prototype_download import configured_download_client, retained_export_request
+        from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+        from .prototype_transport import PrototypeHttpConverterAdapter
+        import re
+        import zipfile
+        p = project(request, pid)  # Authentication and owner check precede all job reads.
+        if not re.fullmatch(r'fox-[a-f0-9]{20}', rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        job = root / 'jobs' / rid
+        try:
+            if (root / 'jobs').is_symlink():
+                raise OpafError('Unsafe prototype storage.')
+            snapshot, original = read_prototype_snapshot(job)
+            validate_prototype_snapshot(snapshot)
+            def current():
+                owner = project(request, pid)['owner']
+                with db() as c:
+                    c.execute('BEGIN')
+                    run = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+                    if not run:
+                        raise HTTPException(404, 'Prototype run not found.')
+                    locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+                    if (not locked or locked['owner'] != owner or owner != p['owner']
+                            or snapshot['approvals']['owner'] != owner
+                            or snapshot['project_id'] != pid or snapshot['project'] != pid
+                            or run['state'] != 'GENERATED' or run['artifact'] is not None
+                            or run['source_hash'] != snapshot['source_hash']
+                            or inventory(current_sources(pid, c))['source_hash'] != snapshot['source_hash']
+                            or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']):
+                        raise OpafError('Prototype owner, source selection or run is no longer current.')
+                target = target_reader()
+                if target['target_profile_sha256'] != snapshot['prototype']['target_profile_sha256']:
+                    raise OpafError('Prototype target changed.')
+                if read_prototype_snapshot(job)[1] != original:
+                    raise OpafError('Prototype snapshot changed.')
+                return target
+            target = current()
+            export_request, receipt = retained_export_request(job, snapshot, target)
+            if metadata_only:
+                # Local retained-proof projection only. This does not fetch a
+                # package, execute a stage, or claim a clean reimport passed.
+                current()
+                return Response(json.dumps({
+                    'schema_version': 1, 'scope': 'fox-generated-prototype-output-v1',
+                    'project_id': pid, 'run_id': rid,
+                    'source_hash': snapshot['source_hash'],
+                    'selected_source_set_id': snapshot['selected_source_set_id'],
+                    'source_binding': snapshot['prototype']['source_binding'],
+                    'status': 'APEX_GENERATED',
+                    'download_path': f'/api/projects/{pid}/prototype-runs/{rid}/download',
+                    'business_behavior_accepted': False,
+                    'clean_schema_install_passed': False,
+                    'package_reimport_passed': False,
+                }), media_type='application/json', headers={'Cache-Control': 'no-store'})
+            factory = download_client_factory or configured_download_client
+            client = factory(snapshot['prototype']['target_profile_sha256'],
+                             installation_projection=installation_projection)
+            raw = PrototypeHttpConverterAdapter(job, client).read_package(export_request, receipt)
+            # Recheck after HTTP, so a source/owner/profile change cannot serve
+            # an export selected using stale authorization.
+            current()
+            retained_export_request(job, snapshot, target_reader())
+            return Response(raw, media_type='application/zip', headers={
+                'Content-Disposition': f'attachment; filename="{rid}-generated-prototype.zip"',
+                'X-FOX-Output-Scope': 'generated-synthetic-prototype-not-business-accepted',
+                'X-Content-SHA256': hashlib.sha256(raw).hexdigest(),
+                'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+        except HTTPException:
+            raise
+        except (ValueError, KeyError, TypeError, AttributeError, ImportError, OSError,
+                RuntimeError, zipfile.BadZipFile):
+            raise HTTPException(409, 'Generated prototype export is unavailable or its retained source, permission or technical proof could not be verified. No operation was retried.') from None
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/output')
+    def generated_prototype_output(pid: str, rid: str, request: Request):
+        return generated_prototype(pid, rid, request, metadata_only=True)
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/download')
+    def download_generated_prototype(pid: str, rid: str, request: Request):
+        return generated_prototype(pid, rid, request)
 
     @app.post('/api/projects/{pid}/prototype-sources')
     async def upload_redacted_prototype(pid: str, request: Request,

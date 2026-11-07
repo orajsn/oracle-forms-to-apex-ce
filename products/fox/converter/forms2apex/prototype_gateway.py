@@ -587,3 +587,52 @@ class PrototypeGateway:
             request = read_object(path)
             _need(request.get("job_id") == job_id, "PROTOTYPE_STAGE_REQUEST_CHANGED")
             return self.recover_stage(stage, request)
+
+    def read_package(self, job_id):
+        """Read only a retained complete export; never export, repair or replay."""
+        validate_job_id(job_id)
+        with _LOCK:
+            root = self._root({"job_id": job_id}, create=False)
+            request_path = root / "export-request.json"
+            if not request_path.exists() and not request_path.is_symlink():
+                return None
+            request = read_object(request_path)
+            _need(request.get("job_id") == job_id, "PROTOTYPE_STAGE_REQUEST_CHANGED")
+            spec, candidate = self._request("export", request)
+            # The exact retained export is the sole authorized action. A
+            # GENERATED run deliberately cannot authorize earlier-stage actions.
+            # Validate their historical envelopes locally under this authority;
+            # do not call recover_stage, which authorizes its own stage request.
+            self._check_prior(root, request)
+            self._snapshot(root, request, spec, candidate, create=False)
+            package = root / "prototype-package.zip"
+            _need(not package.is_symlink() and package.is_file()
+                  and 0 < package.stat().st_size <= 64_000_000, "PROTOTYPE_PACKAGE_SIZE_INVALID")
+            for stage in STAGES:
+                historical = {**request, "prior_receipts": {key: request["prior_receipts"][key]
+                              for key in STAGES[:STAGES.index(stage)]}}
+                _need(read_object(root / (stage + "-request.json")) == historical,
+                      "PROTOTYPE_STAGE_REQUEST_CHANGED")
+                _need(read_object(root / (stage + "-intent.json")) == {"request_sha256": digest(historical)},
+                      "PROTOTYPE_STAGE_INTENT_CHANGED")
+                receipt = read_object(root / (stage + ".json"))
+                self._check_receipt(stage, historical, receipt)
+                _need(type(receipt) is dict and receipt.get("status") == "COMPLETE",
+                      "PROTOTYPE_PACKAGE_STAGE_INCOMPLETE")
+                if stage == "validate":
+                    validation = receipt.get("validation")
+                    _need(type(validation) is dict and validation.get("passed") is True
+                          and type(validation.get("return_code")) is int and validation["return_code"] == 0,
+                          "PROTOTYPE_PACKAGE_VALIDATION_REQUIRED")
+                if stage != "export":
+                    _need(receipt == request["prior_receipts"][stage], "PROTOTYPE_PRIOR_RECEIPT_MISMATCH")
+            raw = package.read_bytes()
+            _need(hashlib.sha256(raw).hexdigest() == receipt["package_sha256"],
+                  "PROTOTYPE_EXPORT_PACKAGE_CHANGED")
+            from .prototype_release import validate_prototype_package
+            validate_prototype_package(raw, request=request,
+                runtime_receipt=request["prior_receipts"]["verify_runtime"]["runtime_receipt"],
+                imported=request["prior_receipts"]["import"],
+                artifact_binding=read_object(root / "snapshot.json"), export_receipt=receipt)
+            self._authorize(request)
+            return raw
