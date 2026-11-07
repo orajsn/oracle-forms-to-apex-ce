@@ -37,6 +37,7 @@ import tempfile
 from . import forms_design_review, forms_native_plan
 from .forms_focus import build_focus_plan
 from .prototype_admission import bound_focus_limit, FOCUS_MAX_OWNED_OBJECTS
+from .prototype_claim_resolution import resolved_mapper, ARTIFACTS as RESOLUTION_ARTIFACTS
 from .forms_focus_merge import merge_focus_blueprints
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import local_packet
@@ -153,11 +154,19 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
 
 
 def _review_index(checkpoints, plan):
+    def row(request):
+        child = checkpoints / request['focus_id']
+        result = {'focus_id': request['focus_id'],
+                  **{name + '_sha256': canonical_hash(_json(child / (name + '.json')))
+                     for name in ('request', 'mapper', 'mapper-target', 'reviewer', 'reviewer-target', 'review-receipt')}}
+        raw = _json(child / 'mapper.json')['output']
+        _, receipt = resolved_mapper(child, request, raw)
+        if receipt is not None:
+            result.update({name[:-5] + '_sha256': canonical_hash(_json(child / name))
+                           for name in RESOLUTION_ARTIFACTS})
+        return result
     return {'source_binding': plan['source_binding'], 'focus_plan_sha256': canonical_hash(plan),
-            'focuses': [{'focus_id': request['focus_id'],
-                        **{name + '_sha256': canonical_hash(_json(checkpoints / request['focus_id'] / (name + '.json')))
-                           for name in ('request', 'mapper', 'mapper-target', 'reviewer', 'reviewer-target', 'review-receipt')}}
-                       for request in plan['requests']]}
+            'focuses': [row(request) for request in plan['requests']]}
 
 
 def authorize_prototype_request(job: Path, request: dict) -> dict:
@@ -210,6 +219,7 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
         mapper_saved, reviewer_saved = _json(child / 'mapper.json'), _json(child / 'reviewer.json')
         candidate, mapper = _role(child, 'mapper', None, mapper_saved['binding']['role'],
                                   focus, identity, None, None, None)
+        candidate, _ = resolved_mapper(child, focus, candidate)
         review, reviewer = _role(child, 'reviewer', None, reviewer_saved['binding']['role'],
             {'request': focus, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)},
             identity, None, None, None)
@@ -352,6 +362,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         _save_once(child / 'request.json', request)
         candidate, mapper = _role(child, 'mapper', opaf_client, profile['mapper'], request,
             identity, target_profile_loader, processing_approval_check, approval_context)
+        candidate, _ = resolved_mapper(child, request, candidate, write=True)
         # Bound and shape-check BEFORE sending an untrusted candidate onward.
         forms_design_review._canonical(candidate, forms_design_review.MAX_CANDIDATE_BYTES)
         forms_design_review._candidate_shape(candidate, request, {row['id'] for row in request['owned_objects']})

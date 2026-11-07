@@ -107,6 +107,9 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
     if len(focuses) != len(set(focuses)) or any(not _FOCUS.fullmatch(focus) for focus in focuses):
         raise OpafError('Prototype authority focus index is invalid.')
     names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)
+    for row in review_index['focuses']:
+        if 'mapper-resolution_sha256' in row:
+            names.extend(f'{row["focus_id"]}/{name}' for name in ('mapper-resolved.json', 'mapper-resolution.json'))
     if len(names) > MAX_AUTHORITY_FILES:
         raise OpafError('Prototype authority exceeds the file-count bound.')
     rows, total = [], 0

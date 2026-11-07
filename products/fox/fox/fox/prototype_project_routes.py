@@ -5,6 +5,7 @@ import hashlib
 from copy import deepcopy
 import json
 import os
+import sqlite3
 from pathlib import Path
 import time
 import uuid
@@ -30,6 +31,10 @@ class PrototypeRunInput(BaseModel):
     approved_redacted_source: StrictBool
     approved_external_ai: StrictBool
     approved_prototype_scope: StrictBool
+
+
+class PrototypeContinuationInput(PrototypeRunInput):
+    checkpoint_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
 def source_documents(sources):
@@ -316,6 +321,127 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raise
         except recovery_errors:
             raise HTTPException(409, 'Mapping recovery was not queued: exact source approval, eligible first-mapper proof or prior retry state could not be verified. The original run is preserved; uncertain operations were not replayed.') from None
+
+    def continuation_context(c, pid, rid, owner):
+        from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+        from .prototype_mapping_recovery import RUN_ID
+        from .prototype_mapping_continuation import inspect_continuation, continuation_event_id, RECORD, EVENT, SCOPE
+        if not RUN_ID.fullmatch(rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        run = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+        if not run:
+            raise HTTPException(404, 'Prototype run not found.')
+        if (root / 'jobs').is_symlink():
+            raise ValueError('Unsafe continuation storage.')
+        job = root / 'jobs' / rid
+        snapshot, original = read_prototype_snapshot(job)
+        documents = validate_prototype_snapshot(snapshot)
+        selected, sources = snapshot['prototype'], current_sources(pid, c)
+        locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+        target = target_reader()
+        if (not locked or locked['owner'] != owner or snapshot['approvals']['owner'] != owner
+                or snapshot['project_id'] != pid or snapshot['project'] != pid
+                or run['state'] not in ('ATTENTION', 'QUEUED', 'PROCESSING', 'GENERATED') or run['artifact'] is not None
+                or run['source_hash'] != snapshot['source_hash']
+                or inventory(sources)['source_hash'] != snapshot['source_hash'] or source_documents(sources) != documents
+                or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']
+                or target['target_profile_sha256'] != selected['target_profile_sha256']
+                or canonical_hash(target['target_profile']) != selected['target_profile_sha256']
+                or len(selected['approved_chunk_hashes']) > 4096):
+            raise ValueError('Continuation owner, source, selection or target is no longer current.')
+        origin = 'approved_prototype_mapping_retry' if 'retry_of' in snapshot else 'approved_prototype_conversion'
+        original_events = c.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?', (origin, rid)).fetchall()
+        if (len(original_events) != 1 or original_events[0]['owner'] != owner
+                or original_events[0]['created'] != snapshot['approvals']['approved_at']):
+            raise ValueError('Continuation has no exact original source-owner admission event.')
+        tables = {row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, column in (('verification_queue', 'job_id'), ('verification_failed_dispositions', 'job_id'),
+                ('verification_retry_attempts', 'job_id'), ('verification_precheck_failures', 'job_id'),
+                ('verification_qa_stage_failures', 'job_id'), ('verification_project_prewrite_failures', 'job_id'),
+                ('technical_verifications', 'run'), ('acceptances', 'run')):
+            if table in tables and c.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (rid,)).fetchone():
+                raise ValueError('Verification or acceptance history conflicts with mapping continuation.')
+        events = c.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
+            '(object_id=? OR object_id LIKE ?)', (EVENT, rid, rid + ':%')).fetchall()
+        recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
+        if bool(events) != recorded or (not recorded and run['state'] != 'ATTENTION'):
+            raise ValueError('Continuation state is orphaned or not terminal.')
+        proof, closure = inspect_continuation(job, snapshot, original, target['target_profile'])
+        if recorded:
+            from .native_pipeline import _json
+            record = _json(job / RECORD)
+            if (len(events) != 1 or events[0]['owner'] != owner or events[0]['created'] != record['approved_at']
+                    or events[0]['object_id'] != continuation_event_id(rid, record)):
+                raise ValueError('Continuation event does not bind its exclusive durable record.')
+        if read_prototype_snapshot(job)[1] != original:
+            raise ValueError('Continuation source snapshot changed.')
+        projection = {'schema_version': 1, 'scope': SCOPE, 'project_id': pid, 'run_id': rid,
+            'source_hash': snapshot['source_hash'], 'source_binding': selected['source_binding'],
+            'selected_source_set_id': snapshot['selected_source_set_id'],
+            'target_profile_sha256': selected['target_profile_sha256'],
+            'approved_chunk_hashes': dict(selected['approved_chunk_hashes']),
+            'strategy': 'resolve-code-unit-owners-v1', **proof}
+        return projection, snapshot, original, closure, run
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/mapping-continuation')
+    def mapping_continuation(pid: str, rid: str, request: Request):
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection = continuation_context(c, pid, rid, p['owner'])[0]
+            return Response(json.dumps(projection), media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except recovery_errors:
+            raise HTTPException(409, 'Mapping continuation is unavailable: current approval or the exact retained checkpoint could not be verified. No operation was replayed.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/continue-mapping', status_code=202)
+    def continue_mapping(pid: str, rid: str, body: PrototypeContinuationInput, request: Request):
+        from .native_pipeline import _save_once
+        from .prototype_mapping_continuation import RECORD, EVENT, SCOPE, continuation_event_id
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection, snapshot, original, closure, run = continuation_context(c, pid, rid, p['owner'])
+                if (body.checkpoint_sha256 != projection['checkpoint_sha256']
+                        or body.source_hash != projection['source_hash'] or body.source_binding != projection['source_binding']
+                        or body.expected_current_source_set_id != projection['selected_source_set_id']
+                        or body.target_profile_sha256 != projection['target_profile_sha256']
+                        or body.approved_chunk_hashes != projection['approved_chunk_hashes']
+                        or not all(value is True for value in (body.approved_redacted_source,
+                            body.approved_external_ai, body.approved_prototype_scope))):
+                    raise ValueError('Exact checkpoint and three fresh processing consents are required.')
+                result = {'id': rid, 'state': run['state'] if projection['continuation_recorded'] else 'QUEUED',
+                          'conversion_profile': PROFILE_ID, 'continued': True}
+                if projection['continuation_recorded']:
+                    return Response(json.dumps(result), status_code=200, media_type='application/json', headers={'Cache-Control': 'no-store'})
+                if not projection['eligible']:
+                    raise ValueError('This checkpoint is not eligible for continuation.')
+                if not admission_allowed(c):
+                    raise HTTPException(429, 'Other unresolved work blocks continuation. This run has not been restarted.')
+                now = time.time()
+                record = {'schema_version': 1, 'scope': SCOPE, 'strategy': projection['strategy'],
+                    'job_id': rid, 'project_id': pid, 'snapshot_sha256': hashlib.sha256(original).hexdigest(),
+                    'checkpoint_sha256': body.checkpoint_sha256, 'files': closure,
+                    **{key: projection[key] for key in ('completed_focuses', 'blocked_focus_id', 'resolved_claim_owners')},
+                    'owner': p['owner'], 'approved_at': now,
+                    'approvals': {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True}}
+                _save_once(root / 'jobs' / rid / RECORD, record)
+                if (root / 'jobs' / rid / 'source-snapshot.json').read_bytes() != original:
+                    raise ValueError('Immutable continuation source changed.')
+                changed = c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Continuing from the retained source-bound mapping checkpoint.', now, rid))
+                if changed.rowcount != 1:
+                    raise ValueError('Continuation run state changed before queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                          (p['owner'], EVENT, continuation_event_id(rid, record), now))
+            return Response(json.dumps(result), status_code=202, media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except (*recovery_errors, sqlite3.Error):
+            raise HTTPException(409, 'Continuation was not queued: checkpoint approval or durable state could not be verified. Original outcomes remain preserved; uncertain operations were not replayed.') from None
 
     @app.post('/api/projects/{pid}/prototype-sources')
     async def upload_redacted_prototype(pid: str, request: Request,

@@ -4,6 +4,35 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.12.0] - 2026-11-07
+
+### Source-reference resolution and saved-progress continuation
+
+- Resolve a claim's code-unit ID to its exact owning Forms object using the
+  authoritative request. Reject unknown, conflicting or out-of-scope references;
+  do not infer missing business behavior or alter the original AI response.
+- Retain a separate source-bound resolution record. Independent review, merge
+  and export proof must use and verify the same resolved candidate.
+- Add an explicit same-run continuation path for a proven stopped mapping step.
+  Reuse completed model checkpoints; preserve the source snapshot, original
+  responses, run identity and previously approved sections.
+- Require current ownership, source selection, unchanged target, exact checkpoint
+  evidence and three fresh processing confirmations. Unknown outcomes and
+  database-stage failures do not become eligible for automatic retry.
+- Show saved progress and the continuation choice in the prototype conversion UI.
+
+Verification includes local ownership-resolution, same-run API, lost-record,
+transaction-orphan, conditional authority-transfer and retained-proof tests;
+modelled continuation/retry browser checks; and independent review. Read-only
+checks against a real saved job found five reusable reviews and twelve exact
+reference resolutions, preserving every original checkpoint in both container
+and host-reader contexts. No new model or database operation ran in those checks.
+
+This source change is not proof of a completed live conversion. Deployment,
+remaining model work, SQLcl validation, import, runtime checks and exact export
+must succeed before the application can be presented as generated. See
+[checkpoint continuation](docs/checkpoint-continuation.md).
+
 ## [0.11.0] - 2026-11-07
 
 ### Explicit first-mapping recovery

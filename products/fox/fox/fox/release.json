@@ -1,22 +1,22 @@
 {
-  "version": "0.11.0",
+  "version": "0.12.0",
   "released_on": "2026-11-07",
-  "title": "Explicit mapping retry with preserved source and attempt history",
+  "title": "Continue saved mapping after resolving proven source references",
   "changes": [
-    "Accept one unambiguous JSON object with an optional single Markdown code fence, without repairing model content.",
-    "Offer one explicit smaller-request retry after a proven incomplete first mapping, preserving the original attempt.",
-    "Bind all original source objects and selected whole code units to versioned request partitions.",
-    "Require current source, target and three fresh consents before creating a deterministic retry child.",
-    "Retain a validated parent and child in source history without duplicate or automatic dispatch.",
-    "Distinguish a proven terminal pre-execution mapping failure from unknown work in verifier admission."
+    "Resolve a code-unit reference to its exact owning Forms object only when the source proves the relationship.",
+    "Preserve the raw AI response and bind any resolved candidate separately to its original request and evidence.",
+    "Require independent review and downstream source-proof checks for the resolved candidate.",
+    "Offer explicit continuation of the same stopped run, reusing verified completed checkpoints without repeating their model calls.",
+    "Recheck current source, unchanged target, original code selection and three fresh consents before continuation.",
+    "Keep uncertain operations, missing proof and unsupported repairs blocked rather than automatically retrying."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
-    "Corrected prompts remain operator-selected resources. One saved real-source partition passed an approved reviewer-only retest; the complete application remains unverified.",
-    "Retry is limited to a proven first-mapper coverage failure. Unknown operations, later-stage failures and chained retries require operator reconciliation.",
+    "A diagnostic source-reference correction is not independent review, completed conversion or proof of business behavior.",
+    "Continuation is limited to a proven source-reference error before the failed section's reviewer or any database stage. It is not general recovery of interrupted model calls or imports.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",

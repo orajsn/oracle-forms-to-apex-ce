@@ -40,8 +40,9 @@ _LOCK = threading.RLock()
 _AUTHORITY_ROOT_FILES = {"binding.json", "sources-manifest.json", "packet.json", "review-index.json",
                          "merged-blueprint.json", "native-plan.json", "rendered.json", "candidate-apexlang.zip"}
 _FOCUS_FILES = ("request", "mapper", "mapper-target", "reviewer", "reviewer-target", "review-receipt")
+_RESOLUTION_FILES = ("mapper-resolved", "mapper-resolution")
 _AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-                             + "|".join(_FOCUS_FILES) + r")\.json)\Z")
+                             + "|".join(_FOCUS_FILES + _RESOLUTION_FILES) + r")\.json)\Z")
 
 
 def _authority_json(raw):
@@ -123,7 +124,10 @@ def _check_authority_members(descriptor, members):
               and re.fullmatch(r"focus-[a-f0-9]{24}", row["focus_id"]) and row["focus_id"] not in focuses,
               "PROTOTYPE_AUTHORITY_FOCUS_INVALID")
         focuses.add(row["focus_id"])
-        for kind in _FOCUS_FILES:
+        resolution = {kind + '_sha256' for kind in _RESOLUTION_FILES} & row.keys()
+        _need(not resolution or resolution == {kind + '_sha256' for kind in _RESOLUTION_FILES},
+              'PROTOTYPE_AUTHORITY_RESOLUTION_INCOMPLETE')
+        for kind in _FOCUS_FILES + (_RESOLUTION_FILES if resolution else ()):
             name = row["focus_id"] + "/" + kind + ".json"
             _need(name in members and digest(_authority_json(members[name])) == row.get(kind + "_sha256"),
                   "PROTOTYPE_AUTHORITY_FOCUS_BYTES_CHANGED")

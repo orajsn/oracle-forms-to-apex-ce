@@ -185,6 +185,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     job = Path(job)
     snapshot, raw = read_prototype_snapshot(job)
     documents = validate_prototype_snapshot(snapshot)
+    from .prototype_mapping_continuation import validate_job_continuation
+    validate_job_continuation(job, snapshot, raw)
     if 'retry_of' in snapshot:
         from .prototype_mapping_recovery import retry_run_id
         if job.name != retry_run_id(snapshot['retry_of']):
@@ -199,6 +201,7 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
             raise OpafError('Prototype immutable source snapshot changed; no further operation is authorized.')
         if approval_check(snapshot) is not True:
             raise OpafError('Prototype source-owner approval is no longer current.')
+        validate_job_continuation(job, snapshot, raw)
         return True
     # The transport performs no source/model approval itself. Repeat the same
     # current selected-source/owner check before converter GETs and POSTs too.

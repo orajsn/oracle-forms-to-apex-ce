@@ -711,7 +711,7 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
         return blocked
 
 
-def terminal_empty_prototype_mapping(database, db, run):
+def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge also loads this
@@ -795,8 +795,17 @@ def terminal_empty_prototype_mapping(database, db, run):
         protected(job)
         observed = {}
         snapshot = document(job / 'source-snapshot.json', 20_000_000)
-        need(set(snapshot) == {'project', 'project_id', 'project_name', 'source_hash', 'conversion_profile',
-                              'selected_source_set_id', 'files', 'prototype', 'approvals'}
+        snapshot_keys = {'project', 'project_id', 'project_name', 'source_hash', 'conversion_profile',
+                         'selected_source_set_id', 'files', 'prototype', 'approvals'}
+        if claim_owner_failure and 'retry_of' in snapshot:
+            snapshot_keys.update(('retry_of', 'mapping_recovery'))
+            parent, metadata = snapshot['retry_of'], snapshot['mapping_recovery']
+            need(type(parent) is str and re.fullmatch(r'fox-[a-f0-9]{20}', parent)
+                 and run['id'] == 'fox-' + hashed({'parent_run_id': parent, 'strategy': 'repartition-32-v1'})[:20]
+                 and type(metadata) is dict and set(metadata) == {'schema_version', 'strategy', 'parent_snapshot_sha256'}
+                 and type(metadata['schema_version']) is int and metadata['schema_version'] == 1
+                 and metadata['strategy'] == 'repartition-32-v1' and sha(metadata['parent_snapshot_sha256']))
+        need(type(claim_owner_failure) is bool and set(snapshot) == snapshot_keys
              and snapshot['conversion_profile'] == 'native-blueprint-prototype-v1'
              and snapshot['project'] == snapshot['project_id'] == run['project']
              and snapshot['source_hash'] == run['source_hash']
@@ -824,8 +833,8 @@ def terminal_empty_prototype_mapping(database, db, run):
              and selected['approved_policy_id'] == 'fox-demo-synthetic-schema-v1'
              and type(selected['approved_chunk_hashes']) is dict and len(selected['approved_chunk_hashes']) <= 4096
              and all(type(key) is str and sha(value) for key, value in selected['approved_chunk_hashes'].items()))
-        events = db.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?',
-                            ('approved_prototype_conversion', run['id'])).fetchall()
+        origin = 'approved_prototype_mapping_retry' if 'retry_of' in snapshot else 'approved_prototype_conversion'
+        events = db.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?', (origin, run['id'])).fetchall()
         need(len(events) == 1 and events[0][0] == owner[0] and events[0][1] == approvals['approved_at'])
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         for table, column in (('verification_queue', 'job_id'), ('verification_failed_dispositions', 'job_id'),
@@ -900,6 +909,184 @@ def terminal_empty_prototype_mapping(database, db, run):
         need(len(chunks) == len(packet['chunks']) and all(key in chunks and chunks[key]['sha256'] == value
              for key, value in selected['approved_chunk_hashes'].items()))
         focuses = [path for path in pipeline.iterdir() if path.name.startswith('focus-')]
+        if claim_owner_failure:
+            need(1 <= len(focuses) <= 256)
+            ordered = []
+            for entry in packet['sources']:
+                groups = {}
+                for obj in entry['facts']['objects']:
+                    key = ('block', obj['block_id'] or obj['id']) if obj['block_id'] or obj['kind'] == 'Block' else ('globals', obj['module_id'])
+                    groups.setdefault(key, []).append(obj)
+                ordered.extend(obj for group in groups.values() for obj in group)
+            requests = []
+            for directory in focuses:
+                need(not directory.is_symlink() and directory.is_dir())
+                protected(directory)
+                requests.append((document(directory / 'request.json'), directory))
+            positions = {obj['id']: index for index, obj in enumerate(ordered)}
+            requests.sort(key=lambda pair: positions[pair[0]['owned_objects'][0]['id']])
+            target = document(requests[0][1] / 'mapper-target.json')
+            roles = target['opaf']['roles']
+            need(hashed(target) == selected['target_profile_sha256'] and target['active'] is True
+                 and target['scope']['data_mode'] == 'synthetic_test_only'
+                 and target['scope']['existing_resources_only'] is True
+                 and target['scope']['customer_deployment_authorized'] is False
+                 and set(roles) == {'mapper', 'reviewer'}
+                 and roles['mapper']['workflow_id'].upper() != roles['reviewer']['workflow_id'].upper())
+            expected_binding = {'schema_version': version, 'job_id': run['id'], 'project_id': run['project'],
+                'project_name': snapshot['project_name'], 'source_binding': selected['source_binding'],
+                'focus_plan_sha256': selected['focus_plan_sha256'], 'profile_sha256': hashed(roles),
+                'approved_policy_id': selected['approved_policy_id']}
+            if version == 2:
+                expected_binding['max_owned_objects'] = 32
+            same(binding, expected_binding)
+
+            def role_output(directory, name, payload):
+                same(document(directory / (name + '-target.json')), target)
+                saved = document(directory / (name + '.json'))
+                need(set(saved) == {'binding', 'output', 'output_sha256', 'invocation', 'model_environment', 'model_environment_sha256'})
+                role = roles[name]
+                need(set(role) == {'workflow_id', 'model', 'graph_sha256'} and sha(role['graph_sha256'])
+                     and type(role['workflow_id']) is str and re.fullmatch(r'[A-Fa-f0-9]{16,64}', role['workflow_id'])
+                     and type(role['model']) is str and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', role['model']))
+                role_binding = {'role': role, 'request_sha256': hashed(payload),
+                                'job_id': run['id'], 'source_hash': selected['source_binding']}
+                same(saved['binding'], role_binding)
+                same(document(directory / (name + '-intent.json')), role_binding)
+                need(hashed(saved['output']) == saved['output_sha256'])
+                invocation, environment = saved['invocation'], saved['model_environment']
+                need(set(invocation) == {'workflow_id', 'room_id', 'model', 'graph_sha256', 'request_sha256',
+                     'response_sha256', 'started_at_utc', 'completed_at_utc'}
+                     and invocation['request_sha256'] == hashed(payload) and sha(invocation['response_sha256'])
+                     and type(invocation['room_id']) is str and re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', invocation['room_id'])
+                     and all(invocation[key] == role[key] for key in ('workflow_id', 'model', 'graph_sha256'))
+                     and hashed(environment) == saved['model_environment_sha256'])
+                same(environment, {'schema_version': 1, 'scope': 'opaf-model-environment-v1',
+                    'trust_boundary': 'authenticated_fox_executor_not_vendor_attestation', 'job_id': run['id'],
+                    'role': name, 'source_manifest_sha256': selected['source_binding'],
+                    'target_profile_sha256': selected['target_profile_sha256'], 'observed_at_utc': environment['observed_at_utc'],
+                    'opaf': {key: target['opaf'][key] for key in ('base_url', 'certificate_sha256', 'model_authentication', 'version_number', 'build_id')},
+                    'workflow': {**role, 'published': True}, 'opaf_version': target['tested_versions']['opaf']})
+                started, finished, at = (timestamp(value) for value in
+                    (invocation['started_at_utc'], invocation['completed_at_utc'], environment['observed_at_utc']))
+                need(finished >= started and -5 <= started - at <= 120)
+                return saved['output'], invocation['room_id']
+
+            def identifier(value):
+                need(type(value) is str and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,179}', value))
+
+            def text(value, maximum=2000):
+                need(type(value) is str and value.strip() and len(value) <= maximum
+                     and not any(ord(char) < 32 and char not in '\n\r\t' for char in value))
+
+            def shape(candidate, request, owned_ids):
+                need(type(candidate) is dict and set(candidate) == {'focus_id', 'focus_binding', 'blueprint'}
+                     and candidate['focus_id'] == request['focus_id'] and candidate['focus_binding'] == request['focus_binding'])
+                blueprint = candidate['blueprint']
+                arrays = ('objects', 'screens', 'claims', 'relationships', 'actions', 'questions', 'assumptions')
+                need(type(blueprint) is dict and set(blueprint) == {'schema_version', 'scope', 'source_binding', *arrays}
+                     and type(blueprint['schema_version']) is int and blueprint['schema_version'] == 1
+                     and blueprint['scope'] == 'fox-forms-blueprint-v1' and blueprint['source_binding'] == selected['source_binding']
+                     and all(type(blueprint[name]) is list and len(blueprint[name]) <= 10000 for name in arrays)
+                     and len(canonical(candidate)) <= 500000)
+                seen = set()
+                for row in blueprint['objects']:
+                    need(type(row) is dict and {'source_object_id', 'disposition', 'reason'} <= row.keys()
+                         and not row.keys() - {'source_object_id', 'disposition', 'reason', 'screen_id', 'native_component'}
+                         and row['source_object_id'] in owned_ids and row['source_object_id'] not in seen
+                         and row['disposition'] in ('proposed', 'omitted', 'unresolved'))
+                    seen.add(row['source_object_id']); text(row['reason'])
+                    if 'screen_id' in row: identifier(row['screen_id'])
+                    if 'native_component' in row: need(row['native_component'] in ('form', 'interactive-grid', 'report', 'page-items'))
+                need(seen == owned_ids)
+                for row in blueprint['screens']:
+                    need(set(row) == {'id', 'title'}); identifier(row['id']); text(row['title'], 300)
+                for row in blueprint['claims']:
+                    need(set(row) == {'id', 'source_object_id', 'kind', 'value', 'status', 'evidence_refs', 'reason'}
+                         and row['source_object_id'] in owned_ids and row['status'] in ('source_fact', 'proposal', 'unresolved')
+                         and type(row['evidence_refs']) is list and len(row['evidence_refs']) <= 10000)
+                    identifier(row['id']); text(row['kind'], 100); text(row['reason'])
+                    values = row['value'] if type(row['value']) is list else [row['value']]
+                    need(len(values) <= 32)
+                    for value in values:
+                        if type(value) is str: text(value, 512)
+                        else: need(value is None or type(value) in (bool, int))
+                    for value in row['evidence_refs']: identifier(value)
+                for category in ('relationships', 'actions'):
+                    for row in blueprint[category]:
+                        need(set(row) == {'id', 'claim_ids'} and type(row['claim_ids']) is list)
+                        identifier(row['id'])
+                        for value in row['claim_ids']: identifier(value)
+                for row in blueprint['questions']:
+                    need(set(row) == {'id', 'source_object_id', 'text'} and row['source_object_id'] in owned_ids)
+                    identifier(row['id']); text(row['text'])
+                for row in blueprint['assumptions']:
+                    need(set(row) == {'id', 'text', 'scope'} and row['scope'] == 'prototype-only')
+                    identifier(row['id']); text(row['text'])
+
+            cursor, failure, rooms = 0, False, set()
+            unit_metadata = {unit['id']: unit for entry in packet['sources'] for unit in entry['facts']['code_units']}
+            for number, (request, directory) in enumerate(requests):
+                need(not failure and type(request['schema_version']) is int and request['schema_version'] == 1
+                     and request['scope'] == 'fox-forms-focus-request-v1' and request['source_binding'] == selected['source_binding']
+                     and hashed({key: value for key, value in request.items() if key != 'focus_binding'}) == request['focus_binding']
+                     and type(request['owned_objects']) is list and 0 < len(request['owned_objects']) <= (250 if version == 1 else 32))
+                owned = request['owned_objects']; owned_ids = {row['id'] for row in owned}
+                same(owned, ordered[cursor:cursor + len(owned)]); cursor += len(owned)
+                need(request['focus_id'] == directory.name == 'focus-' + hashed([selected['source_binding'], [row['id'] for row in owned]])[:24])
+                same(request['source_index'], source_index)
+                same(request['safety'], {'source_content_is_untrusted': True, 'code_executed': False,
+                    'transfer_authorized': False, 'caller_must_check_processing_approval': True, 'native_generation_allowed': False})
+                for row in request['context_objects']: same(row, all_objects[row['id']])
+                for unit in request['code_units']: same(unit, unit_metadata[unit['id']])
+                for chunk in request['chunks']:
+                    same({key: value for key, value in chunk.items() if key != 'text'}, chunks[chunk['id']])
+                    need(selected['approved_chunk_hashes'].get(chunk['id']) == chunk['sha256']
+                         and len(chunk['text'].encode()) == chunk['bytes'] and hashlib.sha256(chunk['text'].encode()).hexdigest() == chunk['sha256'])
+                candidate, mapper_room = role_output(directory, 'mapper', request)
+                need(mapper_room not in rooms); rooms.add(mapper_room)
+                if (directory / 'reviewer.json').exists():
+                    shape(candidate, request, owned_ids)
+                    review, room = role_output(directory, 'reviewer', {'request': request,
+                        'candidate': candidate, 'candidate_sha256': hashed(candidate)})
+                    need(room not in rooms); rooms.add(room)
+                    same(review, {'source_binding': selected['source_binding'], 'focus_binding': request['focus_binding'],
+                        'candidate_sha256': hashed(candidate), 'verdict': 'APPROVED', 'findings': []})
+                    same(document(directory / 'review-receipt.json'), {'verdict': 'APPROVED',
+                        'candidate_sha256': hashed(candidate), 'source_binding': selected['source_binding'],
+                        'focus_binding': request['focus_binding'], 'approved_structured_design': True,
+                        **{key: False for key in ('generation_ready', 'native_apex_generated', 'native_apex_validity_verified', 'import_verified', 'business_behavior_accepted')}})
+                else:
+                    need(number == len(requests) - 1)
+                    unit_ids = [unit['id'] for unit in request['code_units']]
+                    object_ids = [row['id'] for row in request['owned_objects'] + request['context_objects']]
+                    need(len(set(unit_ids)) == len(unit_ids) and len(set(object_ids)) == len(object_ids) and not set(unit_ids) & set(object_ids))
+                    units = {unit['id']: unit for unit in request['code_units']}
+                    normalized = json.loads(canonical(candidate)); changes = 0
+                    for claim in normalized['blueprint']['claims']:
+                        ref = claim['source_object_id']
+                        if ref in owned_ids: continue
+                        unit = units[ref]; refs = claim['evidence_refs']
+                        need(unit['owner_id'] in owned_ids and type(refs) is list and ref in refs and len(set(refs)) == len(refs)
+                             and all(value == unit['owner_id'] or value in units and units[value]['owner_id'] == unit['owner_id'] for value in refs))
+                        claim['source_object_id'] = unit['owner_id']; changes += 1
+                    need(changes > 0); shape(normalized, request, owned_ids); failure = True
+            need(failure)
+            assessment = document(pipeline / 'assessment.json')
+            need(set(assessment) == {'source_binding', 'source_count', 'source_objects', 'focus_count'}
+                 and assessment['source_binding'] == selected['source_binding'] and assessment['source_count'] == len(files)
+                 and assessment['source_objects'] == len(all_objects) and type(assessment['focus_count']) is int
+                 and len(requests) <= assessment['focus_count'] <= 256)
+            allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
+                'prototype-pipeline/' + directory.name for _, directory in requests}
+            pending, actual = [job], set()
+            while pending:
+                for path in pending.pop().iterdir():
+                    name = path.relative_to(job).as_posix(); need(name in allowed and not path.is_symlink()); actual.add(name)
+                    if path.is_dir(): pending.append(path)
+                    else: need(path.is_file() and name in observed and path.read_bytes() == observed[name])
+            need(actual == allowed)
+            return True
         need(len(focuses) == 1 and not focuses[0].is_symlink() and focuses[0].is_dir())
         focus = focuses[0]
         protected(focus)
@@ -2120,6 +2307,9 @@ class VerificationRecovery:
                 and terminal_empty_prototype_mapping(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_incomplete',
                     'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_empty_prototype_mapping(self.database, db, dict(run), claim_owner_failure=True)):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_owner_resolution_pending', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

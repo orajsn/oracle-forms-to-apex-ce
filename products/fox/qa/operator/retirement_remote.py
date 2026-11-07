@@ -161,7 +161,8 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                       'RETIREMENT_REMOTE_QUEUED_WORK_NOT_ADMISSIBLE')
                 waiting.append({'binding': binding.payload(), 'record_sha256': row['record_sha256']})
             elif value['recovery_state'] in {'precheck_failed_closed','qa_stage_failed_closed',
-                    'project_prewrite_failed_closed', 'prototype_mapping_incomplete'}:
+                    'project_prewrite_failed_closed', 'prototype_mapping_incomplete',
+                    'prototype_mapping_owner_resolution_pending'}:
                 # The production recovery reader has revalidated the separate
                 # append-only row, original queue/claim and retained package.
                 # The prototype family instead rechecks its exact sealed first

@@ -33,7 +33,7 @@ def generated(client, configured, monkeypatch):
         expected_source_binding=selected['source_binding'], approved_chunk_hashes=selected['approved_chunk_hashes'],
         approved_policy_id=selected['approved_policy_id'], opaf_client=SyntheticOpaf(),
         profile=deepcopy(PROFILE), target_profile_loader=lambda: deepcopy(TARGET),
-        processing_approval_check=lambda _: True, converter_adapter=CompleteSyntheticConverter())
+        processing_approval_check=lambda _: True, converter_adapter=CompleteSyntheticConverter(), focus_schema_version=selected['schema_version'])
     assert result['status'] == 'APEX_GENERATED'
     (job / 'prototype-result.json').write_text(json.dumps(result), encoding='utf-8')
     # The API configuration fixture uses a synthetic approved target hash. Bind
