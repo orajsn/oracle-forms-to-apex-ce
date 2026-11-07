@@ -132,6 +132,9 @@ class RegistrationExecutor:
     def _receipt_scope(self):
         return PLAN_SCOPE
 
+    def _roles(self):
+        return ROLES
+
     @staticmethod
     def _key(digest, role, operation, kind):
         return digest + '-' + role + '-' + operation + '-' + kind + '.json'
@@ -199,7 +202,7 @@ class RegistrationExecutor:
         _require(all(type(item) is dict for item in items), 'Invalid workflow listing item.')
         seen = set(item['workflow_id'].upper() for item in plan['existing_profile']['opaf']['roles'].values())
         output = {}
-        for role in ROLES:
+        for role in self._roles():
             candidate = plan['candidates']['candidates'][role]
             matches = [item for item in items if item.get('name') == candidate['header']['name']]
             _require(len(matches) <= 1, 'Duplicate candidate workflow name.')
@@ -240,7 +243,7 @@ class RegistrationExecutor:
         """One create OR publish only. Unknown outcomes retain intent and prohibit retry."""
         try:
             _require(explicit_apply is True, 'Explicit registration authorization is required.')
-            _require(role in ROLES and operation in ('create', 'publish'), 'Invalid registration operation.')
+            _require(role in self._roles() and operation in ('create', 'publish'), 'Invalid registration operation.')
             digest = self._validated_plan(plan, expected_plan_sha256)
             key = self._key(digest, role, operation, 'intent')
             _require(self.store.read(key) is None, 'Operation already attempted; no automatic replay.')

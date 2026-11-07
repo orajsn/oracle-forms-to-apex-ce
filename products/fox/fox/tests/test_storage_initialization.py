@@ -19,7 +19,7 @@ from fox.intake import checked_source
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 BASE_TABLES = {'projects', 'sources', 'sessions', 'attempts', 'runs', 'events',
-               'acceptances', 'prepared_uploads'}
+               'acceptances', 'prepared_uploads', 'source_redaction_receipts'}
 HISTORY_TABLES = {'source_sets', 'source_set_members', 'project_source_selection'}
 LEGACY_SCHEMA = '''
 CREATE TABLE projects(id TEXT PRIMARY KEY,owner TEXT NOT NULL,customer TEXT NOT NULL,name TEXT NOT NULL,description TEXT NOT NULL,created REAL NOT NULL);
@@ -138,10 +138,17 @@ def test_core_constraints_remain_enforced(tmp_path):
             source_history.create_project_selection(connection, 'p', 1)
             connection.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
                                ('r1', 'p', 'a' * 64, 'ATTENTION', 'Synthetic', 1, 1, None))
-        with pytest.raises(sqlite3.IntegrityError):
-            with connection:
-                connection.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
-                                   ('r2', 'p', 'a' * 64, 'ATTENTION', 'Synthetic', 1, 1, None))
+        # Explicit recovery children retain the same exact project/source.
+        # Ordinary duplicate admission is serialized in the API, while the
+        # run primary key and project foreign key stay database-enforced.
+        with connection:
+            connection.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
+                               ('r2', 'p', 'a' * 64, 'QUEUED', 'Explicit synthetic retry', 1, 1, None))
+        for rid, pid in [('r1', 'p'), ('r3', 'missing-project')]:
+            with pytest.raises(sqlite3.IntegrityError):
+                with connection:
+                    connection.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
+                                       (rid, pid, 'a' * 64, 'ATTENTION', 'Synthetic', 1, 1, None))
 
 
 def test_caller_controls_history_transaction_commit_or_rollback(tmp_path):

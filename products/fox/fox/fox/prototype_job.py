@@ -24,7 +24,7 @@ from .opaf import ConverterClient, OpafClient, OpafError, canonical_hash
 from .project_conversion import _validated_source_bytes
 from .prototype_pipeline import run_prototype_pipeline
 from .prototype_transport import PrototypeHttpConverterAdapter
-from .prototype_admission import PROFILE_ID, prepare_prototype_admission
+from .prototype_admission import PROFILE_ID, bound_focus_limit, prepare_prototype_admission
 
 MAX_SNAPSHOT_BYTES = 20_000_000
 _SHA = re.compile(r'[a-f0-9]{64}\Z')
@@ -56,14 +56,17 @@ def validate_prototype_snapshot(snapshot):
                 or not re.fullmatch(r'ss-[a-f0-9]{32}', snapshot['selected_source_set_id'])):
             raise ValueError()
         approvals, selected = snapshot['approvals'], snapshot['prototype']
+        bound_focus_limit(selected)
+        selected_keys = {'schema_version', 'source_binding', 'focus_plan_sha256',
+                         'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
+        if selected['schema_version'] == 2:
+            selected_keys.add('max_owned_objects')
         if (not isinstance(approvals, dict) or any(approvals.get(key) is not True for key in
                 ('redacted_source', 'external_ai', 'synthetic_prototype'))
                 or not isinstance(approvals.get('owner'), str) or not 1 <= len(approvals['owner']) <= 180
                 or type(approvals.get('approved_at')) not in (int, float)
                 or not math.isfinite(approvals['approved_at']) or approvals['approved_at'] <= 0
-                or not isinstance(selected, dict) or set(selected) != {'schema_version', 'source_binding',
-                    'focus_plan_sha256', 'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
-                or type(selected['schema_version']) is not int or selected['schema_version'] != 1
+                or not isinstance(selected, dict) or set(selected) != selected_keys
                 or any(not isinstance(selected.get(key), str) or not _SHA.fullmatch(selected[key])
                        for key in ('source_binding', 'focus_plan_sha256', 'target_profile_sha256'))):
             raise ValueError()
@@ -78,9 +81,12 @@ def validate_prototype_snapshot(snapshot):
             target_profile_sha256=selected['target_profile_sha256'],
             approved_redacted_source=approvals['redacted_source'],
             approved_external_ai=approvals['external_ai'],
-            approved_prototype_scope=approvals['synthetic_prototype'])
+            approved_prototype_scope=approvals['synthetic_prototype'],
+            schema_version=selected['schema_version'])
         if rebuilt['prototype'] != selected:
             raise ValueError()
+        from .prototype_mapping_recovery import validate_retry_lineage
+        validate_retry_lineage(snapshot)
     except (KeyError, ValueError, TypeError, AttributeError, OverflowError):
         raise OpafError('Prototype source, selected scope or persisted permission is invalid or stale.') from None
     return documents
@@ -179,6 +185,10 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     job = Path(job)
     snapshot, raw = read_prototype_snapshot(job)
     documents = validate_prototype_snapshot(snapshot)
+    if 'retry_of' in snapshot:
+        from .prototype_mapping_recovery import retry_run_id
+        if job.name != retry_run_id(snapshot['retry_of']):
+            raise OpafError('Prototype mapping-recovery job differs from its bound parent identity.')
     if approval_check(snapshot) is not True:
         raise OpafError('Prototype source-owner approval is no longer current.')
     selected = snapshot['prototype']
@@ -209,7 +219,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         approved_chunk_hashes=selected['approved_chunk_hashes'], approved_policy_id=selected['approved_policy_id'],
         opaf_client=runtime['opaf_client'], profile=runtime['profile'],
         target_profile_loader=runtime['target_profile_loader'], processing_approval_check=still_approved,
-        converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'))
+        converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
+        focus_schema_version=selected['schema_version'])
     still_approved()
     _save_result(job, result)
     return result

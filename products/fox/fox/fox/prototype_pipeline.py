@@ -36,6 +36,7 @@ import tempfile
 
 from . import forms_design_review, forms_native_plan
 from .forms_focus import build_focus_plan
+from .prototype_admission import bound_focus_limit, FOCUS_MAX_OWNED_OBJECTS
 from .forms_focus_merge import merge_focus_blueprints
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import local_packet
@@ -196,7 +197,8 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
     if packet != _artifact_json(checkpoints / 'packet.json'):
         raise OpafError('Prototype facts do not match fresh retained source bytes.')
     plan = build_focus_plan(documents, expected_source_binding=binding['source_binding'],
-                            approved_chunk_hashes=manifest['selected_chunk_hashes'])
+                            approved_chunk_hashes=manifest['selected_chunk_hashes'],
+                            max_owned_objects=bound_focus_limit(binding))
     if canonical_hash(plan) != binding['focus_plan_sha256']:
         raise OpafError('Prototype focus selection differs from its retained binding.')
     candidates = []
@@ -278,7 +280,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            project_id, project_name, expected_source_binding,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
-                           converter_adapter=None, renderer=None):
+                           converter_adapter=None, renderer=None, focus_schema_version=1):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -300,12 +302,16 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
             or profile['mapper'].get('workflow_id', '').upper() == profile['reviewer'].get('workflow_id', '').upper()):
         raise OpafError('Prototype requires separately configured mapper and reviewer workflows.')
     packet = local_packet(documents)
+    strategy = {'schema_version': focus_schema_version}
+    if type(focus_schema_version) is int and focus_schema_version == 2:
+        strategy['max_owned_objects'] = FOCUS_MAX_OWNED_OBJECTS
+    limit = bound_focus_limit(strategy)
     plan = build_focus_plan(documents, expected_source_binding=expected_source_binding,
-                            approved_chunk_hashes=approved_chunk_hashes)
+                            approved_chunk_hashes=approved_chunk_hashes, max_owned_objects=limit)
     _directory(job)
     checkpoints = job / 'prototype-pipeline'
     _directory(checkpoints)
-    binding = {'schema_version': 1, 'job_id': job.name, 'project_id': project_id,
+    binding = {**strategy, 'job_id': job.name, 'project_id': project_id,
                'project_name': project_name, 'source_binding': packet['source_binding'],
                'focus_plan_sha256': canonical_hash(plan),
                'profile_sha256': canonical_hash({name: profile[name] for name in ('mapper', 'reviewer')}),

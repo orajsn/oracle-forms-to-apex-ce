@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -33,6 +34,63 @@ class OpafError(RuntimeError):
 
 def canonical_hash(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
+
+
+def _unique_json_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON property.')
+        result[key] = value
+    return result
+
+
+def _finite_json_constant(value):
+    raise ValueError('Nonfinite JSON value.')
+
+
+def parse_model_message(message):
+    """Accept one JSON object, optionally wrapped in one exact Markdown fence.
+
+    This only unwraps transport formatting. It does not repair, extract or
+    synthesize model content. The invocation hash still covers the untouched
+    API response, including any original fence.
+    """
+    if isinstance(message, str):
+        raw = message.strip()
+        if raw.startswith('```'):
+            fenced = re.fullmatch(r'```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```', raw)
+            if fenced is None:
+                raise ValueError('Invalid model fence.')
+            raw = fenced.group(1)
+        try:
+            message = json.loads(raw, object_pairs_hook=_unique_json_pairs, parse_constant=_finite_json_constant)
+        except RecursionError:
+            raise ValueError('Model value is too deep.') from None
+
+    # The API can already return a dictionary. Verify its entire JSON value,
+    # including nonfinite floats (also 1e999 parsed from otherwise valid JSON).
+    def visit(value, depth=0):
+        if depth > 100:
+            raise ValueError('Model value is too deep.')
+        if type(value) is dict:
+            for key, child in value.items():
+                if type(key) is not str:
+                    raise ValueError('Invalid model property.')
+                visit(child, depth + 1)
+        elif type(value) is list:
+            for child in value:
+                visit(child, depth + 1)
+        elif type(value) is float:
+            if not math.isfinite(value):
+                raise ValueError('Nonfinite model value.')
+        elif value is not None and type(value) not in (str, bool, int):
+            raise ValueError('Invalid model JSON value.')
+
+    if type(message) is not dict:
+        raise ValueError('Model output must be one JSON object.')
+    visit(message)
+    return message
 
 
 def _utc_now():
@@ -132,8 +190,10 @@ class OpafClient:
                 if 'agent_factory_session' not in cookies:
                     raise OpafError('OPAF did not establish an authenticated session.')
                 self.cookie = 'agent_factory_session='+cookies['agent_factory_session'].value
-            try: return json.loads(raw)
-            except ValueError: raise OpafError('OPAF returned an unsupported response format.') from None
+            try:
+                return json.loads(raw, object_pairs_hook=_unique_json_pairs, parse_constant=_finite_json_constant)
+            except (ValueError, RecursionError):
+                raise OpafError('OPAF returned an unsupported response format.') from None
         finally:
             conn.close()
 
@@ -246,8 +306,7 @@ class OpafClient:
                     {**role,'started_at_utc':started,'completed_at_utc':started})
             response=self._request('POST','/v1/agentBuilder/run/'+workflow_id,{'message':encoded})
             completed=_utc_now().isoformat()
-            message=response.get('message')
-            if isinstance(message,str):message=json.loads(message)
+            message=parse_model_message(response.get('message'))
             if not isinstance(message,dict) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',response.get('roomId','')):
                 raise OpafError('OPAF did not return structured output with an invocation identity.')
             invocation={'workflow_id':workflow_id,'room_id':response['roomId'],'model':role['model'],

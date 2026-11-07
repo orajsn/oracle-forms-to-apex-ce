@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field, StrictBool
 from . import source_history
 from .intake import inventory, MAX_FILE_BYTES
 from .partial_draft import saved_draft_scope
-from .opaf import OpafError
+from .opaf import OpafError, canonical_hash
 from .prototype_admission import (PROFILE_ID, describe_prototype_sources,
                                   prepare_prototype_admission)
 
@@ -147,6 +148,175 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
     def download_generated_prototype(pid: str, rid: str, request: Request):
         return generated_prototype(pid, rid, request)
 
+    def recovery_context(c, pid, rid, owner):
+        from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+        from .prototype_mapping_recovery import RUN_ID, mapping_recovery_proof, retry_run_id, STRATEGY
+        if not RUN_ID.fullmatch(rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        run = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+        if not run:
+            raise HTTPException(404, 'Prototype run not found.')
+        if (root / 'jobs').is_symlink():
+            raise ValueError('Unsafe mapping-recovery storage.')
+        snapshot, original = read_prototype_snapshot(root / 'jobs' / rid)
+        documents = validate_prototype_snapshot(snapshot)
+        locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+        sources = current_sources(pid, c)
+        if (not locked or locked['owner'] != owner or snapshot['approvals']['owner'] != owner
+                or snapshot['project_id'] != pid or snapshot['project'] != pid
+                or run['state'] != 'ATTENTION' or run['artifact'] is not None
+                or run['source_hash'] != snapshot['source_hash']
+                or inventory(sources)['source_hash'] != snapshot['source_hash']
+                or source_documents(sources) != documents
+                or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']
+                or c.execute('SELECT 1 FROM acceptances WHERE run=?', (rid,)).fetchone()
+                or not c.execute('SELECT 1 FROM events WHERE owner=? AND action=? AND object_id=?',
+                    (owner, 'approved_prototype_conversion', rid)).fetchone()):
+            raise ValueError('Mapping-recovery permission or current source is stale.')
+        target = target_reader()
+        if canonical_hash(target['target_profile']) != target['target_profile_sha256']:
+            raise ValueError('Mapping-recovery target changed.')
+        proof, retained_target = mapping_recovery_proof(root / 'jobs' / rid, snapshot, original)
+        current_target = target['target_profile']
+        role_only = deepcopy(retained_target)
+        role_only['opaf']['roles'] = deepcopy(current_target['opaf']['roles'])
+        if (canonical_hash(role_only) != target['target_profile_sha256'] or any(
+                current_target['opaf']['roles'][name]['model'] != retained_target['opaf']['roles'][name]['model']
+                for name in ('mapper', 'reviewer'))):
+            raise ValueError('Mapping-recovery execution destination or model changed.')
+        selected = snapshot['prototype']
+        if len(selected['approved_chunk_hashes']) > 4096:
+            raise ValueError('Mapping-recovery selection exceeds the admission bound.')
+        admission = prepare_prototype_admission(documents,
+            expected_source_binding=selected['source_binding'],
+            approved_chunk_hashes=selected['approved_chunk_hashes'],
+            target_profile_sha256=target['target_profile_sha256'],
+            approved_redacted_source=True, approved_external_ai=True,
+            approved_prototype_scope=True, schema_version=2)
+        child_id = retry_run_id(rid)
+        child = c.execute('SELECT * FROM runs WHERE id=?', (child_id,)).fetchone()
+        child_job = root / 'jobs' / child_id
+        exists = child_job.exists() or child_job.is_symlink()
+        if bool(child) != exists:
+            raise ValueError('Orphan mapping-recovery state requires reconciliation.')
+        others = c.execute('SELECT id FROM runs WHERE project=? AND source_hash=?',
+                           (pid, snapshot['source_hash'])).fetchall()
+        if any(row['id'] not in (rid, child_id) for row in others):
+            raise ValueError('Unrecognized same-source execution requires reconciliation.')
+        digest = hashlib.sha256(original).hexdigest()
+        metadata = {'schema_version': 1, 'strategy': STRATEGY, 'parent_snapshot_sha256': digest}
+        if child:
+            saved, child_raw = read_prototype_snapshot(child_job)
+            validate_prototype_snapshot(saved)
+            expected = deepcopy(snapshot)
+            expected.update(retry_of=rid, mapping_recovery=metadata, prototype=admission['prototype'])
+            expected['approvals']['approved_at'] = saved['approvals']['approved_at']
+            if (canonical_hash(saved) != canonical_hash(expected) or child['project'] != pid or child['source_hash'] != snapshot['source_hash']
+                    or child['state'] not in ('QUEUED', 'PROCESSING', 'ATTENTION', 'GENERATED')
+                    or child['artifact'] is not None
+                    or c.execute('SELECT COUNT(*) FROM events WHERE owner=? AND action=? AND object_id=?',
+                        (owner, 'approved_prototype_mapping_retry', child_id)).fetchone()[0] != 1):
+                raise ValueError('Existing mapping-recovery child differs from its approved parent.')
+            # Never interpret an uncertain outcome as permission to submit a
+            # second execution, even when the previous HTTP response was lost.
+            for path in child_job.rglob('*'):
+                if path.is_symlink():
+                    raise ValueError('Unsafe existing mapping-recovery child.')
+                if path.name.endswith('-intent.json') and not path.with_name(
+                        path.name.replace('-intent.json', '.json')).is_file():
+                    raise ValueError('Existing mapping-recovery outcome is uncertain.')
+            if read_prototype_snapshot(child_job)[1] != child_raw:
+                raise ValueError('Existing mapping-recovery child changed.')
+            proof.update(eligible=False, reason='A mapping retry already exists. Open that run; it has not been restarted.')
+        if read_prototype_snapshot(root / 'jobs' / rid)[1] != original:
+            raise ValueError('Mapping-recovery parent changed.')
+        projection = {'schema_version': 1, 'scope': 'fox-prototype-mapping-recovery-v1',
+            'project_id': pid, 'run_id': rid, 'source_hash': snapshot['source_hash'],
+            'source_binding': selected['source_binding'],
+            'selected_source_set_id': snapshot['selected_source_set_id'],
+            'target_profile_sha256': target['target_profile_sha256'],
+            'parent_target_profile_sha256': selected['target_profile_sha256'],
+            'target_profile_changed': target['target_profile_sha256'] != selected['target_profile_sha256'],
+            'approved_chunk_hashes': dict(selected['approved_chunk_hashes']),
+            'parent_snapshot_sha256': digest, 'strategy': STRATEGY,
+            'existing_retry_run_id': child_id if child else None, **proof}
+        return projection, snapshot, original, admission, child_id, child, metadata
+
+    recovery_errors = (ValueError, KeyError, TypeError, AttributeError, OSError,
+                       RuntimeError, ImportError, RecursionError, OverflowError)
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/mapping-recovery')
+    def inspect_mapping_recovery(pid: str, rid: str, request: Request):
+        p = project(request, pid)  # Owner check precedes every filesystem read.
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection = recovery_context(c, pid, rid, p['owner'])[0]
+            return Response(json.dumps(projection), media_type='application/json',
+                            headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except recovery_errors:
+            raise HTTPException(409, 'Mapping recovery is unavailable because the current source, permission or retained first-mapper proof is unsafe, stale or needs reconciliation. No operation was retried.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/retry-mapping', status_code=202)
+    def retry_mapping(pid: str, rid: str, body: PrototypeRunInput, request: Request):
+        from .native_pipeline import _sync
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection, parent, original, admission, child_id, child, metadata = recovery_context(c, pid, rid, p['owner'])
+                selected = parent['prototype']
+                if (body.source_hash != parent['source_hash']
+                        or body.source_binding != selected['source_binding']
+                        or body.expected_current_source_set_id != parent['selected_source_set_id']
+                        or body.target_profile_sha256 != projection['target_profile_sha256']
+                        or body.approved_chunk_hashes != selected['approved_chunk_hashes']
+                        or not all(value is True for value in (body.approved_redacted_source,
+                            body.approved_external_ai, body.approved_prototype_scope))):
+                    raise ValueError('Exact parent scope and explicit approvals are required.')
+                result = {'id': child_id, 'state': child['state'] if child else 'QUEUED',
+                          'conversion_profile': PROFILE_ID, 'summary': admission['summary'], 'retry_of': rid}
+                if child:
+                    return Response(json.dumps(result), status_code=200, media_type='application/json',
+                                    headers={'Cache-Control': 'no-store'})
+                if not projection['eligible']:
+                    raise ValueError('This run is not eligible for bounded mapping recovery.')
+                if not admission_allowed(c):
+                    raise HTTPException(429, 'Another conversion or verification requires completion. Your existing run is preserved.')
+                if c.execute("SELECT COUNT(*) FROM runs WHERE state IN ('QUEUED','PROCESSING')").fetchone()[0] >= 5:
+                    raise HTTPException(429, 'The conversion queue is full. Your existing run is preserved.')
+                snapshot = deepcopy(parent)
+                snapshot.update(retry_of=rid, mapping_recovery=metadata, prototype=admission['prototype'])
+                now = time.time()
+                snapshot['approvals']['approved_at'] = now
+                raw = json.dumps(snapshot, ensure_ascii=False, allow_nan=False).encode('utf-8')
+                if len(raw) > 20_000_000:
+                    raise HTTPException(413, 'The source-bound retry exceeds the prototype job limit.')
+                # Any partial filesystem write is preserved. A lost/failed DB
+                # commit leaves an orphan that the next request must block.
+                job = root / 'jobs' / child_id
+                job.mkdir()
+                with (job / 'source-snapshot.json').open('xb') as stream:
+                    stream.write(raw)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                _sync(job)
+                _sync(job.parent)
+                if (root / 'jobs' / rid / 'source-snapshot.json').read_bytes() != original:
+                    raise ValueError('Mapping-recovery parent changed before queueing.')
+                c.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)', (child_id, pid, parent['source_hash'],
+                    'QUEUED', 'Waiting for explicit smaller-batch mapping recovery.', now, now, None))
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                          (p['owner'], 'approved_prototype_mapping_retry', child_id, now))
+            return Response(json.dumps(result), status_code=202, media_type='application/json',
+                            headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except recovery_errors:
+            raise HTTPException(409, 'Mapping recovery was not queued: exact source approval, eligible first-mapper proof or prior retry state could not be verified. The original run is preserved; uncertain operations were not replayed.') from None
+
     @app.post('/api/projects/{pid}/prototype-sources')
     async def upload_redacted_prototype(pid: str, request: Request,
             files: list[UploadFile] = File(...), receipts: list[UploadFile] = File(...),
@@ -253,7 +423,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     target_profile_sha256=digest,
                     approved_redacted_source=body.approved_redacted_source,
                     approved_external_ai=body.approved_external_ai,
-                    approved_prototype_scope=body.approved_prototype_scope)
+                    approved_prototype_scope=body.approved_prototype_scope, schema_version=2)
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Source approval is missing or changed. Review the exact files, code selection and processing permissions again.') from None
             old = c.execute('SELECT id,state FROM runs WHERE project=? AND source_hash=?', (pid, body.source_hash)).fetchone()

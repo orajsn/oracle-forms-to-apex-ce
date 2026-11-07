@@ -4,6 +4,49 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.11.0] - 2026-11-07
+
+### Explicit first-mapping recovery
+
+- Parse a single model JSON object with an optional single JSON/plain Markdown
+  fence. Reject prose, multiple values, duplicate keys and nonfinite values;
+  retain the untouched API-response hash. No model content is synthesized.
+- Add a read-only recovery check and an explicitly approved, deterministic child
+  attempt for a proven incomplete first mapper. Preserve the original source,
+  selected code units and failed attempt. Unknown, later-stage, reviewer-rejected
+  and chained attempts are not automatically retried.
+- Bind new request partitions to schema 2 with at most 32 owned objects each;
+  preserve schema-1/250 historical reconstruction. Every source object and whole
+  selected code unit remains covered; smaller requests are not omitted Forms.
+- Permit only a freshly approved role-profile update with the same destination,
+  model and processing boundary. Show the changed-workflow notice in the UI.
+- Migrate only the legacy SQLite run-source uniqueness constraint, preserving
+  run IDs/rows, primary/foreign keys and transaction rollback. Normal generation
+  retains serialized duplicate guards. History accepts only the validated
+  deterministic parent/child pair and shows two linked runs, not duplicate data.
+- Recognize an exact, sealed, empty first-mapper failure as terminal before any
+  executable work. This grants neither success nor retry authority. Generic
+  attention, missing proof, later work and unknown operations remain blocking.
+- Add separate v3 analysis/review prompt resources that distinguish non-executing
+  analysis from source safety flags. Existing workflow resources are preserved.
+- Add a partition-aware v4 reviewer that accepts supported module-level analysis
+  without demanding screens from a partition that owns no Blocks. Known Block
+  and Item mapping, ownership and behavior-evidence requirements remain intact.
+  Registration permits only the new reviewer and preserves the existing mapper.
+
+Verification: scoped local API/SQLite/history/rollback and parser regressions;
+simulated desktop/mobile recovery UI; independent review; and read-only tests
+of the terminal-failure classifier on actual retained proof in both rootless UID
+contexts. Legacy fixture cases were tested in an isolated source copy.
+
+**Not a live conversion-readiness claim.** The real-source diagnostic returned
+structured behavior analysis. One explicitly approved reviewer-only retest of
+that unchanged saved module-level candidate returned `APPROVED`, zero findings;
+generation was not repeated and no import occurred. This verifies one partition,
+not the whole application. Guarded deployment, a complete real-file
+import/runtime/export and human business review remain separate. See
+[mapping recovery](docs/prototype-mapping-recovery.md).
+
 ## [0.10.0] - 2026-11-07
 
 ### Generated prototype output and connected verification adapters

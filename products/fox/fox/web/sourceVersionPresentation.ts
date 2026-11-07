@@ -46,7 +46,7 @@ function metadata(value:unknown,selected:string|null):SourceSetMetadata{
   ||typeof value.created!=='number'||!Number.isFinite(value.created)||value.created<0||value.created>253402300799
   ||typeof value.origin!=='string'||!['upload','legacy-current','exclude'].includes(value.origin)
   ||typeof value.is_selected!=='boolean'||value.is_selected!==(value.id===selected)
-  ||!Array.isArray(value.run_ids)||value.run_ids.length>1||value.run_ids.some(id=>!fileId(id)))throw invalid();
+  ||!Array.isArray(value.run_ids)||value.run_ids.length>2||value.run_ids.some(id=>!fileId(id))||new Set(value.run_ids).size!==value.run_ids.length)throw invalid();
  return {id:value.id,source_hash:value.source_hash,file_count:value.file_count,source_bytes:value.source_bytes,created:value.created,
   origin:value.origin as SourceSetMetadata['origin'],is_selected:value.is_selected,run_ids:[...value.run_ids] as string[]};
 }

@@ -346,13 +346,36 @@ def create_project_selection(c: sqlite3.Connection, pid: str, now: float) -> Non
 def _metadata(c: sqlite3.Connection, head: dict, selected: str | None) -> dict:
     result = {key: head[key] for key in ('id', 'source_hash', 'file_count', 'source_bytes', 'created', 'origin')}
     result['is_selected'] = head['id'] == selected
-    # The runs table is unique by project/hash. Fetch two to detect corruption,
-    # not truncate it into a seemingly valid public response.
-    run_ids = [row['id'] for row in _rows(c, 'SELECT id FROM runs WHERE project=? AND source_hash=? ORDER BY created,id LIMIT 2', (head['project'], head['source_hash']))]
-    if (len(run_ids) > 1 or any(type(value) is not str or not 1 <= len(value) <= 128
+    # One source may have exactly one explicit, deterministic mapping-recovery
+    # child. Fetch three to reject arbitrary duplicates, never truncate history.
+    run_ids = [row['id'] for row in _rows(c, 'SELECT id FROM runs WHERE project=? AND source_hash=? ORDER BY created,id LIMIT 3', (head['project'], head['source_hash']))]
+    if (len(run_ids) > 2 or any(type(value) is not str or not 1 <= len(value) <= 128
                               or any(ord(char) < 32 or ord(char) == 127 for char in value)
                               for value in run_ids)):
         _fail()
+    if len(run_ids) == 2:
+        # Lazy pure ID derivation avoids storage-initialization import cycles.
+        # Events are server-authored display lineage, not permission to execute
+        # or proof of model/technical/human success; those recheck snapshots.
+        from .prototype_mapping_recovery import retry_run_id
+        try:
+            pairs = [(parent, child) for parent, child in (run_ids, run_ids[::-1])
+                     if retry_run_id(parent) == child]
+        except ValueError:
+            _fail()
+        if len(pairs) != 1:
+            _fail()
+        parent, child = pairs[0]
+        owner = _project(c, head['project'])['owner']
+        events = _rows(c, '''SELECT owner,action,object_id FROM events
+            WHERE object_id IN (?,?) AND action IN (?,?) LIMIT 5''',
+            (parent, child, 'approved_prototype_conversion', 'approved_prototype_mapping_retry'))
+        expected = [(owner, 'approved_prototype_conversion', parent),
+                    (owner, 'approved_prototype_mapping_retry', child)]
+        if (len(events) != 2 or
+                {(row['owner'], row['action'], row['object_id']) for row in events} != set(expected)):
+            _fail()
+        run_ids = [parent, child]
     result['run_ids'] = run_ids
     return result
 

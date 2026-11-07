@@ -711,6 +711,289 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
         return blocked
 
 
+def terminal_empty_prototype_mapping(database, db, run):
+    """Recognize one sealed first EMPTY mapper, not success or retry authority.
+
+    Deliberately self-contained stdlib: the transition bridge also loads this
+    reviewed module in the serving legacy namespace, which has no new prototype
+    modules. Producer-held durable bindings are checked here; fresh XML semantic
+    reconstruction and current processing consent remain the recovery API's job.
+    Unknown/missing/extra evidence and all later work remain blocking.
+    """
+    import math
+    import os
+
+    def need(value):
+        if not value:
+            raise ValueError('Unconfirmed terminal prototype mapping.')
+
+    def sha(value):
+        return type(value) is str and re.fullmatch(r'[a-f0-9]{64}', value) is not None
+
+    def canonical(value):
+        return json.dumps(value, sort_keys=True, separators=(',', ':'),
+                          ensure_ascii=False, allow_nan=False).encode('utf-8')
+
+    def hashed(value):
+        return hashlib.sha256(canonical(value)).hexdigest()
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            need(key not in result)
+            result[key] = value
+        return result
+
+    def protected(path, private=False):
+        need(not path.is_symlink())
+        if os.name == 'posix':
+            metadata = path.stat()
+            need(metadata.st_uid == owner_uid and metadata.st_mode & (0o077 if private else 0o022) == 0)
+
+    def read(path, maximum=2_000_000):
+        protected(path)
+        need(not path.is_symlink() and path.is_file() and 0 < path.stat().st_size <= maximum)
+        need(path.stat().st_nlink == 1)
+        raw = path.read_bytes()
+        need(0 < len(raw) <= maximum)
+        observed[path.relative_to(job).as_posix()] = raw
+        return raw
+
+    def document(path, maximum=2_000_000):
+        value = json.loads(read(path, maximum).decode('utf-8'), object_pairs_hook=unique,
+                           parse_constant=lambda _: need(False))
+        need(type(value) is dict)
+        canonical(value)  # Also refuse overflowing/nonfinite decoded numbers.
+        return value
+
+    def same(left, right):
+        need(canonical(left) == canonical(right))
+
+    def timestamp(value):
+        need(type(value) is str and re.fullmatch(
+            r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)', value))
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+
+    try:
+        need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
+             and type(run.get('id')) is str and re.fullmatch(r'fox-[a-f0-9]{20}', run['id'])
+             and sha(run.get('source_hash')) and type(run.get('project')) is str)
+        root = Path(database).absolute().parent
+        job = root / 'jobs' / run['id']
+        need(root.resolve() == root and all(not path.is_symlink() and path.is_dir()
+             for path in (root, root / 'jobs', job)))
+        owner_uid = root.stat().st_uid if os.name == 'posix' else None
+        # The stopped transition reader is rootless-namespace UID0 reading the
+        # fixed existing UID1000 data. Live FOX reads as UID1000. Ownership must
+        # remain consistent; this grants no write/execution or path authority.
+        if os.name == 'posix':
+            need(os.geteuid() == owner_uid or os.geteuid() == 0 and owner_uid == 1000)
+        protected(root, private=True)
+        protected(Path(database).absolute())
+        need(Path(database).absolute().stat().st_nlink == 1)
+        protected(root / 'jobs')
+        protected(job)
+        observed = {}
+        snapshot = document(job / 'source-snapshot.json', 20_000_000)
+        need(set(snapshot) == {'project', 'project_id', 'project_name', 'source_hash', 'conversion_profile',
+                              'selected_source_set_id', 'files', 'prototype', 'approvals'}
+             and snapshot['conversion_profile'] == 'native-blueprint-prototype-v1'
+             and snapshot['project'] == snapshot['project_id'] == run['project']
+             and snapshot['source_hash'] == run['source_hash']
+             and type(snapshot['project_name']) is str and 1 <= len(snapshot['project_name']) <= 120
+             and type(snapshot['selected_source_set_id']) is str
+             and re.fullmatch(r'ss-[a-f0-9]{32}', snapshot['selected_source_set_id']))
+        owner = db.execute('SELECT owner FROM projects WHERE id=?', (run['project'],)).fetchone()
+        approvals, selected = snapshot['approvals'], snapshot['prototype']
+        need(owner is not None and type(owner[0]) is str
+             and type(approvals) is dict and set(approvals) ==
+                 {'redacted_source', 'external_ai', 'synthetic_prototype', 'owner', 'approved_at'}
+             and approvals['owner'] == owner[0] and 1 <= len(owner[0]) <= 180
+             and all(approvals[key] is True for key in ('redacted_source', 'external_ai', 'synthetic_prototype'))
+             and type(approvals['approved_at']) in (int, float)
+             and math.isfinite(approvals['approved_at']) and approvals['approved_at'] > 0
+             and type(selected) is dict and type(selected.get('schema_version')) is int)
+        version = selected['schema_version']
+        keys = {'schema_version', 'source_binding', 'focus_plan_sha256', 'approved_chunk_hashes',
+                'approved_policy_id', 'target_profile_sha256'}
+        if version == 2:
+            keys.add('max_owned_objects')
+        need(set(selected) == keys and version in (1, 2)
+             and (version == 1 or type(selected['max_owned_objects']) is int and selected['max_owned_objects'] == 32)
+             and all(sha(selected[key]) for key in ('source_binding', 'focus_plan_sha256', 'target_profile_sha256'))
+             and selected['approved_policy_id'] == 'fox-demo-synthetic-schema-v1'
+             and type(selected['approved_chunk_hashes']) is dict and len(selected['approved_chunk_hashes']) <= 4096
+             and all(type(key) is str and sha(value) for key, value in selected['approved_chunk_hashes'].items()))
+        events = db.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?',
+                            ('approved_prototype_conversion', run['id'])).fetchall()
+        need(len(events) == 1 and events[0][0] == owner[0] and events[0][1] == approvals['approved_at'])
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, column in (('verification_queue', 'job_id'), ('verification_failed_dispositions', 'job_id'),
+                ('verification_retry_attempts', 'job_id'), ('verification_precheck_failures', 'job_id'),
+                ('verification_qa_stage_failures', 'job_id'), ('verification_project_prewrite_failures', 'job_id'),
+                ('technical_verifications', 'run'), ('acceptances', 'run')):
+            if table in tables:
+                need(db.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (run['id'],)).fetchone() is None)
+        head = db.execute('SELECT project,source_hash,file_count,source_bytes FROM source_sets WHERE id=?',
+                          (snapshot['selected_source_set_id'],)).fetchone()
+        files = snapshot['files']
+        # Historical no-execution classification uses the retained version,
+        # not today's selected pointer. Fresh retry permission checks both.
+        need(head is not None and head[0] == run['project'] and head[1] == run['source_hash']
+             and type(files) is list and 1 <= len(files) <= 4 and head[2] == len(files))
+        rows = db.execute('SELECT s.id,s.project,s.name,s.sha256,s.bytes,s.text,s.created '
+            'FROM source_set_members m JOIN sources s ON s.id=m.source_id '
+            'WHERE m.source_set_id=? AND m.name=s.name AND m.sha256=s.sha256 AND m.bytes=s.bytes '
+            'ORDER BY m.name', (snapshot['selected_source_set_id'],)).fetchall()
+        same([dict(zip(('id', 'project', 'name', 'sha256', 'bytes', 'text', 'created'), row)) for row in rows], files)
+        originals = []
+        for source in files:
+            need(type(source['name']) is str and source['name'].lower().endswith('.xml')
+                 and not any(char in source['name'] for char in '/\\:') and sha(source['sha256'])
+                 and type(source['text']) is str and type(source['bytes']) is int
+                 and 0 < source['bytes'] <= 5 * 1024 * 1024 and source['project'] == run['project'])
+            raw = source['text'].encode('utf-8')
+            if hashlib.sha256(raw).hexdigest() != source['sha256']:
+                raw = b'\xef\xbb\xbf' + raw
+            need(len(raw) == source['bytes'] and hashlib.sha256(raw).hexdigest() == source['sha256'])
+            originals.append(raw)
+        need(len({row['name'].casefold() for row in files}) == len(files)
+             and head[3] == sum(len(raw) for raw in originals)
+             and hashlib.sha256('\n'.join(row['name'] + ':' + row['sha256'] for row in files).encode()).hexdigest() == run['source_hash'])
+        pipeline = job / 'prototype-pipeline'
+        need(not pipeline.is_symlink() and pipeline.is_dir()
+             and not (pipeline / 'sources').is_symlink() and (pipeline / 'sources').is_dir())
+        protected(pipeline)
+        protected(pipeline / 'sources')
+        binding = document(pipeline / 'binding.json')
+        manifest = document(pipeline / 'sources-manifest.json')
+        same(manifest, {'source_binding': selected['source_binding'], 'selected_chunk_hashes': selected['approved_chunk_hashes'],
+            'files': [{'name': row['name'], 'sha256': row['sha256'], 'bytes': row['bytes']} for row in files]})
+        packet = document(pipeline / 'packet.json', 20_000_000)
+        need(packet['schema_version'] == 1 and type(packet['schema_version']) is int
+             and packet['scope'] == 'fox-forms-understanding-packet-v1'
+             and packet['selection_status'] == 'NOT_SELECTED' and packet['transfer_authorized'] is False
+             and packet['caller_must_check_processing_approval'] is True
+             and packet['safety'] == {'code_executed': False, 'source_content_is_untrusted': True,
+                 'model_submission_allowed': False, 'native_generation_allowed': False}
+             and hashed({'sources': packet['sources'], 'chunks': packet['chunks']}) == packet['source_binding'] == selected['source_binding']
+             and len(packet['sources']) == len(files))
+        all_objects, first_group = {}, []
+        source_index = []
+        for index, (entry, source) in enumerate(zip(packet['sources'], files)):
+            descriptor = {'name': source['name'], 'sha256': source['sha256'], 'bytes': source['bytes'], 'encoding': 'utf-8'}
+            same(entry['source'], descriptor)
+            same(entry['facts']['source'], descriptor)
+            source_index.append(descriptor)
+            for obj in entry['facts']['objects']:
+                need(type(obj['id']) is str and obj['id'] not in all_objects)
+                all_objects[obj['id']] = obj
+            if index == 0:
+                objects = entry['facts']['objects']
+                need(type(objects) is list and len(objects) > 0)
+                first = objects[0]
+                group = (first['block_id'] or (first['id'] if first['kind'] == 'Block' else None), first['module_id'])
+                first_group = [obj for obj in objects if
+                    (obj['block_id'] or (obj['id'] if obj['kind'] == 'Block' else None), obj['module_id']) == group]
+            need(read(pipeline / 'sources' / ('source-%03d.xml' % index), 5 * 1024 * 1024) == originals[index])
+        chunks = {row['id']: row for row in packet['chunks']}
+        need(len(chunks) == len(packet['chunks']) and all(key in chunks and chunks[key]['sha256'] == value
+             for key, value in selected['approved_chunk_hashes'].items()))
+        focuses = [path for path in pipeline.iterdir() if path.name.startswith('focus-')]
+        need(len(focuses) == 1 and not focuses[0].is_symlink() and focuses[0].is_dir())
+        focus = focuses[0]
+        protected(focus)
+        request = document(focus / 'request.json')
+        need(set(request) == {'schema_version', 'scope', 'source_binding', 'focus_id', 'focus_binding', 'source_index',
+            'owned_objects', 'context_objects', 'code_units', 'links', 'dependencies', 'findings', 'chunks',
+            'unselected_code_unit_ids', 'safety'} and type(request['schema_version']) is int and request['schema_version'] == 1
+            and request['scope'] == 'fox-forms-focus-request-v1' and request['source_binding'] == selected['source_binding']
+            and sha(request['focus_binding']) and hashed({key: value for key, value in request.items() if key != 'focus_binding'}) == request['focus_binding']
+            and type(request['owned_objects']) is list and 0 < len(request['owned_objects']) <= (250 if version == 1 else 32))
+        owned = request['owned_objects']
+        same(owned, first_group[:len(owned)])
+        need(request['focus_id'] == focus.name == 'focus-' + hashed([selected['source_binding'], [row['id'] for row in owned]])[:24])
+        same(request['source_index'], source_index)
+        same(request['safety'], {'source_content_is_untrusted': True, 'code_executed': False,
+             'transfer_authorized': False, 'caller_must_check_processing_approval': True, 'native_generation_allowed': False})
+        for row in request['context_objects']:
+            same(row, all_objects[row['id']])
+        for row in request['chunks']:
+            text = row['text'].encode('utf-8')
+            same({key: value for key, value in row.items() if key != 'text'}, chunks[row['id']])
+            need(selected['approved_chunk_hashes'].get(row['id']) == row['sha256']
+                 and len(text) == row['bytes'] and hashlib.sha256(text).hexdigest() == row['sha256'])
+        assessment = document(pipeline / 'assessment.json')
+        need(set(assessment) == {'source_binding', 'source_count', 'source_objects', 'focus_count'}
+             and assessment['source_binding'] == selected['source_binding'] and assessment['source_count'] == len(files)
+             and assessment['source_objects'] == len(all_objects) and type(assessment['focus_count']) is int
+             and 1 <= assessment['focus_count'] <= 256)
+        target = document(focus / 'mapper-target.json')
+        need(hashed(target) == selected['target_profile_sha256'] and target['active'] is True
+             and target['scope']['data_mode'] == 'synthetic_test_only' and target['scope']['existing_resources_only'] is True
+             and target['scope']['customer_deployment_authorized'] is False)
+        roles = target['opaf']['roles']
+        need(type(roles) is dict and set(roles) == {'mapper', 'reviewer'})
+        for role in roles.values():
+            need(type(role) is dict and set(role) == {'workflow_id', 'model', 'graph_sha256'}
+                 and type(role['workflow_id']) is str and re.fullmatch(r'[A-Fa-f0-9]{16,64}', role['workflow_id'])
+                 and type(role['model']) is str and re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', role['model']) and sha(role['graph_sha256']))
+        need(roles['mapper']['workflow_id'].upper() != roles['reviewer']['workflow_id'].upper())
+        expected_binding = {'schema_version': version, 'job_id': run['id'], 'project_id': run['project'],
+            'project_name': snapshot['project_name'], 'source_binding': selected['source_binding'],
+            'focus_plan_sha256': selected['focus_plan_sha256'], 'profile_sha256': hashed(roles),
+            'approved_policy_id': selected['approved_policy_id']}
+        if version == 2:
+            expected_binding['max_owned_objects'] = 32
+        same(binding, expected_binding)
+        saved = document(focus / 'mapper.json')
+        need(set(saved) == {'binding', 'output', 'output_sha256', 'invocation', 'model_environment', 'model_environment_sha256'})
+        identity = {'job_id': run['id'], 'source_hash': selected['source_binding']}
+        role_binding = {'role': roles['mapper'], 'request_sha256': hashed(request), **identity}
+        same(saved['binding'], role_binding)
+        same(document(focus / 'mapper-intent.json'), role_binding)
+        output = saved['output']
+        need(type(output) is dict and set(output) == {'focus_id', 'focus_binding', 'blueprint'}
+             and output['focus_id'] == request['focus_id'] and output['focus_binding'] == request['focus_binding']
+             and hashed(output) == saved['output_sha256'])
+        same(output['blueprint'], {'schema_version': 1, 'scope': 'fox-forms-blueprint-v1',
+            'source_binding': selected['source_binding'], **{key: [] for key in
+                ('objects', 'screens', 'claims', 'relationships', 'actions', 'questions', 'assumptions')}})
+        invocation, environment = saved['invocation'], saved['model_environment']
+        need(set(invocation) == {'workflow_id', 'room_id', 'model', 'graph_sha256', 'request_sha256',
+            'response_sha256', 'started_at_utc', 'completed_at_utc'}
+            and invocation['request_sha256'] == hashed(request) and sha(invocation['response_sha256'])
+            and type(invocation['room_id']) is str and re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', invocation['room_id'])
+            and all(invocation[key] == roles['mapper'][key] for key in ('workflow_id', 'model', 'graph_sha256'))
+            and hashed(environment) == saved['model_environment_sha256'])
+        same(environment, {'schema_version': 1, 'scope': 'opaf-model-environment-v1',
+            'trust_boundary': 'authenticated_fox_executor_not_vendor_attestation',
+            'job_id': run['id'], 'role': 'mapper', 'source_manifest_sha256': selected['source_binding'],
+            'target_profile_sha256': selected['target_profile_sha256'], 'observed_at_utc': environment['observed_at_utc'],
+            'opaf': {key: target['opaf'][key] for key in ('base_url', 'certificate_sha256',
+                'model_authentication', 'version_number', 'build_id')},
+            'workflow': {**roles['mapper'], 'published': True}, 'opaf_version': target['tested_versions']['opaf']})
+        started, completed, observed_at = (timestamp(value) for value in
+            (invocation['started_at_utc'], invocation['completed_at_utc'], environment['observed_at_utc']))
+        need(completed >= started and -5 <= started - observed_at <= 120)
+        allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources',
+                                  'prototype-pipeline/' + focus.name}
+        pending, actual = [job], set()
+        while pending:
+            for path in pending.pop().iterdir():
+                name = path.relative_to(job).as_posix()
+                need(name in allowed and not path.is_symlink())
+                actual.add(name)
+                if path.is_dir():
+                    pending.append(path)
+                else:
+                    need(path.is_file() and name in observed and path.read_bytes() == observed[name])
+        need(actual == allowed)
+        return True
+    except Exception:
+        return False
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Explicit recovery initialization; never migration, repair or admission.
 
@@ -1832,6 +2115,11 @@ class VerificationRecovery:
         if stage is not None:
             _need(closed is None and retry is None,'QA_STAGE_CONFLICTING_RECOVERY_HISTORY')
             return {'blocks_admission':False,'recovery_state':'qa_stage_failed_closed','retry_eligible':False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None
+                and closed is None and retry is None
+                and terminal_empty_prototype_mapping(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_incomplete',
+                    'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256
