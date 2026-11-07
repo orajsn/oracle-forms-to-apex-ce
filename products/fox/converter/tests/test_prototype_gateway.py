@@ -363,6 +363,19 @@ def rebind_bundle(bundle):
     bundle["manifest_sha256"] = digest(descriptor)
 
 
+def test_epoch_marker_selects_syntax_but_cannot_authorize_legacy_index(case):
+    bundle = authority_bundle(case)
+    raw = b'{}'
+    bundle['files'].append({'path': 'epochs/epoch-000002/epoch-record.json',
+        'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw),
+        'content_base64': base64.b64encode(raw).decode('ascii')})
+    rebind_bundle(bundle)
+    with pytest.raises(RuntimeError, match='MEMBERSHIP_MISMATCH'):
+        case.adapter.stage_source_authority(case.request['job_id'], bundle)
+    assert case.calls == []
+    assert case.adapter.recover_source_authority(case.request['job_id']) is None
+
+
 def test_source_authority_staging_is_immutable_read_only_recoverable_and_not_approval(case):
     bundle = authority_bundle(case)
     assert case.adapter.recover_source_authority(case.request["job_id"]) is None

@@ -23,11 +23,13 @@ def continuation_event_id(rid, record):
     return rid + ':' + canonical_hash(record)
 
 
-def validate_job_continuation(job, snapshot, original):
+def validate_job_continuation(job, snapshot, original, *, phase=None):
     """Worker-side durable consent check before configuration or a new call."""
     database = job.parent.parent / 'fox.sqlite3'
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
     if not recorded and not database.exists() and not database.is_symlink():
+        if (job / 'mapping-epochs').exists() or (job / 'prototype-pipeline' / 'epochs').exists():
+            raise OpafError('Epoch proof cannot fall back to an unrecorded legacy run.')
         return  # Legacy direct callers without a persisted continuation.
     if database.is_symlink() or not database.is_file():
         raise OpafError('Continuation database is missing or unsafe.')
@@ -37,10 +39,14 @@ def validate_job_continuation(job, snapshot, original):
         if not recorded:
             if rows:
                 raise OpafError('Persisted continuation lost its durable record; no new operation is authorized.')
+            from .prototype_mapping_epochs import validate_epoch_chain
+            validate_epoch_chain(job, snapshot, original, connection, phase=phase)
             return
         record = validate_continuation_record(job, snapshot, original, _json(job / RECORD))
         if rows != [(record['owner'], continuation_event_id(job.name, record), record['approved_at'])]:
             raise OpafError('Continuation has no exact persisted consent event.')
+        from .prototype_mapping_epochs import validate_epoch_chain
+        validate_epoch_chain(job, snapshot, original, connection, phase=phase)
 
 
 def validate_continuation_record(job, snapshot, original, record):

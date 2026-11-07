@@ -711,13 +711,17 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
         return blocked
 
 
-def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False):
+def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
+                                     analysis_epoch_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge also loads this
     reviewed module in the serving legacy namespace, which has no new prototype
     modules. Producer-held durable bindings are checked here; fresh XML semantic
     reconstruction and current processing consent remain the recovery API's job.
+    The opt-in analysis family proves only a sealed, pre-database stop after an
+    immutable v1 continuation. Historical AI approval is NOT source-fact truth.
+    New epoch eligibility and processing consent must be checked separately.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -797,7 +801,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         snapshot = document(job / 'source-snapshot.json', 20_000_000)
         snapshot_keys = {'project', 'project_id', 'project_name', 'source_hash', 'conversion_profile',
                          'selected_source_set_id', 'files', 'prototype', 'approvals'}
-        if claim_owner_failure and 'retry_of' in snapshot:
+        if (claim_owner_failure or analysis_epoch_failure) and 'retry_of' in snapshot:
             snapshot_keys.update(('retry_of', 'mapping_recovery'))
             parent, metadata = snapshot['retry_of'], snapshot['mapping_recovery']
             need(type(parent) is str and re.fullmatch(r'fox-[a-f0-9]{20}', parent)
@@ -805,7 +809,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                  and type(metadata) is dict and set(metadata) == {'schema_version', 'strategy', 'parent_snapshot_sha256'}
                  and type(metadata['schema_version']) is int and metadata['schema_version'] == 1
                  and metadata['strategy'] == 'repartition-32-v1' and sha(metadata['parent_snapshot_sha256']))
-        need(type(claim_owner_failure) is bool and set(snapshot) == snapshot_keys
+        need(type(claim_owner_failure) is bool and type(analysis_epoch_failure) is bool
+             and not (claim_owner_failure and analysis_epoch_failure) and set(snapshot) == snapshot_keys
              and snapshot['conversion_profile'] == 'native-blueprint-prototype-v1'
              and snapshot['project'] == snapshot['project_id'] == run['project']
              and snapshot['source_hash'] == run['source_hash']
@@ -909,8 +914,37 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         need(len(chunks) == len(packet['chunks']) and all(key in chunks and chunks[key]['sha256'] == value
              for key, value in selected['approved_chunk_hashes'].items()))
         focuses = [path for path in pipeline.iterdir() if path.name.startswith('focus-')]
-        if claim_owner_failure:
+        if claim_owner_failure or analysis_epoch_failure:
             need(1 <= len(focuses) <= 256)
+            continuation = None
+            if analysis_epoch_failure:
+                need(version == 2 and len(focuses) == 8)
+                continuation = document(job / 'mapping-continuation.json')
+                need(set(continuation) == {'schema_version', 'scope', 'strategy', 'job_id', 'project_id',
+                    'snapshot_sha256', 'checkpoint_sha256', 'files', 'completed_focuses', 'blocked_focus_id',
+                    'resolved_claim_owners', 'owner', 'approved_at', 'approvals'}
+                    and type(continuation['schema_version']) is int and continuation['schema_version'] == 1
+                    and continuation['scope'] == 'fox-prototype-mapping-continuation-v1'
+                    and continuation['strategy'] == 'resolve-code-unit-owners-v1'
+                    and continuation['job_id'] == run['id'] and continuation['project_id'] == run['project']
+                    and continuation['snapshot_sha256'] == hashlib.sha256(observed['source-snapshot.json']).hexdigest()
+                    and continuation['owner'] == owner[0]
+                    and type(continuation['approved_at']) in (int, float)
+                    and math.isfinite(continuation['approved_at']) and continuation['approved_at'] > 0
+                    and type(continuation['completed_focuses']) is int and continuation['completed_focuses'] == 5
+                    and type(continuation['resolved_claim_owners']) is int
+                    and 1 <= continuation['resolved_claim_owners'] <= 10000
+                    and type(continuation['files']) is dict and 1 <= len(continuation['files']) <= 4096)
+                same(continuation['approvals'], {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True})
+                proof = {key: continuation[key] for key in
+                    ('files', 'completed_focuses', 'blocked_focus_id', 'resolved_claim_owners')}
+                need(hashed(proof) == continuation['checkpoint_sha256'])
+                events = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
+                    '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_continuation',
+                    run['id'], run['id'] + ':%')).fetchall()
+                need([tuple(row) for row in events] == [(owner[0], run['id'] + ':' + hashed(continuation), continuation['approved_at'])])
+                need(db.execute('SELECT 1 FROM events WHERE action=? AND (object_id=? OR object_id LIKE ?) LIMIT 1',
+                    ('approved_prototype_mapping_epoch', run['id'], run['id'] + ':%')).fetchone() is None)
             ordered = []
             for entry in packet['sources']:
                 groups = {}
@@ -1025,6 +1059,14 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     identifier(row['id']); text(row['text'])
 
             cursor, failure, rooms = 0, False, set()
+            prefix, checkpoint_files, resolution_count = [], set(), 0
+            if analysis_epoch_failure:
+                checkpoint_files = set(observed) - {'mapping-continuation.json'}
+                # Request files have already been read while ordering focuses;
+                # only the first six existed at the immutable v1 checkpoint.
+                checkpoint_files -= {'prototype-pipeline/' + directory.name + '/request.json'
+                                     for _, directory in requests[6:]}
+                checkpoint_files.add('prototype-pipeline/assessment.json')
             unit_metadata = {unit['id']: unit for entry in packet['sources'] for unit in entry['facts']['code_units']}
             for number, (request, directory) in enumerate(requests):
                 need(not failure and type(request['schema_version']) is int and request['schema_version'] == 1
@@ -1045,6 +1087,39 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                          and len(chunk['text'].encode()) == chunk['bytes'] and hashlib.sha256(chunk['text'].encode()).hexdigest() == chunk['sha256'])
                 candidate, mapper_room = role_output(directory, 'mapper', request)
                 need(mapper_room not in rooms); rooms.add(mapper_room)
+                if analysis_epoch_failure:
+                    if number < 6:
+                        checkpoint_files.update('prototype-pipeline/' + directory.name + '/' + name for name in
+                            ('mapper.json', 'mapper-target.json', 'mapper-intent.json'))
+                    if number < 5:
+                        checkpoint_files.update('prototype-pipeline/' + directory.name + '/' + name for name in
+                            ('reviewer.json', 'reviewer-target.json', 'reviewer-intent.json', 'review-receipt.json'))
+                    if number == 5:
+                        need(request['focus_id'] == continuation['blocked_focus_id'])
+                        raw = candidate
+                        candidate = json.loads(canonical(raw)); changes = []
+                        units = {unit['id']: unit for unit in request['code_units']}
+                        object_ids = [row['id'] for row in request['owned_objects'] + request['context_objects']]
+                        need(len(units) == len(request['code_units']) and len(set(object_ids)) == len(object_ids)
+                             and not set(units) & set(object_ids))
+                        for index, claim in enumerate(candidate['blueprint']['claims']):
+                            ref = claim['source_object_id']
+                            if ref in owned_ids: continue
+                            unit, refs = units[ref], claim['evidence_refs']
+                            need(unit['owner_id'] in owned_ids and type(refs) is list and ref in refs
+                                 and len(set(refs)) == len(refs) and all(value == unit['owner_id'] or
+                                     value in units and units[value]['owner_id'] == unit['owner_id'] for value in refs))
+                            claim['source_object_id'] = unit['owner_id']
+                            changes.append({'claim_index': index, 'claim_id': claim['id'],
+                                'code_unit_id': ref, 'source_object_id': unit['owner_id']})
+                        resolution_count = len(changes)
+                        need(resolution_count == continuation['resolved_claim_owners'])
+                        same(document(directory / 'mapper-resolved.json'), candidate)
+                        same(document(directory / 'mapper-resolution.json'), {'schema_version': 1,
+                            'scope': 'fox-prototype-claim-owner-resolution-v1', 'strategy': 'resolve-code-unit-owners-v1',
+                            'source_binding': request['source_binding'], 'focus_id': request['focus_id'],
+                            'request_sha256': hashed(request), 'raw_candidate_sha256': hashed(raw),
+                            'candidate_sha256': hashed(candidate), 'resolutions': changes})
                 if (directory / 'reviewer.json').exists():
                     shape(candidate, request, owned_ids)
                     review, room = role_output(directory, 'reviewer', {'request': request,
@@ -1056,8 +1131,53 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         'candidate_sha256': hashed(candidate), 'source_binding': selected['source_binding'],
                         'focus_binding': request['focus_binding'], 'approved_structured_design': True,
                         **{key: False for key in ('generation_ready', 'native_apex_generated', 'native_apex_validity_verified', 'import_verified', 'business_behavior_accepted')}})
+                    if analysis_epoch_failure:
+                        need(number < 7)
+                        # This is historical provenance, not a fact-validity
+                        # gate. The new epoch must freshly diagnose/repair7.
+                        prefix.append(candidate)
                 else:
                     need(number == len(requests) - 1)
+                    if analysis_epoch_failure:
+                        need(number == 7 and len(prefix) == 7 and resolution_count > 0)
+                        # Recognize only the retained context/alias stop. This
+                        # in-memory structural projection grants no resume or
+                        # source-fact approval and is never saved as AI output.
+                        projected = json.loads(canonical(candidate))
+                        blueprint, prior = projected['blueprint'], prefix[-1]['blueprint']
+                        extras = [row for row in blueprint['objects'] if row['source_object_id'] not in owned_ids]
+                        need(len(extras) == 1)
+                        extra = extras[0]; ref = extra['source_object_id']
+                        context = {row['id']: row for row in request['context_objects']}
+                        need(context[ref]['kind'] == 'Block')
+                        matches = [row for row in prior['objects'] if row['source_object_id'] == ref]
+                        need(len(matches) == 1)
+                        same({key: value for key, value in extra.items() if key != 'reason'},
+                             {key: value for key, value in matches[0].items() if key != 'reason'})
+                        screen = extra['screen_id']
+                        duplicates = [row for row in blueprint['screens'] if row['id'] == screen]
+                        prior_screens = [row for row in prior['screens'] if row['id'] == screen]
+                        need(len(duplicates) == len(prior_screens) == 1); same(duplicates, prior_screens)
+                        excluded = [row for row in blueprint['claims'] if row['source_object_id'] not in owned_ids]
+                        need(len(excluded) == 1)
+                        claim = excluded[0]
+                        need(claim['source_object_id'] == ref and claim['kind'] == 'object.kind'
+                             and claim['status'] == 'source_fact' and claim['value'] == 'Block'
+                             and claim['evidence_refs'] == [ref])
+                        need(not any(claim['id'] in row['claim_ids'] for value in [candidate, *prefix]
+                            for category in ('actions', 'relationships') for row in value['blueprint'][category]))
+                        blueprint['objects'].remove(extra); blueprint['claims'].remove(claim)
+                        blueprint['screens'] = [row for row in blueprint['screens'] if row['id'] != screen]
+                        aliases = 0
+                        for row in blueprint['claims']:
+                            if row['kind'] == 'object.item_type' and row['status'] == 'source_fact':
+                                obj = all_objects[row['source_object_id']]
+                                need(obj['id'] in owned_ids and obj['kind'] == 'Item'
+                                     and row['value'] == obj['item_type'] and row['evidence_refs'] == [obj['id']])
+                                row['kind'] = 'item.item_type'; aliases += 1
+                        need(aliases == 2); shape(projected, request, owned_ids)
+                        failure = True
+                        continue
                     unit_ids = [unit['id'] for unit in request['code_units']]
                     object_ids = [row['id'] for row in request['owned_objects'] + request['context_objects']]
                     need(len(set(unit_ids)) == len(unit_ids) and len(set(object_ids)) == len(object_ids) and not set(unit_ids) & set(object_ids))
@@ -1077,6 +1197,9 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                  and assessment['source_binding'] == selected['source_binding'] and assessment['source_count'] == len(files)
                  and assessment['source_objects'] == len(all_objects) and type(assessment['focus_count']) is int
                  and len(requests) <= assessment['focus_count'] <= 256)
+            if analysis_epoch_failure:
+                need(set(continuation['files']) == checkpoint_files)
+                same(continuation['files'], {name: hashlib.sha256(observed[name]).hexdigest() for name in checkpoint_files})
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests}
             pending, actual = [job], set()
@@ -2310,6 +2433,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_empty_prototype_mapping(self.database, db, dict(run), claim_owner_failure=True)):
             return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_owner_resolution_pending', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_empty_prototype_mapping(self.database, db, dict(run), analysis_epoch_failure=True)):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_mapping_analysis_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

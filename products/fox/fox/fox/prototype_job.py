@@ -196,12 +196,12 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     selected = snapshot['prototype']
     runtime = (configuration_loader or _configuration)(selected['target_profile_sha256'],
                                                         installation_projection=installation_projection)
-    def still_approved(context=None):
+    def still_approved(context=None, *, phase=None):
         if (job / 'source-snapshot.json').is_symlink() or (job / 'source-snapshot.json').read_bytes() != raw:
             raise OpafError('Prototype immutable source snapshot changed; no further operation is authorized.')
         if approval_check(snapshot) is not True:
             raise OpafError('Prototype source-owner approval is no longer current.')
-        validate_job_continuation(job, snapshot, raw)
+        validate_job_continuation(job, snapshot, raw, phase=phase)
         return True
     # The transport performs no source/model approval itself. Repeat the same
     # current selected-source/owner check before converter GETs and POSTs too.
@@ -215,7 +215,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
             still_approved()
             return transport.recover_stage(stage, request)
         def run_stage(self, stage, request):
-            still_approved()
+            from .prototype_mapping_epochs import converter_phase
+            phase = converter_phase(job, snapshot, raw, stage, request)
+            still_approved(phase=phase)
             return transport.run_stage(stage, request)
     result = run_prototype_pipeline(job, documents, project_id=snapshot['project_id'],
         project_name=snapshot['project_name'], expected_source_binding=selected['source_binding'],

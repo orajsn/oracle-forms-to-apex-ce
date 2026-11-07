@@ -197,6 +197,10 @@ def authorize_current(root, db, profile_path, request):
         raise ValueError('Reviewed roles or focus changed')
     authorize_prototype_request(job, request)
     _retained_request(job, request)
+    from .prototype_mapping_epochs import converter_phase
+    from .prototype_mapping_continuation import validate_job_continuation
+    phase = converter_phase(job, snapshot, original, CONVERTER_STAGES[len(request['prior_receipts'])], request)
+    validate_job_continuation(job, snapshot, original, phase=phase)
     if state == 'GENERATED':
         # A finished run authorizes only the exact retained export request,
         # never a new stage/action or a caller's substitute prior receipts.

@@ -154,6 +154,30 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
 
 
 def _review_index(checkpoints, plan):
+    from .prototype_mapping_epochs import technical_record, active_focus, read
+    epoch = technical_record(checkpoints)
+    if epoch is not None:
+        packet = _artifact_json(checkpoints / 'packet.json')
+        target = read(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
+        views = []
+        for request in plan['requests']:
+            view = active_focus(checkpoints, packet, plan, request, target, views)
+            if not view['checked']['approved_structured_design']:
+                raise OpafError('Active epoch lacks approved reviewed design.')
+            views.append(view)
+        files = []
+        # Include exact historical and active technical provenance, not owner
+        # consent claims. The original FOX callback separately checks its DB.
+        names = {name[len('prototype-pipeline/'):] for name in epoch['before_files'] if name.startswith('prototype-pipeline/')}
+        base = checkpoints / 'epochs' / 'epoch-000002'
+        names.update(path.relative_to(checkpoints).as_posix() for path in base.rglob('*') if path.is_file())
+        for name in sorted(names):
+            path = checkpoints / name
+            if path.is_symlink() or not path.is_file():
+                raise OpafError('Epoch provenance is missing or linked.')
+            files.append({'path': name, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        return {'schema_version': 2, 'source_binding': plan['source_binding'], 'focus_plan_sha256': canonical_hash(plan),
+                'epoch_sha256': canonical_hash(epoch), 'focuses': [view['proof'] for view in views], 'provenance_files': files}
     def row(request):
         child = checkpoints / request['focus_id']
         result = {'focus_id': request['focus_id'],
@@ -212,7 +236,17 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
         raise OpafError('Prototype focus selection differs from its retained binding.')
     candidates = []
     identity = {'job_id': job.name, 'source_hash': binding['source_binding']}
+    from .prototype_mapping_epochs import technical_record, active_focus
+    epoch = technical_record(checkpoints)
+    views = []
     for focus in plan['requests']:
+        if epoch is not None:
+            target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
+            view = active_focus(checkpoints, packet, plan, focus, target, views)
+            if not view['checked']['approved_structured_design']:
+                raise OpafError('Active epoch source design is not approved.')
+            views.append(view); candidates.append(view['candidate'])
+            continue
         child = checkpoints / focus['focus_id']
         if child.is_symlink() or _json(child / 'request.json') != focus:
             raise OpafError('Prototype authority focus request changed.')
@@ -241,7 +275,7 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
             or request.get('plan_sha256') != native_plan['plan_sha256']):
         raise OpafError('Prototype converter plan differs from the reviewed source reconstruction.')
     index = _review_index(checkpoints, plan)
-    if _json(checkpoints / 'review-index.json') != index:
+    if canonical_hash(_json(checkpoints / 'review-index.json')) != canonical_hash(index):
         raise OpafError('Prototype reviewer authority index changed.')
     authority = {'schema_version': 1, 'scope': 'fox-prototype-source-authority-v1',
                  'binding_sha256': canonical_hash(binding), 'sources_manifest_sha256': canonical_hash(manifest),
@@ -356,28 +390,21 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     candidates, reviews = [], []
     identity = {'job_id': job.name, 'source_hash': packet['source_binding']}
     approval_context = {**binding, 'selected_chunk_hashes': dict(approved_chunk_hashes)}
+    from .prototype_mapping_epochs import active_focus
+    views = []
     for request in plan['requests']:
-        child = checkpoints / request['focus_id']
-        _directory(child)
-        _save_once(child / 'request.json', request)
-        candidate, mapper = _role(child, 'mapper', opaf_client, profile['mapper'], request,
-            identity, target_profile_loader, processing_approval_check, approval_context)
-        candidate, _ = resolved_mapper(child, request, candidate, write=True)
-        # Bound and shape-check BEFORE sending an untrusted candidate onward.
-        forms_design_review._canonical(candidate, forms_design_review.MAX_CANDIDATE_BYTES)
-        forms_design_review._candidate_shape(candidate, request, {row['id'] for row in request['owned_objects']})
-        review, reviewer = _role(child, 'reviewer', opaf_client, profile['reviewer'],
-            {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)},
-            identity, target_profile_loader, processing_approval_check, approval_context)
-        if mapper['room_id'] == reviewer['room_id']:
-            raise OpafError('Prototype reviewer must have an independent invocation identity.')
-        checked = forms_design_review.validate_design_review(request, candidate, review)
-        _save_once(child / 'review-receipt.json', checked)
+        target = (target_profile_loader() if target_profile_loader is not None else
+                  _json(checkpoints / request['focus_id'] / 'mapper-target.json'))
+        view = active_focus(checkpoints, packet, plan, request, target, views,
+            runtime={'opaf_client': opaf_client, 'target_profile_loader': target_profile_loader,
+                     'processing_approval_check': processing_approval_check, 'approval_context': approval_context})
+        candidate, checked = view['candidate'], view['checked']
         reviews.append(checked)
         if not checked['approved_structured_design']:
             result.update(status='CHANGES_REQUIRED', stage='reviewing', blocked_focus_id=request['focus_id'])
             return result
         candidates.append(candidate)
+        views.append(view)
     merged = merge_focus_blueprints(documents, plan, candidates)
     _save_artifact(checkpoints / 'merged-blueprint.json', merged)
     native_plan = build_native_prototype_plan(documents, merged['blueprint'],

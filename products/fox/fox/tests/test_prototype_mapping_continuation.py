@@ -65,7 +65,8 @@ def continuation(client, monkeypatch):
     with monkeypatch.context() as old:
         # Create the old released failure faithfully; no candidate is repaired
         # or new reviewer invoked while building this synthetic fixture.
-        old.setattr(pipeline, 'resolved_mapper', lambda directory, request, candidate, **kwargs: (candidate, None))
+        from fox import prototype_mapping_epochs
+        old.setattr(prototype_mapping_epochs, 'resolved_mapper', lambda directory, request, candidate, **kwargs: (candidate, None))
         with pytest.raises(ValueError):
             pipeline.run_prototype_pipeline(job, [('synthetic.xml', raw)], project_id=pid,
                 project_name=snapshot['project_name'], expected_source_binding=body['source_binding'],

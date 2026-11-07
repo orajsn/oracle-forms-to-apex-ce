@@ -339,9 +339,13 @@ def validate_blueprint(packet: dict, blueprint: dict) -> dict:
         _fail()
 
 
-def _validate_blueprint(packet, blueprint):
+def source_fact_index(packet):
+    """Validate fresh packet facts and expose the SAME exact evidence whitelist.
+
+    Caller must reconstruct packet from original bytes. This is deterministic
+    source evidence, never an AI approval, generation or behavior acceptance.
+    """
     _bounded_json(packet)
-    _bounded_json(blueprint)
     _keys(packet, {"schema_version", "scope", "source_binding", "sources"}, {
         "chunks", "selectable_code_unit_ids", "selected_code_unit_ids", "transfer_authorized",
         "caller_must_check_processing_approval", "interpretation_boundary", "safety", "selection_status", "no_automatic_selection"})
@@ -360,6 +364,31 @@ def _validate_blueprint(packet, blueprint):
         source_hashes.add(entry["source"]["sha256"])
         _facts(entry["facts"], entry["source"], objects, evidence, allowed)
     _packet_binding(packet)
+    return objects, evidence, allowed
+
+
+def validate_claim_evidence(claim, objects, evidence, allowed):
+    """Apply the existing claim-evidence/source-fact rule, without widening it."""
+    owner = claim['source_object_id']
+    if owner not in objects or claim['status'] not in {'source_fact', 'proposal', 'unresolved'}:
+        _fail()
+    _text(claim['kind'], 100)
+    _text(claim['reason'])
+    _value(claim['value'])
+    refs = _rows(claim['evidence_refs'])
+    if (not refs or len(set(refs)) != len(refs) or any(ref not in evidence for ref in refs)
+            or not any(evidence[ref] == owner for ref in refs)):
+        _fail('A claim must reference exact source evidence, including its source object.')
+    if claim['status'] == 'source_fact':
+        matches = {ref for kind, value, ref in allowed.get(owner, [])
+                   if kind == claim['kind'] and value == _canonical(claim['value'])}
+        if not matches or not set(refs) <= matches:
+            _fail('A source-fact claim is not an exact whitelisted machine-extracted fact.')
+
+
+def _validate_blueprint(packet, blueprint):
+    _bounded_json(blueprint)
+    objects, evidence, allowed = source_fact_index(packet)
     _keys(blueprint, {"schema_version", "scope", "source_binding", "objects", "screens", "claims",
                       "relationships", "actions", "questions", "assumptions"})
     if (type(blueprint["schema_version"]) is not int or blueprint["schema_version"] != 1
@@ -412,21 +441,7 @@ def _validate_blueprint(packet, blueprint):
                 _fail("A proposed item must retain its source block and target screen.")
     claims = index(blueprint["claims"], {"id", "source_object_id", "kind", "value", "status", "evidence_refs", "reason"})
     for claim in claims.values():
-        owner = claim["source_object_id"]
-        if owner not in objects or claim["status"] not in {"source_fact", "proposal", "unresolved"}:
-            _fail()
-        _text(claim["kind"], 100)
-        _text(claim["reason"])
-        _value(claim["value"])
-        refs = _rows(claim["evidence_refs"])
-        if (not refs or len(set(refs)) != len(refs) or any(ref not in evidence for ref in refs)
-                or not any(evidence[ref] == owner for ref in refs)):
-            _fail("A claim must reference exact source evidence, including its source object.")
-        if claim["status"] == "source_fact":
-            matches = {ref for kind, value, ref in allowed.get(owner, [])
-                       if kind == claim["kind"] and value == _canonical(claim["value"])}
-            if not matches or not set(refs) <= matches:
-                _fail("A source-fact claim is not an exact whitelisted machine-extracted fact.")
+        validate_claim_evidence(claim, objects, evidence, allowed)
     for collection in ("relationships", "actions"):
         for row in index(blueprint[collection], {"id", "claim_ids"}).values():
             refs = _rows(row["claim_ids"])

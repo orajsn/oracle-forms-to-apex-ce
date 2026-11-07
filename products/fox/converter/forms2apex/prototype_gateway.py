@@ -41,8 +41,13 @@ _AUTHORITY_ROOT_FILES = {"binding.json", "sources-manifest.json", "packet.json",
                          "merged-blueprint.json", "native-plan.json", "rendered.json", "candidate-apexlang.zip"}
 _FOCUS_FILES = ("request", "mapper", "mapper-target", "reviewer", "reviewer-target", "review-receipt")
 _RESOLUTION_FILES = ("mapper-resolved", "mapper-resolution")
+_EPOCH_FILES = ('mapper-request', 'reviewer-request', 'projection-candidate', 'projection-receipt')
+_LEGACY_AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
+                                  + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES) + r")\.json)\Z")
 _AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-                             + "|".join(_FOCUS_FILES + _RESOLUTION_FILES) + r")\.json)\Z")
+    + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + ('mapper-intent', 'reviewer-intent')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
+    r'(?:epoch-record|predecessor-record)\.json|source-facts/focus-[a-f0-9]{24}\.json|focus-[a-f0-9]{24}/(?:'
+    + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES + ('mapper-intent', 'reviewer-intent')) + r')\.json))\Z')
 
 
 def _authority_json(raw):
@@ -72,13 +77,18 @@ def _authority_descriptor(bundle, *, encoded):
           "PROTOTYPE_SOURCE_AUTHORITY_FIELDS_INVALID")
     _need(type(bundle["files"]) is list and 1 <= len(bundle["files"]) <= 2048,
           "PROTOTYPE_AUTHORITY_FILE_COUNT_INVALID")
+    # This fixed member selects parsing syntax only. Its actual record/index,
+    # every byte and the original owner DB authority are validated separately.
+    epoch_format = any(type(row) is dict and row.get('path') == 'epochs/epoch-000002/epoch-record.json'
+                       for row in bundle['files'])
+    path_format = _AUTHORITY_PATH if epoch_format else _LEGACY_AUTHORITY_PATH
     rows, names, total = [], [], 0
     for row in bundle["files"]:
         _need(type(row) is dict and set(row) == ({"path", "sha256", "bytes", "content_base64"} if encoded
                                               else {"path", "sha256", "bytes"}),
               "PROTOTYPE_AUTHORITY_FILE_FIELDS_INVALID")
         name = row["path"]
-        _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or _AUTHORITY_PATH.fullmatch(name)),
+        _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)),
               "PROTOTYPE_AUTHORITY_PATH_NOT_ALLOWED")
         _need(type(row["bytes"]) is int and 0 < row["bytes"] <= 20_000_000
               and type(row["sha256"]) is str and _SHA.fullmatch(row["sha256"]),
@@ -119,6 +129,15 @@ def _check_authority_members(descriptor, members):
               "PROTOTYPE_AUTHORITY_SOURCE_BYTES_CHANGED")
         expected.add(name)
     focuses = set()
+    if index.get('schema_version') == 2:
+        _need(type(index.get('provenance_files')) is list and 1 <= len(index['provenance_files']) <= 2048,
+              'PROTOTYPE_EPOCH_PROVENANCE_REQUIRED')
+        for row in index['provenance_files']:
+            _need(type(row) is dict and set(row) == {'path', 'sha256'} and row['path'] in members
+                  and hashlib.sha256(members[row['path']]).hexdigest() == row['sha256'], 'PROTOTYPE_EPOCH_PROVENANCE_CHANGED')
+            expected.add(row['path'])
+        _need(set(members) == expected, 'PROTOTYPE_AUTHORITY_MEMBERSHIP_MISMATCH')
+        return
     for row in index["focuses"]:
         _need(type(row) is dict and type(row.get("focus_id")) is str
               and re.fullmatch(r"focus-[a-f0-9]{24}", row["focus_id"]) and row["focus_id"] not in focuses,
@@ -239,7 +258,8 @@ class PrototypeGateway:
                 return None
             _need(target.is_dir(), "PROTOTYPE_AUTHORITY_DIRECTORY_INVALID")
             actual = {}
-            allowed_directories = {row["path"].rsplit("/", 1)[0] for row in descriptor["files"] if "/" in row["path"]}
+            allowed_directories = {'/'.join(parts[:index]) for row in descriptor['files']
+                for parts in [row['path'].split('/')] for index in range(1, len(parts))}
             retained_bytes = 0
             for path in target.rglob("*"):
                 _need(not path.is_symlink() and (path.is_file() or path.is_dir()),

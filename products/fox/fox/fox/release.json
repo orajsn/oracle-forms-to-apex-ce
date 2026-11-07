@@ -1,22 +1,22 @@
 {
-  "version": "0.12.0",
+  "version": "0.13.0",
   "released_on": "2026-11-07",
-  "title": "Continue saved mapping after resolving proven source references",
+  "title": "Source-checked repair with preserved analysis history",
   "changes": [
-    "Resolve a code-unit reference to its exact owning Forms object only when the source proves the relationship.",
-    "Preserve the raw AI response and bind any resolved candidate separately to its original request and evidence.",
-    "Require independent review and downstream source-proof checks for the resolved candidate.",
-    "Offer explicit continuation of the same stopped run, reusing verified completed checkpoints without repeating their model calls.",
-    "Recheck current source, unchanged target, original code selection and three fresh consents before continuation.",
-    "Keep uncertain operations, missing proof and unsupported repairs blocked rather than automatically retrying."
+    "Check literal source-fact claims against authoritative source evidence before relying on AI review.",
+    "Distinguish AI-reviewed sections from sections that passed deterministic source checks.",
+    "Permit one explicitly approved targeted repair and independent re-review while preserving the original responses.",
+    "Resolve proven duplicate context declarations and exact property aliases with separately reviewed evidence.",
+    "Append checkpoint-bound continuation records without replacing earlier approvals or restarting the whole file.",
+    "Continue remaining work only after corrective checks pass; stop on rejection, malformed output or uncertain operations."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
-    "A diagnostic source-reference correction is not independent review, completed conversion or proof of business behavior.",
-    "Continuation is limited to a proven source-reference error before the failed section's reviewer or any database stage. It is not general recovery of interrupted model calls or imports.",
+    "A corrected candidate requires new independent review; an earlier approval does not certify changed content or override a failed source check.",
+    "Repair is limited to the approved checkpoint plan before database stages. There is no automatic corrective loop or replay of uncertain calls or imports.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",

@@ -4,6 +4,35 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.13.0] - 2026-11-07
+
+### Source-checked repair and append-only continuation
+
+- Check source-fact claims against the existing exact whitelist and evidence
+  rules before new review. AI approval cannot override a failed source check.
+- Add a bounded targeted repair and new independent review for an eligible
+  saved section. Preserve original responses and prior approvals as history;
+  only newly validated proof can become active for export.
+- Project only proven repeated context declarations and exact property aliases.
+  Preserve excluded records and rationales in versioned evidence and include
+  that evidence in the independently bound reviewer request.
+- Append source-, target- and checkpoint-bound continuation records with exact
+  predecessor hashes, fresh consent and same-run identity. Do not replace the
+  earlier continuation record or restart completed model requests.
+- Show AI-reviewed and source-checked counts separately. Continue remaining
+  sections only after the corrective phase passes; no automatic repair loop.
+
+Verification includes pure source-fact/repair tests, local epoch API and worker
+scenarios, interrupted-operation and staged-path guards, and an integrated local
+authority/staging/export test with authored external responses. Modelled UI
+regressions and independent reviews passed. Read-only checks against the retained
+real job confirmed the bounded repair plan and preserved all 69 child-run files
+in both container and host-reader checks; those checks invoked no model or import.
+
+Publication and deployment are separate from live repair success. The corrected
+candidate, remaining analysis, SQLcl validation, import, runtime checks and export
+must still pass. See [source-fact repair](docs/source-fact-repair.md).
+
 ## [0.12.0] - 2026-11-07
 
 ### Source-reference resolution and saved-progress continuation

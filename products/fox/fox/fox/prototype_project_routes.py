@@ -12,7 +12,7 @@ import uuid
 
 from fastapi import HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, StrictBool
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from . import source_history
 from .intake import inventory, MAX_FILE_BYTES
@@ -35,6 +35,11 @@ class PrototypeRunInput(BaseModel):
 
 class PrototypeContinuationInput(PrototypeRunInput):
     checkpoint_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class PrototypeEpochInput(PrototypeContinuationInput):
+    expected_epoch_number: StrictInt = Field(ge=1, le=1000000)
+    expected_predecessor_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
 def source_documents(sources):
@@ -442,6 +447,123 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raise
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'Continuation was not queued: checkpoint approval or durable state could not be verified. Original outcomes remain preserved; uncertain operations were not replayed.') from None
+
+    def epoch_context(c, pid, rid, owner):
+        from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+        from .prototype_mapping_recovery import RUN_ID
+        from .prototype_mapping_epochs import inspect_next_epoch, SCOPE, STRATEGY, NUMBER
+        if not RUN_ID.fullmatch(rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        run = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+        if not run:
+            raise HTTPException(404, 'Prototype run not found.')
+        if (root / 'jobs').is_symlink():
+            raise ValueError('Unsafe epoch storage.')
+        job = root / 'jobs' / rid
+        snapshot, original = read_prototype_snapshot(job)
+        documents = validate_prototype_snapshot(snapshot)
+        selected, sources = snapshot['prototype'], current_sources(pid, c)
+        locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+        target = target_reader()
+        if (not locked or locked['owner'] != owner or snapshot['approvals']['owner'] != owner
+                or snapshot['project_id'] != pid or snapshot['project'] != pid
+                or run['state'] not in ('ATTENTION', 'QUEUED', 'PROCESSING', 'GENERATED') or run['artifact'] is not None
+                or run['source_hash'] != snapshot['source_hash'] or inventory(sources)['source_hash'] != snapshot['source_hash']
+                or source_documents(sources) != documents
+                or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']
+                or target['target_profile_sha256'] != selected['target_profile_sha256']
+                or canonical_hash(target['target_profile']) != selected['target_profile_sha256']
+                or len(selected['approved_chunk_hashes']) > 4096):
+            raise ValueError('Epoch source, selected version, owner or target changed.')
+        origin = 'approved_prototype_mapping_retry' if 'retry_of' in snapshot else 'approved_prototype_conversion'
+        events = c.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?', (origin, rid)).fetchall()
+        if len(events) != 1 or events[0]['owner'] != owner or events[0]['created'] != snapshot['approvals']['approved_at']:
+            raise ValueError('Epoch run has no exact source-owner origin event.')
+        tables = {row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for table, column in (('verification_queue', 'job_id'), ('verification_failed_dispositions', 'job_id'),
+                ('verification_retry_attempts', 'job_id'), ('verification_precheck_failures', 'job_id'),
+                ('verification_qa_stage_failures', 'job_id'), ('verification_project_prewrite_failures', 'job_id'),
+                ('technical_verifications', 'run'), ('acceptances', 'run')):
+            if table in tables and c.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (rid,)).fetchone():
+                raise ValueError('Later verification or acceptance work conflicts with this epoch.')
+        plan, before, record, checkpoint, predecessor = inspect_next_epoch(job, snapshot, original, target['target_profile'], c)
+        if record is None and run['state'] != 'ATTENTION':
+            raise ValueError('Only a known terminal checkpoint can start this epoch.')
+        if read_prototype_snapshot(job)[1] != original:
+            raise ValueError('Epoch source snapshot changed during inspection.')
+        public_fields = ('ai_approved_focuses', 'source_checked_focuses', 'repair_focus_id', 'projection_focus_id',
+            'source_fact_violations', 'planned_corrective_operations', 'remaining_focus_count', 'continue_remaining_run')
+        projection = {'schema_version': 1, 'scope': SCOPE, 'project_id': pid, 'run_id': rid,
+            'source_hash': snapshot['source_hash'], 'source_binding': selected['source_binding'],
+            'selected_source_set_id': snapshot['selected_source_set_id'], 'target_profile_sha256': selected['target_profile_sha256'],
+            'approved_chunk_hashes': dict(selected['approved_chunk_hashes']), 'epoch_number': NUMBER,
+            'predecessor_sha256': predecessor, 'checkpoint_sha256': checkpoint, 'eligible': record is None,
+            'reason': ('The next epoch repairs unsupported clause facts and reviews the exact projection, then continues the remaining selected sections.'
+                if record is None else 'This epoch is already recorded. Open the same run; no operation was replayed.'),
+            'epoch_recorded': record is not None, **{key: plan[key] for key in public_fields}}
+        return projection, snapshot, original, plan, before, record, run
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/mapping-epochs/next')
+    def next_mapping_epoch(pid: str, rid: str, request: Request):
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection = epoch_context(c, pid, rid, p['owner'])[0]
+            return Response(json.dumps(projection), media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except recovery_errors:
+            raise HTTPException(409, 'The next mapping epoch is unavailable: exact source, consent, predecessor or terminal proof could not be verified. No operation was replayed.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/mapping-epochs', status_code=202)
+    def submit_mapping_epoch(pid: str, rid: str, body: PrototypeEpochInput, request: Request):
+        from .prototype_mapping_epochs import RECORD, PREFIX, EVENT, SCOPE, STRATEGY, NUMBER, POLICY, event_id, save, read
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection, snapshot, original, plan, before, record, run = epoch_context(c, pid, rid, p['owner'])
+                if (body.expected_epoch_number != projection['epoch_number']
+                        or body.expected_predecessor_sha256 != projection['predecessor_sha256']
+                        or body.checkpoint_sha256 != projection['checkpoint_sha256']
+                        or body.source_hash != projection['source_hash'] or body.source_binding != projection['source_binding']
+                        or body.expected_current_source_set_id != projection['selected_source_set_id']
+                        or body.target_profile_sha256 != projection['target_profile_sha256']
+                        or body.approved_chunk_hashes != projection['approved_chunk_hashes']
+                        or not all(value is True for value in (body.approved_redacted_source, body.approved_external_ai, body.approved_prototype_scope))):
+                    raise ValueError('Epoch needs the exact plan and three fresh source-processing consents.')
+                result = {'id': rid, 'state': run['state'] if record else 'QUEUED', 'conversion_profile': PROFILE_ID,
+                          'continued': True, 'epoch_number': NUMBER}
+                if record:
+                    return Response(json.dumps(result), status_code=200, media_type='application/json', headers={'Cache-Control': 'no-store'})
+                if not admission_allowed(c):
+                    raise HTTPException(429, 'Other unresolved work blocks this epoch. Existing outcomes remain preserved.')
+                now = time.time()
+                record = {'schema_version': 1, 'scope': SCOPE, 'strategy': STRATEGY, 'epoch_number': NUMBER,
+                    'predecessor_sha256': projection['predecessor_sha256'], 'checkpoint_sha256': projection['checkpoint_sha256'],
+                    'job_id': rid, 'project_id': pid, 'snapshot_sha256': hashlib.sha256(original).hexdigest(),
+                    'source_hash': snapshot['source_hash'], 'source_binding': snapshot['prototype']['source_binding'],
+                    'target_profile_sha256': snapshot['prototype']['target_profile_sha256'], 'owner': p['owner'], 'approved_at': now,
+                    'approvals': {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True},
+                    'before_files': before, 'plan': plan, 'normalization_policy': POLICY}
+                job = root / 'jobs' / rid
+                save(job / RECORD, record, True)
+                save(job / 'prototype-pipeline' / PREFIX / 'epoch-record.json', record, True)
+                save(job / 'prototype-pipeline' / PREFIX / 'predecessor-record.json', read(job / 'mapping-continuation.json'), True)
+                if (job / 'source-snapshot.json').read_bytes() != original:
+                    raise ValueError('Epoch immutable source changed before queueing.')
+                updated = c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Continuing the same run with a bounded source-fact repair and reviewed technical projection.', now, rid))
+                if updated.rowcount != 1:
+                    raise ValueError('Epoch row changed before queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                          (p['owner'], EVENT, event_id(rid, record), now))
+            return Response(json.dumps(result), status_code=202, media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except (*recovery_errors, sqlite3.Error):
+            raise HTTPException(409, 'The epoch was not queued: source approval or durable epoch state could not be verified. Original operations remain preserved; uncertain calls were not replayed.') from None
 
     @app.post('/api/projects/{pid}/prototype-sources')
     async def upload_redacted_prototype(pid: str, request: Request,
