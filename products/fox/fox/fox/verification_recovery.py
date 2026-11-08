@@ -714,7 +714,8 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
                                      analysis_epoch_failure=False, clause_repair_failure=False,
                                      container_review_failure=False, partition_review_failure=False,
-                                     context_screen_failure=False, review_scope_failure=False):
+                                     context_screen_failure=False, review_scope_failure=False,
+                                     post_correction_review_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge loads this
@@ -738,6 +739,9 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     The epoch-six opt-in recognizes only the sealed non-owned context-Block
     attribution defect. It does not accept the review or authorize correction.
     Unknown/missing/extra evidence and all later work remain blocking.
+    A distinct opt-in preserves the complete original167 checkpoint and then
+    checks its consumed correction and sealed14-section negative publication.
+    This grants preservation/admission classification only, never retry/approval.
     """
     import math
     import os
@@ -773,7 +777,12 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         protected(path)
         need(not path.is_symlink() and path.is_file() and 0 < path.stat().st_size <= maximum)
         need(path.stat().st_nlink == 1)
-        raw = path.read_bytes()
+        source = (job / 'prototype-result-publications/epoch-000006/previous-result.json'
+                  if archived_latest and path == job / 'prototype-result.json' else path)
+        protected(source)
+        need(source.is_file() and not source.is_symlink() and source.stat().st_nlink == 1
+             and 0 < source.stat().st_size <= maximum)
+        raw = source.read_bytes()
         need(0 < len(raw) <= maximum)
         observed[path.relative_to(job).as_posix()] = raw
         return raw
@@ -796,9 +805,13 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     try:
         need(all(type(value) is bool for value in
                  (claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                  container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure))
+                  container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure,
+                  post_correction_review_failure))
              and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                      container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure)) <= 1)
+                      container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure,
+                      post_correction_review_failure)) <= 1)
+        archived_latest = post_correction_review_failure
+        review_scope_failure = review_scope_failure or post_correction_review_failure
         screen_family = context_screen_failure or review_scope_failure
         partition_family = partition_review_failure or screen_family
         container_family = container_review_failure or partition_family
@@ -1313,7 +1326,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 need(sorted(row[0] for row in event_actions) == sorted((origin,
                     'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
                     *(['approved_prototype_mapping_epoch'] * (4 if review_scope_failure else 3 if context_screen_failure else 2 if partition_review_failure else 1)
-                      if container_family else []))))
+                      if container_family else []), *(['approved_prototype_review_scope_correction']
+                      if post_correction_review_failure else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
                 same(document(epoch_root / 'predecessor-record.json'), continuation)
@@ -1766,15 +1780,21 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                                 ancestors.append({'source': ancestor, 'mapping': ancestor_mapping,
                                                   'owner_binding': bindings[owner_of[parent]]})
                                 parent = ancestor['parent_id']
-                            declaration, screen_focus = screens[mapping['screen_id']]
-                            owners = [obj for obj in mappings if all_objects[obj]['kind'] == 'Block'
-                                      and mappings[obj].get('screen_id') == mapping['screen_id']
-                                      and mappings[obj]['disposition'] == 'proposed']
-                            need(len(owners) == 1 and source['block_id'] == owners[0])
-                            block_id = owners[0]
-                            screen_context = {'declaration': declaration, 'source_block': all_objects[block_id],
-                                'owner_mapping': mappings[block_id], 'owner_binding': bindings[screen_focus],
-                                'borrowed_from_prior_focus': screen_focus != current_id}
+                            screen_context = None
+                            if 'screen_id' in mapping:
+                                declaration, screen_focus = screens[mapping['screen_id']]
+                                owners = [obj for obj in mappings if all_objects[obj]['kind'] == 'Block'
+                                          and mappings[obj].get('screen_id') == mapping['screen_id']
+                                          and mappings[obj]['disposition'] == 'proposed']
+                                need(len(owners) == 1 and source['block_id'] == owners[0])
+                                block_id = owners[0]
+                                screen_context = {'declaration': declaration, 'source_block': all_objects[block_id],
+                                    'owner_mapping': mappings[block_id], 'owner_binding': bindings[screen_focus],
+                                    'borrowed_from_prior_focus': screen_focus != current_id}
+                            else:
+                                need(post_correction_review_failure and source['kind'] == 'DataSourceColumn'
+                                     and mapping['disposition'] == 'unresolved'
+                                     and set(mapping) == {'source_object_id', 'disposition', 'reason'})
                             coverage = []
                             if source['kind'] == 'Trigger':
                                 units = [unit for unit in unit_metadata.values() if unit['owner_id'] == source['id']]
@@ -2334,6 +2354,269 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                             same(document(job / previous_six), latest)
                             need(observed[previous_six] == observed['prototype-result.json'] and len(observed) == 167)
                             epoch_directories |= sixth_dirs
+                            if post_correction_review_failure:
+                                # Fixed preservation-only successor of the167 stop.
+                                # The archived-pointer leaf above rebuilds ONLY its
+                                # historical checkpoint. Restore the actual latest
+                                # leaf before the final publication/physical closure.
+                                failed_before = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                                correction_prefix = sixth_prefix + '/review-correction'
+                                correction_root = job / correction_prefix
+                                correction_dir = correction_root / 'attempt-000001'
+                                for path in (correction_root, correction_dir, sixth_root / 'source-facts'):
+                                    need(path.is_dir()); protected(path)
+                                    epoch_directories.add(path.relative_to(job).as_posix())
+
+                                def ledger(req, compact):
+                                    inherited = []
+                                    for row in compact['owned_rows']:
+                                        screen = row['screen_context']
+                                        if screen is not None and screen['borrowed_from_prior_focus']:
+                                            value = {key: screen[key] for key in ('source_ref', 'mapping_ref', 'owner_ref', 'screen_ref')}
+                                            value['declaration'] = compact['tables']['screens'][screen['screen_ref']]
+                                            if value not in inherited: inherited.append(value)
+                                    return {'owned_objects': [{'id': row['id'], 'kind': row['kind']} for row in req['owned_objects']],
+                                        'context_only_objects': [{'id': row['id'], 'kind': row['kind']} for row in req['context_objects']],
+                                        'inherited_screens': inherited,
+                                        'rule': 'Only owned_objects may be finding source_object_id values. Context grants no ownership. '
+                                            'Inherited screens need no local declaration without an owned Block. '
+                                            'Use null for an application-level finding; genuine semantic defects still block.'}
+
+                                pins = {'failed_request_sha256': hashlib.sha256(observed[sixth_prefix + '/' + focus_nine + '/reviewer-request.json']).hexdigest(),
+                                    'failed_response_sha256': hashlib.sha256(observed[sixth_prefix + '/' + focus_nine + '/reviewer.json']).hexdigest(),
+                                    'failed_task_sha256': hashed(task_nine), 'failed_output_sha256': hashed(review_nine),
+                                    'failed_invocation_sha256': hashed(document(sixth_dir / 'reviewer.json')['invocation']),
+                                    'kind': 'CONTEXT_ONLY_FINDING_ATTRIBUTION', 'non_owned_finding_ids': [block_nine]}
+                                corrected_task = json.loads(canonical(task_nine))
+                                corrected_task.update(scope='fox-prototype-review-scope-correction-v1',
+                                    ownership_ledger=ledger(request_nine, task_nine['design_context']), correction_of=pins)
+                                corrected_task['task_guidance'] += (' The explicit ownership_ledger is authoritative for section ownership. '
+                                    'This is a new independent review of the unchanged candidate, not acceptance of the old response. '
+                                    'The prior response was rejected structurally and is not a semantic review receipt. '
+                                    'Do not force approval; identify any genuine defects in the owned mapping.')
+                                corrected_task.pop('task_binding'); corrected_task['task_binding'] = hashed(corrected_task)
+                                correction_plan = {**pins, 'pending_review_focus_id': focus_nine,
+                                    'candidate_sha256': hashed(candidate_nine), 'design_context_sha256': hashed(audit_nine),
+                                    'corrected_task_sha256': hashed(corrected_task), 'ownership_ledger_sha256': hashed(corrected_task['ownership_ledger']),
+                                    'ai_approved_focuses': 8, 'saved_mapping_focuses': 1,
+                                    'unstarted_focus_count': assessment['focus_count'] - 9,
+                                    'remaining_focus_count': assessment['focus_count'] - 8, 'new_reviewer_calls': 1, 'repeated_mapper_calls': 0}
+                                child = document(correction_root / 'authorization.json')
+                                expected_child = {key: sixth[key] for key in ('job_id', 'project_id', 'snapshot_sha256',
+                                    'source_hash', 'source_binding', 'target_profile_sha256', 'owner', 'approvals')}
+                                expected_child.update(schema_version=1, scope='fox-prototype-review-scope-correction-v1',
+                                    epoch_number=6, epoch_record_sha256=hashed(sixth), approved_at=child['approved_at'],
+                                    before_files=failed_before, plan=correction_plan,
+                                    checkpoint_sha256=hashed({'scope': 'fox-prototype-review-scope-correction-v1',
+                                        'epoch_record_sha256': hashed(sixth), 'before_files': failed_before, 'plan': correction_plan}))
+                                need(type(child['approved_at']) in (int, float) and math.isfinite(child['approved_at'])
+                                     and child['approved_at'] > sixth['approved_at'])
+                                same(child, expected_child)
+                                correction_events = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
+                                    '(object_id=? OR object_id LIKE ?)', ('approved_prototype_review_scope_correction',
+                                    run['id'], run['id'] + ':%')).fetchall()
+                                need([tuple(row) for row in correction_events] == [(owner[0],
+                                    run['id'] + ':review-correction:000006:' + hashed(child), child['approved_at'])])
+                                same(document(correction_dir / 'reviewer-request.json'), corrected_task)
+                                corrected_review, corrected_room = role_output(correction_dir, 'reviewer', corrected_task)
+                                used_rooms = rooms | {room, analysis_room, clause_review_room, review_room, root_room,
+                                    current_room, compact_room, mapper_nine_room, reviewer_nine_room}
+                                need(corrected_room not in used_rooms); used_rooms.add(corrected_room)
+                                same(corrected_review, {'source_binding': selected['source_binding'], 'focus_binding': request_nine['focus_binding'],
+                                    'candidate_sha256': hashed(candidate_nine), 'verdict': 'APPROVED', 'findings': []})
+                                checked = review_receipt(candidate_nine, request_nine, 'APPROVED')
+                                same(document(correction_dir / 'review-receipt.json'), checked)
+                                facts_nine_count = sum(claim['status'] == 'source_fact' for claim in candidate_nine['blueprint']['claims'])
+                                same(document(sixth_root / 'source-facts' / (focus_nine + '.json')), gate(candidate_nine, request_nine, facts_nine_count))
+                                proof_nine = {'focus_id': focus_nine, 'kind': 'REVIEWED_SCOPE_CORRECTION',
+                                    'candidate_sha256': hashed(candidate_nine), 'source_fact_check': gate(candidate_nine, request_nine, facts_nine_count),
+                                    'active_directory': correction_prefix[len('prototype-pipeline/'):] + '/attempt-000001',
+                                    'mapper_invocation': document(dir_nine / 'mapper.json')['invocation'],
+                                    'retained_mapper_directory': 'epochs/epoch-000005/' + focus_nine,
+                                    'reviewer_invocation': document(correction_dir / 'reviewer.json')['invocation'],
+                                    'review_request_sha256': hashed(corrected_task), 'review_sha256': hashed(corrected_review),
+                                    'review_receipt_sha256': hashed(checked), 'technical_evidence_sha256': hashed(screen_evidence),
+                                    'review_correction_sha256': hashed(child)}
+                                completed_requests = [req for req, _ in requests] + [request_nine]
+                                completed_candidates = [*candidates_four, candidate_nine]
+                                completed_proofs = [*proofs_eight, proof_nine]
+                                cursor_later = cursor + len(owned_nine)
+
+                                def ordinary_request(req, owned):
+                                    refs = {obj['id'] for obj in owned}
+                                    entries = [entry for entry in packet['sources'] if refs <= {obj['id'] for obj in entry['facts']['objects']}]
+                                    need(len(entries) == 1); facts = entries[0]['facts']
+                                    units = [unit for obj in owned for unit in facts['code_units'] if unit['owner_id'] == obj['id']]
+                                    associated = refs | {unit['id'] for unit in units}
+                                    links = [row for row in facts['links'] if row['source_id'] in associated]
+                                    findings = [row for row in facts['findings'] if not row['object_ids'] or associated.intersection(row['object_ids'])]
+                                    contexts = set()
+                                    def ancestors(ref):
+                                        seen = set()
+                                        while ref is not None:
+                                            need(ref in all_objects and ref not in seen); seen.add(ref); contexts.add(ref)
+                                            ref = all_objects[ref]['parent_id']
+                                    for obj in owned: ancestors(obj['parent_id'])
+                                    for link in links:
+                                        if link['status'] == 'resolved': ancestors(link['target_id'])
+                                    for finding in findings:
+                                        for ref in finding['object_ids']: ancestors(ref)
+                                    supplied = {row['code_unit_id']: row for row in req['chunks']}
+                                    need(len(supplied) == len(req['chunks'])); selected_chunks = []
+                                    for unit in units:
+                                        chunk = chunk_units[unit['id']]
+                                        if chunk['id'] in selected['approved_chunk_hashes']:
+                                            body = supplied[unit['id']]['text']
+                                            need(type(body) is str and len(body.encode()) == unit['bytes']
+                                                 and hashlib.sha256(body.encode()).hexdigest() == unit['sha256'])
+                                            selected_chunks.append({**chunk, 'text': body})
+                                    result = {'schema_version': 1, 'scope': 'fox-forms-focus-request-v1',
+                                        'source_binding': selected['source_binding'],
+                                        'focus_id': 'focus-' + hashed([selected['source_binding'], [obj['id'] for obj in owned]])[:24],
+                                        'source_index': source_index, 'owned_objects': owned,
+                                        'context_objects': [all_objects[ref] for ref in sorted(contexts - refs, key=object_order.__getitem__)],
+                                        'code_units': units, 'links': links, 'dependencies': [row for row in facts['dependencies'] if row['source_id'] in associated],
+                                        'findings': findings, 'chunks': selected_chunks,
+                                        'unselected_code_unit_ids': [unit['id'] for unit in units if chunk_units[unit['id']]['id'] not in selected['approved_chunk_hashes']],
+                                        'safety': requests[0][0]['safety']}
+                                    result['focus_binding'] = hashed(result)
+                                    same(req, result); need(len(canonical(req)) <= 500000)
+
+                                def compact_context(audit):
+                                    tables = {key: {} for key in ('sources', 'mappings', 'screens', 'owner_bindings')}
+                                    def put(table, key, value):
+                                        if key in tables[table]: same(tables[table][key], value)
+                                        else: tables[table][key] = value
+                                        return key
+                                    def triple(source, mapping, binding):
+                                        need(source['id'] == mapping['source_object_id'])
+                                        return {'source_ref': put('sources', source['id'], source),
+                                            'mapping_ref': put('mappings', source['id'], mapping),
+                                            'owner_ref': put('owner_bindings', binding['focus_id'], binding)}
+                                    header = json.loads(canonical({key: value for key, value in audit.items() if key != 'owned_rows'}))
+                                    header['prefix_check']['reference_bindings'] = {key: put('owner_bindings', value['focus_id'], value)
+                                        for key, value in header['prefix_check']['reference_bindings'].items()}
+                                    rows = []
+                                    for row in audit['owned_rows']:
+                                        screen = row['screen_context']
+                                        value = {'focus_id': row['focus_id'], **triple(row['source'], row['mapping'], row['owner_binding']),
+                                            'ancestors': [triple(a['source'], a['mapping'], a['owner_binding']) for a in row['ancestors']],
+                                            'screen_context': None, 'unit_coverage': row['unit_coverage']}
+                                        if screen is not None:
+                                            value['screen_context'] = {**triple(screen['source_block'], screen['owner_mapping'], screen['owner_binding']),
+                                                'screen_ref': put('screens', screen['declaration']['id'], screen['declaration']),
+                                                'borrowed_from_prior_focus': screen['borrowed_from_prior_focus']}
+                                        rows.append(value)
+                                    return {'schema_version': 1, 'scope': 'fox-compact-design-review-context-v1',
+                                        'header': header, 'tables': tables, 'owned_rows': rows}
+
+                                for position in range(9, 14):
+                                    rest = ordered[cursor_later:]; need(rest)
+                                    group = (rest[0]['block_id'], rest[0]['module_id']); owned_later = []
+                                    for obj in rest:
+                                        if (obj['block_id'], obj['module_id']) != group or len(owned_later) == 32: break
+                                        owned_later.append(obj)
+                                    fid = 'focus-' + hashed([selected['source_binding'], [obj['id'] for obj in owned_later]])[:24]
+                                    directory = sixth_root / fid
+                                    need(directory.is_dir()); protected(directory); epoch_directories.add(sixth_prefix + '/' + fid)
+                                    req = document(directory / 'mapper-request.json', 500000)
+                                    ordinary_request(req, owned_later); cursor_later += len(owned_later)
+                                    raw, mapper_room = role_output(directory, 'mapper', req)
+                                    need(mapper_room not in used_rooms); used_rooms.add(mapper_room)
+                                    owned_ids = {obj['id'] for obj in owned_later}
+                                    # This fixed terminal has no further alias/context
+                                    # repair: the checked screen projection is NO_CHANGE.
+                                    shape(raw, req, owned_ids)
+                                    candidate = document(directory / 'projection-candidate.json')
+                                    same(candidate, raw); same(document(directory / 'screen-input-candidate.json'), raw)
+                                    summary_prior, _ = context_data(completed_proofs, context_requests=completed_requests,
+                                        candidates=completed_candidates, all_reviewed=True)
+                                    refs_prior = {key: {field: value for field, value in ref.items() if field != 'kind'}
+                                        for key, ref in summary_prior['reference_bindings'].items()}
+                                    summary, rows = context_data(completed_proofs, context_requests=[*completed_requests, req],
+                                        candidates=[*completed_candidates, candidate], current_request=req, current_candidate=candidate)
+                                    audit = {'schema_version': 1, 'scope': 'fox-design-review-context-v1', 'focus_id': fid,
+                                        'source_binding': selected['source_binding'], 'target_profile_sha256': selected['target_profile_sha256'],
+                                        'focus_request_sha256': hashed(req), 'candidate_sha256': hashed(candidate),
+                                        'prefix_check': summary, 'owned_rows': rows, 'review_required': True, **context_false}
+                                    same(document(directory / 'full-audit-context.json'), audit)
+                                    screen = {'schema_version': 1, 'scope': 'fox-context-screen-projection-v1',
+                                        'source_binding': selected['source_binding'], 'focus_plan_sha256': selected['focus_plan_sha256'],
+                                        'focus_id': fid, 'focus_request_sha256': hashed(req), 'target_profile_sha256': selected['target_profile_sha256'],
+                                        'raw_candidate_sha256': hashed(raw), 'candidate_sha256': hashed(candidate), 'status': 'NO_CHANGE',
+                                        'removed_screens': [], 'prior_prefix_sha256': hashed(completed_candidates),
+                                        'prior_references_sha256': hashed(refs_prior), 'prior_prefix_check_sha256': hashed(summary_prior),
+                                        'derived_review_context_sha256': hashed(audit), 'only_screen_declarations_changed': True,
+                                        'raw_model_output': False, 'independent_review_required': True, 'semantic_equivalence_asserted': False,
+                                        'caller_must_reconstruct_prior_reviewed_views': True, 'caller_must_preserve_originals': True,
+                                        'ai_approval_granted': False, **context_false}
+                                    same(document(directory / 'screen-projection-receipt.json'), screen)
+                                    evidence = {'schema_version': 1, 'scope': 'fox-focus-context-screen-normalization-v1',
+                                        'base_technical_evidence': None, 'context_screen_projection': screen, 'raw_mapper_candidate_sha256': hashed(raw)}
+                                    same(document(directory / 'projection-receipt.json'), evidence)
+                                    task = {'schema_version': 1, 'scope': 'fox-partition-review-task-v1', 'request': req,
+                                        'candidate': candidate, 'candidate_sha256': hashed(candidate),
+                                        'target_profile_sha256': selected['target_profile_sha256'], 'design_context_sha256': hashed(audit),
+                                        'design_context': compact_context(audit), 'task_guidance': guidance,
+                                        'independent_semantic_review_required': True, 'historical_allegations': None, **context_false,
+                                        'review_context': {'schema_version': 1, 'scope': 'fox-focus-extended-review-v1',
+                                            'operation': 'projection_review', 'raw_candidate': raw, 'raw_candidate_sha256': hashed(raw),
+                                            'evidence': evidence, 'trusted_requirements': {
+                                                'source_fact_values_and_every_ref_must_match_exact_whitelist': True,
+                                                'old_ai_approval_is_not_source_validation': True,
+                                                'review_every_required_clause_body_conditions_effects_and_action_refs': True,
+                                                'generic_or_relabelled_unsupported_facts_must_be_changes_required': True,
+                                                'external_semantics_must_remain_uncertain': True,
+                                                'compare_both_rationales_no_semantic_equivalence_from_machine_match': True,
+                                                'never_repair_candidate_or_accept_business_behavior': True}}}
+                                    task['ownership_ledger'] = ledger(req, task['design_context'])
+                                    task['task_guidance'] += (' The explicit ownership_ledger distinguishes owned objects from context-only '
+                                        'objects and inherited screens. Only owned IDs (or null for a global finding) may be used in '
+                                        'findings. Context grants no ownership. Reject genuine semantic defects; do not force approval.')
+                                    task['task_binding'] = hashed(task)
+                                    need(len(json.dumps(task, ensure_ascii=False, allow_nan=False).encode()) <= 650000)
+                                    same(document(directory / 'reviewer-request.json'), task)
+                                    output, reviewer_room = role_output(directory, 'reviewer', task)
+                                    need(reviewer_room not in used_rooms); used_rooms.add(reviewer_room)
+                                    verdict = 'APPROVED' if position < 13 else 'CHANGES_REQUIRED'
+                                    need(set(output) == {'source_binding', 'focus_binding', 'candidate_sha256', 'verdict', 'findings'}
+                                         and output['source_binding'] == selected['source_binding'] and output['focus_binding'] == req['focus_binding']
+                                         and output['candidate_sha256'] == hashed(candidate) and output['verdict'] == verdict
+                                         and type(output['findings']) is list and len(output['findings']) <= 250
+                                         and bool(output['findings']) == (verdict == 'CHANGES_REQUIRED'))
+                                    for finding in output['findings']:
+                                        need(type(finding) is dict and set(finding) == {'source_object_id', 'code', 'detail'}
+                                             and (finding['source_object_id'] is None or finding['source_object_id'] in owned_ids))
+                                        identifier(finding['code']); text(finding['detail'])
+                                    checked = review_receipt(candidate, req, verdict)
+                                    same(document(directory / 'review-receipt.json'), checked)
+                                    count = sum(claim['status'] == 'source_fact' for claim in candidate['blueprint']['claims'])
+                                    source_gate = gate(candidate, req, count)
+                                    same(document(sixth_root / 'source-facts' / (fid + '.json')), source_gate)
+                                    completed_requests.append(req); completed_candidates.append(candidate)
+                                    completed_proofs.append({'focus_id': fid, 'candidate_sha256': hashed(candidate),
+                                        'source_fact_check': source_gate, 'review_request_sha256': hashed(task),
+                                        'review_sha256': hashed(output), 'review_receipt_sha256': hashed(checked),
+                                        'active_directory': 'epochs/epoch-000006/' + fid,
+                                        'mapper_invocation': document(directory / 'mapper.json')['invocation'],
+                                        'reviewer_invocation': document(directory / 'reviewer.json')['invocation'],
+                                        'technical_evidence_sha256': hashed(evidence)})
+                                need(len(completed_proofs) == 14 and len(completed_candidates) == 14)
+                                archived_latest = False
+                                physical_latest = document(job / 'prototype-result.json')
+                                expected_latest = {**latest, 'mapping_epoch_sha256': hashed(sixth),
+                                    'blocked_focus_id': completed_requests[-1]['focus_id']}
+                                same(physical_latest, expected_latest)
+                                final_history = 'prototype-results/' + hashed(physical_latest) + '.json'
+                                same(document(job / final_history), physical_latest)
+                                need(observed[final_history] == observed['prototype-result.json'])
+                                same(document(job / 'prototype-result-publications/epoch-000006/publication.json'), {
+                                    'schema_version': 1, 'scope': 'fox-prototype-epoch-result-publication-v1', 'job_id': run['id'],
+                                    'project_id': run['project'], 'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                                    'epoch_sha256': hashed(sixth), 'screen_projection_sha256': hashed(screen_receipt),
+                                    'result_sha256': hashed(physical_latest), 'history_path': final_history, 'status': 'CHANGES_REQUIRED',
+                                    'stage': 'reviewing', 'active_proofs_sha256': hashed(completed_proofs), 'stage_files': {}, 'previous_result': sixth_pin})
+                                need(len(observed) == 251)
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
@@ -2461,6 +2744,11 @@ def terminal_prototype_context_screen(database, db, run):
 def terminal_prototype_review_scope(database, db, run):
     """Only head six's sealed non-owned reviewer finding; no correction grant."""
     return terminal_empty_prototype_mapping(database, db, run, review_scope_failure=True)
+
+
+def terminal_prototype_post_correction_review(database, db, run):
+    """Sealed consumed correction plus14-section negative; no retry/approval grant."""
+    return terminal_empty_prototype_mapping(database, db, run, post_correction_review_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -3610,6 +3898,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_prototype_review_scope(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_review_scope_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_post_correction_review(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_post_correction_review_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

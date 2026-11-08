@@ -40,6 +40,12 @@ _CASE_CACHE = None
 def authored_exact_nine(authored_duplicate_mapper, monkeypatch):
     """29 Items + 3 selected whole Triggers; context Block is not owned."""
     import test_prototype_mapping_epochs as synthetic
+    from fox import prototype_project_routes as routes
+    admission = routes.prepare_prototype_admission
+    def legacy_admission(*args, **kwargs):
+        kwargs['metadata_task_policy'] = None  # Explicitly author the historical018 contract.
+        return admission(*args, **kwargs)
+    monkeypatch.setattr(routes, 'prepare_prototype_admission', legacy_admission)
     upload, pipeline, invoke = synthetic.upload, synthetic.run_prototype_pipeline, EpochModel.invoke
     def enlarged(documents):
         marker = b'</Block><Block Name="LAST"'
@@ -270,6 +276,8 @@ def test_resealed_review_must_be_only_known_nonowned_context_block_defect(review
 
 @pytest.mark.parametrize('mutation', [None, 'pending', 'receipt', 'correction', 'source-tamper', 'legacy1', 'legacy2'])
 def test_actual_generated_checkedfinder_queryonly_and_legacy_safe(review_scope_case, historical_case, monkeypatch, mutation):
+    if mutation in ('legacy1', 'legacy2') and not (Path(__file__).resolve().parents[2] / 'deployment/native-beta-profile.json').is_file():
+        pytest.skip('Historical legacy native-beta-profile.json is absent; no substitute passing profile is fabricated.')
     combine(review_scope_case, historical_case)
     job = historical_case.root / 'jobs' / review_scope_case[3]
     directory = next((job / 'prototype-pipeline/epochs/epoch-000006').glob('focus-*'))

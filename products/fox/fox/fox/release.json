@@ -1,12 +1,12 @@
 {
-  "version": "0.19.0",
+  "version": "0.19.1",
   "released_on": "2026-11-08",
-  "title": "Recognize saved Forms column names and continue",
+  "title": "Preserve completed review failures during upgrades",
   "changes": [
-    "Recognize direct DSCName metadata from the exact saved Forms source without changing historical facts or source identifiers.",
-    "Offer a bounded same-run repair with fresh independent review of changed mapping explanations; preserve original results and completed mapping calls.",
-    "Show unchanged reviewed sections, mappings needing review and unstarted sections beside explicit processing confirmations.",
-    "Carry source-bound name metadata into newly authorized model tasks while preserving technical validation and separate business acceptance."
+    "Recognize a sealed post-correction negative review as stopped work for upgrade preservation, not as a successful conversion.",
+    "Validate the original history, correction approval, completed review sequence and final result publication before classifying the run.",
+    "Keep pending calls, new repair activity, Oracle-stage artifacts and changed evidence blocking the upgrade.",
+    "Preserve separate processing consent, retry authority, technical verification and business acceptance."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

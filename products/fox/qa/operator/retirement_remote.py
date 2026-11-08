@@ -162,7 +162,7 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                 waiting.append({'binding': binding.payload(), 'record_sha256': row['record_sha256']})
             elif value['recovery_state'] in {'prototype_clause_repair_terminal', 'prototype_container_review_terminal',
                                             'prototype_partition_review_terminal', 'prototype_context_screen_terminal',
-                                            'prototype_review_scope_terminal'}:
+                                            'prototype_review_scope_terminal', 'prototype_post_correction_review_terminal'}:
                 # A label cannot close, replay, export or authorize this run.
                 # Independently re-read the exact sealed pre-database failure;
                 # missing helpers in an older namespace fail closed as well.
@@ -171,7 +171,8 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                     'prototype_container_review_terminal': 'terminal_prototype_container_review',
                     'prototype_partition_review_terminal': 'terminal_prototype_partition_review',
                     'prototype_context_screen_terminal': 'terminal_prototype_context_screen',
-                    'prototype_review_scope_terminal': 'terminal_prototype_review_scope'}[value['recovery_state']]
+                    'prototype_review_scope_terminal': 'terminal_prototype_review_scope',
+                    'prototype_post_correction_review_terminal': 'terminal_prototype_post_correction_review'}[value['recovery_state']]
                 classifier = getattr(recovery_module, classifier_name, None)
                 _need(value == {'blocks_admission': False,
                     'recovery_state': value['recovery_state'], 'retry_eligible': False}

@@ -4,6 +4,26 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.19.1] - 2026-11-08
+
+### Preserve completed review failures during upgrades
+
+- Recognize the bounded, sealed post-correction negative-review state as stopped
+  work that can be preserved during a software upgrade. Earlier terminal
+  classifications retain their existing rules.
+- Recheck original history, correction authorization and event, contiguous
+  completed independent reviews, and the final result/history/publication.
+  Historical reads do not replace or rewrite the physical current result.
+- Keep active repairs, pending or orphan calls, unexpected files and Oracle-stage
+  artifacts blocking. The retirement reader independently checks the terminal
+  classification rather than trusting its label.
+- Grant no retry, review approval, application import, conversion success or
+  business acceptance through this classification.
+
+This patch changes upgrade preservation, not the generated APEX format or the
+conversion's required independent-review and deterministic-validation gates.
+Source publication does not establish deployment or a completed real conversion.
+
 ## [0.19.0] - 2026-11-08
 
 ### Recognize saved Forms column names and continue
