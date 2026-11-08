@@ -4,6 +4,40 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.20.0] - 2026-11-09
+
+### Review corrected mapping format and continue
+
+- Add a source-bound format policy for an exact repeated binding field and two
+  Item metadata kind aliases. Values, evidence, statuses and business behavior
+  are unchanged; mismatched or unsupported facts still stop processing.
+- Preserve successful legacy owner/context handling. Original model responses
+  remain immutable, with separate normalization evidence and fresh independent
+  review of the resulting candidate.
+- Offer **Review corrected format and continue** for an eligible saved mapping.
+  Show reviewed sections, the saved mapping and unstarted work; lock the original
+  selection and require three fresh processing confirmations. Duplicate and
+  uncertain requests do not automatically queue another attempt.
+- Materialize only deterministically derived review artifacts under a separate
+  same-run continuation authorization. Do not reset consumed repair records,
+  create another mapping epoch or regenerate completed mapping calls.
+- Separate protected maintenance preservation of recognized, closed provider
+  history from ordinary conversion admission. Preservation grants no review,
+  retry, processing, import or business-acceptance authority. Unknown work and
+  Oracle-stage artifacts remain blocking.
+
+The format policy does not repair missing business logic or invent source facts.
+APEX validation, unique import, runtime verification and exact export gates remain
+required. Source publication, deployment, completed conversion and human business
+acceptance are separate outcomes.
+
+Local checks cover source-bound normalization, retained-result authority,
+duplicate/invalid requests, and an exact ZIP downloaded through FOX using authored
+model, SQLcl and browser replies. The UI suite passed 22 checks and TypeScript
+checking passed. A read-only check against the retained real job confirms the
+continuation plan without adopting it or calling a model/database operation.
+These checks are not proof of a completed live conversion.
+
 ## [0.19.1] - 2026-11-08
 
 ### Preserve completed review failures during upgrades

@@ -120,14 +120,26 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
         _need(0 < len(ids) <= 10000 and len(set(ids)) == len(ids)
               and {old['job_id'], *(job['binding']['job_id'] for job in idle['completed_jobs'])} <= set(ids),
               'RETIREMENT_REMOTE_JOB_UNION_CHANGED')
-        eligibility = {}
+        eligibility, preservation = {}, {}
         waiting, busy = [], []
         for job_id in sorted(ids):
-            value = store._eligibility(db, job_id)
+            protected = store._protected_read_status(db, job_id, purpose='maintenance_preservation')
+            value = protected['admission']
             _need(type(value) is dict and set(value) == {'blocks_admission', 'recovery_state', 'retry_eligible'}
                   and type(value['blocks_admission']) is bool and type(value['retry_eligible']) is bool,
                   'RETIREMENT_REMOTE_ELIGIBILITY_INVALID')
-            if value['blocks_admission']:
+            if protected['preservation_allowed']:
+                # Independently reopen the sealed lineage; a projected ready
+                # flag/label is not authority. Admission remains blocked.
+                run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+                classifier = getattr(recovery_module, 'terminal_closed_provider_preservation', None)
+                _need(value['blocks_admission'] is True and value['retry_eligible'] is False
+                      and protected['preservation_state'] == 'closed_provider_history'
+                      and run is not None and callable(classifier)
+                      and classifier(root / 'fox.sqlite3', db, dict(run)) is True,
+                      'RETIREMENT_REMOTE_PRESERVATION_UNCONFIRMED')
+                preservation[job_id] = 'closed_provider_history'
+            elif value['blocks_admission']:
                 _need(for_startup is True, 'RETIREMENT_REMOTE_UNRESOLVED_OR_ACTIVE_WORK')
                 if value['recovery_state'] == 'conversion_active':
                     # An ordinary conversion is not a new verification claim.
@@ -223,7 +235,8 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
                 'completed_retry': {key: retry[key] for key in ('release_sha256', 'job_id', 'attempt_id', 'proof_sha256')},
                 'completed_idle_jobs': idle['completed_jobs'], 'waiting_verification_count': len(waiting),
                 'busy_conversion_count': len(busy), 'admission_state': 'WAIT' if busy else 'READY',
-                'snapshot': {'eligibility': eligibility, 'waiting': waiting, 'busy': busy, 'idle_queue': queue_rows,
+                'snapshot': {'eligibility': eligibility, 'preservation': preservation,
+                             'waiting': waiting, 'busy': busy, 'idle_queue': queue_rows,
                              'retry': attempt}}
 
 

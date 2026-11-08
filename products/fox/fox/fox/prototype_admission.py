@@ -59,7 +59,7 @@ def describe_prototype_sources(documents):
 def prepare_prototype_admission(documents, *, expected_source_binding,
                                 approved_chunk_hashes, target_profile_sha256,
                                 approved_redacted_source, approved_external_ai,
-                                approved_prototype_scope, schema_version=1, metadata_task_policy=None):
+                                approved_prototype_scope, schema_version=1, metadata_task_policy=None, candidate_format_policy=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
@@ -82,6 +82,10 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
         from .prototype_dsc_identity_repair import TASK_POLICY
         if metadata_task_policy != TASK_POLICY: raise ValueError('Unknown metadata task policy.')
         strategy['metadata_task_policy'] = metadata_task_policy
+    if candidate_format_policy is not None:
+        from .prototype_candidate_format import POLICY
+        if candidate_format_policy != POLICY: raise ValueError('Unknown candidate format policy.')
+        strategy['candidate_format_policy'] = candidate_format_policy
     return {
         'prototype': {
             **strategy,

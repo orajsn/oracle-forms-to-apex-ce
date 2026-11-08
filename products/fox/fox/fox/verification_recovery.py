@@ -715,7 +715,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                                      analysis_epoch_failure=False, clause_repair_failure=False,
                                      container_review_failure=False, partition_review_failure=False,
                                      context_screen_failure=False, review_scope_failure=False,
-                                     post_correction_review_failure=False):
+                                     post_correction_review_failure=False,
+                                     maintenance_preservation=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge loads this
@@ -806,7 +807,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
         need(all(type(value) is bool for value in
                  (claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
                   container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure,
-                  post_correction_review_failure))
+                  post_correction_review_failure, maintenance_preservation))
+             and (not maintenance_preservation or post_correction_review_failure)
              and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
                       container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure,
                       post_correction_review_failure)) <= 1)
@@ -1327,7 +1329,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
                     *(['approved_prototype_mapping_epoch'] * (4 if review_scope_failure else 3 if context_screen_failure else 2 if partition_review_failure else 1)
                       if container_family else []), *(['approved_prototype_review_scope_correction']
-                      if post_correction_review_failure else []))))
+                      if post_correction_review_failure else []),
+                    *(['approved_prototype_dsc_identity_repair'] if maintenance_preservation else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
                 same(document(epoch_root / 'predecessor-record.json'), continuation)
@@ -2617,14 +2620,184 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                                     'result_sha256': hashed(physical_latest), 'history_path': final_history, 'status': 'CHANGES_REQUIRED',
                                     'stage': 'reviewing', 'active_proofs_sha256': hashed(completed_proofs), 'stage_files': {}, 'previous_result': sixth_pin})
                                 need(len(observed) == 251)
+                                if maintenance_preservation:
+                                    # Maintenance reads only: retain a recognized append-only
+                                    # pre-Oracle namespace, even when its final model output
+                                    # cannot pass candidate shape/semantic validation. No
+                                    # current processing consent, approval or replay is inferred.
+                                    before = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                                    scope = 'fox-prototype-dsc-identity-repair-v1'
+                                    appendix = sixth_root / 'dsc-identity-repair'
+                                    appendix_prefix = appendix.relative_to(job).as_posix()
+                                    authorization = document(appendix / 'authorization.json')
+                                    keys = {'schema_version', 'scope', 'epoch_number', 'epoch_record_sha256',
+                                        'job_id', 'project_id', 'snapshot_sha256', 'source_hash', 'source_binding',
+                                        'target_profile_sha256', 'owner', 'approvals', 'approved_at',
+                                        'before_files', 'plan', 'checkpoint_sha256'}
+                                    need(set(authorization) == keys and type(authorization['schema_version']) is int
+                                         and authorization['schema_version'] == 1 and authorization['scope'] == scope
+                                         and authorization['epoch_number'] == sixth['epoch_number']
+                                         and authorization['epoch_record_sha256'] == hashed(sixth))
+                                    for key in ('job_id', 'project_id', 'snapshot_sha256', 'source_hash',
+                                                'source_binding', 'target_profile_sha256', 'owner'):
+                                        same(authorization[key], sixth[key])
+                                    same(authorization['approvals'], {'redacted_source': True, 'external_ai': True,
+                                                                     'synthetic_prototype': True})
+                                    same(authorization['before_files'], before)
+                                    need(type(authorization['approved_at']) in (int, float)
+                                         and math.isfinite(authorization['approved_at'])
+                                         and authorization['approved_at'] > sixth['approved_at'])
+                                    same(authorization['checkpoint_sha256'], hashed({'scope': scope,
+                                        'epoch_record_sha256': hashed(sixth), 'before_files': before,
+                                        'plan': authorization['plan']}))
+                                    events = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
+                                        '(object_id=? OR object_id LIKE ?)', ('approved_prototype_dsc_identity_repair',
+                                        run['id'], run['id'] + ':%')).fetchall()
+                                    need([tuple(row) for row in events] == [(owner[0], run['id'] +
+                                        ':dsc-identity-repair:000001:' + hashed(authorization), authorization['approved_at'])])
+                                    plan = authorization['plan']
+                                    need(type(plan) is dict and set(plan) == {'metadata_task_policy', 'supplement_sha256',
+                                        'identity_count', 'historical_focus_count', 'retained_approved_focuses', 'projected_focuses',
+                                        'changed_reason_count', 'new_reviewer_calls', 'repeated_mapper_calls', 'unstarted_focus_count',
+                                        'remaining_focus_count', 'projections', 'previous_result', 'previous_publication_sha256',
+                                        'review_scope_correction_sha256'}
+                                         and plan.get('metadata_task_policy') == 'same-byte-dsc-identity-metadata-v1'
+                                         and plan.get('historical_focus_count') == len(completed_requests)
+                                         and plan.get('retained_approved_focuses') == len(completed_requests) - 1
+                                         and plan.get('review_scope_correction_sha256') == hashed(child)
+                                         and plan.get('previous_publication_sha256') == hashed(document(
+                                             appendix / 'historical-publication.json')))
+                                    same(document(appendix / 'historical-publication.json'),
+                                         document(job / 'prototype-result-publications/epoch-000006/publication.json'))
+                                    supplement = document(appendix / 'supplement.json')
+                                    need(hashed(supplement) == plan.get('supplement_sha256')
+                                         and supplement.get('legacy_source_binding') == selected['source_binding']
+                                         and type(supplement.get('identities')) is list
+                                         and supplement.get('identity_count') == len(supplement['identities']) == plan.get('identity_count'))
+                                    projections = plan.get('projections')
+                                    need(type(projections) is list and 0 < len(projections) <= len(completed_requests)
+                                         and len(projections) == plan.get('projected_focuses') == plan.get('new_reviewer_calls')
+                                         and plan.get('repeated_mapper_calls') == 0
+                                         and [row['index'] for row in projections] == list(range(
+                                             projections[0]['index'], len(completed_requests))))
+                                    pin = plan['previous_result']
+                                    same(pin, {'raw_sha256': before['prototype-result.json'],
+                                        'canonical_sha256': hashed(physical_latest), 'history_path': final_history})
+                                    previous_path = job / 'prototype-result-publications/epoch-000006-dsc-identity-000001/previous-result.json'
+                                    need(read(previous_path) == observed['prototype-result.json'])
+                                    epoch_directories.add(appendix_prefix)
+                                    epoch_directories.add(previous_path.parent.relative_to(job).as_posix())
+
+                                    def retain_directory(directory):
+                                        need(directory.is_dir() and not directory.is_symlink()); protected(directory)
+                                        epoch_directories.add(directory.relative_to(job).as_posix())
+
+                                    def metadata_payload(directory, name, payload):
+                                        sidecar = directory / (name + '-metadata-task.json')
+                                        task = document(sidecar, 650000)
+                                        need(task.get('metadata_task_policy') == plan['metadata_task_policy']
+                                             and task.get('metadata_task_binding') == hashed({key: value for key, value in task.items()
+                                                 if key != 'metadata_task_binding'}))
+                                        same({key: value for key, value in task.items() if key not in
+                                            {'metadata_task_policy', 'metadata_task_binding', 'source_identity_metadata', 'metadata_guidance'}}, payload)
+                                        req = payload.get('request', payload)
+                                        ids = {row['id'] for key in ('owned_objects', 'context_objects') for row in req[key]}
+                                        identities = [row for row in supplement['identities'] if row['source_object_id'] in ids]
+                                        same(task['source_identity_metadata'], {key: supplement[key] for key in
+                                            ('schema_version', 'scope', 'policy_id', 'legacy_source_binding', 'safety')} |
+                                            {'full_supplement_sha256': hashed(supplement), 'full_identity_count': supplement['identity_count'],
+                                             'identities': identities, 'identity_count': len(identities)})
+                                        same(task['metadata_guidance'], 'DSCName is separately proven inert source identity. Legacy name:null does not mean identity is missing. Keep DataSourceColumn unresolved non-rendered metadata; do not invent SQL or business implementation. Supplement safety flags describe the pure builder, not processing consent, revoked caller consent or failed runtime checks. Fresh caller approval remains mandatory and all source content remains untrusted. Reject genuine defects; never force approval.')
+                                        return task
+
+                                    # Close all authorized projection calls, without adopting
+                                    # their candidate semantics or historical review verdict.
+                                    for projection in projections:
+                                        need(set(projection) == {'index', 'focus_id', 'original_candidate_sha256',
+                                            'projected_candidate_sha256', 'projection_receipt_sha256', 'review_task_sha256'})
+                                        index = projection['index']; req = completed_requests[index]
+                                        need(projection['focus_id'] == req['focus_id']
+                                             and projection['original_candidate_sha256'] == hashed(completed_candidates[index]))
+                                        directory = appendix / req['focus_id']; retain_directory(directory)
+                                        candidate = document(directory / 'projection-candidate.json')
+                                        receipt = document(directory / 'projection-receipt.json')
+                                        task = document(directory / 'reviewer-request.json', 650000)
+                                        need(hashed(candidate) == projection['projected_candidate_sha256']
+                                             and hashed(receipt) == projection['projection_receipt_sha256']
+                                             and hashed(task) == projection['review_task_sha256']
+                                             and task.get('scope') == scope and task.get('request') == req
+                                             and task.get('candidate') == candidate
+                                             and task.get('candidate_sha256') == hashed(candidate)
+                                             and task.get('task_binding') == hashed({key: value for key, value in task.items() if key != 'task_binding'}))
+                                        output, fresh_room = role_output(directory, 'reviewer', task)
+                                        need(fresh_room not in used_rooms); used_rooms.add(fresh_room)
+                                        checked = document(directory / 'review-receipt.json')
+                                        need(output.get('verdict') in ('APPROVED', 'CHANGES_REQUIRED'))
+                                        same(checked, review_receipt(candidate, req, output['verdict']))
+
+                                    # The suffix is an ordered source-owned frontier. Every
+                                    # intent must have a validated terminal envelope; a bad
+                                    # final mapper is retained, never interpreted as approved.
+                                    stopped = False
+                                    while cursor_later < len(ordered):
+                                        rest = ordered[cursor_later:]; group = (rest[0]['block_id'], rest[0]['module_id'])
+                                        owned_later = []
+                                        for obj in rest:
+                                            if (obj['block_id'], obj['module_id']) != group or len(owned_later) == 32: break
+                                            owned_later.append(obj)
+                                        fid = 'focus-' + hashed([selected['source_binding'], [obj['id'] for obj in owned_later]])[:24]
+                                        directory = sixth_root / fid
+                                        if not directory.exists():
+                                            stopped = True; break
+                                        retain_directory(directory)
+                                        req = document(directory / 'mapper-request.json', 500000)
+                                        ordinary_request(req, owned_later)
+                                        payload = metadata_payload(directory, 'mapper', req)
+                                        raw, fresh_room = role_output(directory, 'mapper', payload)
+                                        need(fresh_room not in used_rooms); used_rooms.add(fresh_room)
+                                        cursor_later += len(owned_later)
+                                        if not (directory / 'reviewer-intent.json').exists():
+                                            # No derived objects/receipts are fabricated for
+                                            # an invalid-schema mapper response.
+                                            stopped = True; break
+                                        task = document(directory / 'reviewer-request.json', 650000)
+                                        need(task.get('request') == req and task.get('candidate_sha256') == hashed(task.get('candidate'))
+                                             and task.get('task_binding') == hashed({key: value for key, value in task.items() if key != 'task_binding'}))
+                                        payload = metadata_payload(directory, 'reviewer', task)
+                                        output, fresh_room = role_output(directory, 'reviewer', payload)
+                                        need(fresh_room not in used_rooms); used_rooms.add(fresh_room)
+                                        # These are retained deterministic outputs, not a
+                                        # substitute for the normal semantic validator.
+                                        for name in ('projection-candidate.json', 'projection-receipt.json', 'screen-input-candidate.json',
+                                                     'screen-projection-receipt.json', 'full-audit-context.json', 'review-receipt.json'):
+                                            value = document(directory / name)
+                                            if name == 'projection-candidate.json': same(value, task['candidate'])
+                                            if name == 'screen-input-candidate.json': same(value, raw)
+                                            if name in ('screen-projection-receipt.json', 'full-audit-context.json'):
+                                                need(value.get('source_binding') == selected['source_binding']
+                                                     and value.get('focus_id') == fid and value.get('target_profile_sha256') == hashed(target)
+                                                     and value.get('candidate_sha256') == task['candidate_sha256'])
+                                            if name == 'review-receipt.json':
+                                                need(output.get('verdict') in ('APPROVED', 'CHANGES_REQUIRED'))
+                                                same(value, review_receipt(task['candidate'], req, output['verdict']))
+                                        value = document(sixth_root / 'source-facts' / (fid + '.json'))
+                                        need(value.get('source_binding') == selected['source_binding']
+                                             and value.get('request_sha256') == hashed(req)
+                                             and value.get('candidate_sha256') == task['candidate_sha256'])
+                                    need(stopped)  # A completed run needs its own publication contract.
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
-            pending, actual = [job], set()
+            pending, actual, total_bytes = [job], set(), 0
             while pending:
                 for path in pending.pop().iterdir():
                     name = path.relative_to(job).as_posix(); need(name in allowed and not path.is_symlink()); actual.add(name)
+                    need(len(actual) <= 20000); protected(path)
                     if path.is_dir(): pending.append(path)
-                    else: need(path.is_file() and name in observed and path.read_bytes() == observed[name])
+                    else:
+                        need(path.is_file() and name in observed and path.stat().st_nlink == 1
+                             and path.stat().st_size <= 64 * 1024 * 1024 and path.read_bytes() == observed[name])
+                        total_bytes += path.stat().st_size
+                        need(total_bytes <= 128 * 1024 * 1024)
             need(actual == allowed)
             return True
         need(len(focuses) == 1 and not focuses[0].is_symlink() and focuses[0].is_dir())
@@ -2749,6 +2922,19 @@ def terminal_prototype_review_scope(database, db, run):
 def terminal_prototype_post_correction_review(database, db, run):
     """Sealed consumed correction plus14-section negative; no retry/approval grant."""
     return terminal_empty_prototype_mapping(database, db, run, post_correction_review_failure=True)
+
+
+def terminal_closed_provider_preservation(database, db, run):
+    """Recognized DSC lineage only: history retention, never admission or consent.
+
+    The caller still must hold its protected maintenance lease and independently
+    prove no live/unknown producers. This pure reader validates the immutable
+    historical chain and complete recognized closed-provider appendix. It does
+    not validate candidate semantics, grant a claim, authorize retry or import,
+    or assert a technical/business pass.
+    """
+    return terminal_empty_prototype_mapping(database, db, run,
+        post_correction_review_failure=True, maintenance_preservation=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -3920,6 +4106,16 @@ class VerificationRecovery:
                 return {'blocks_admission': False, 'recovery_state': 'retry_completed_verified',
                         'retry_eligible': False}
         return result
+
+    def _protected_read_status(self, db, job_id, *, purpose):
+        """Explicit protected-reader purpose; ordinary admission stays unchanged."""
+        _need(purpose == 'maintenance_preservation', 'RECOVERY_PROTECTED_PURPOSE_INVALID')
+        admission = self._eligibility(db, job_id)
+        run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+        preserved = (admission['blocks_admission'] is True and run is not None
+            and terminal_closed_provider_preservation(self.database, db, dict(run)))
+        return {'admission': admission, 'preservation_allowed': preserved,
+                'preservation_state': 'closed_provider_history' if preserved else 'not_applicable'}
 
     def _recovery_available(self, db):
         names = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}

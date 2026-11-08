@@ -60,6 +60,14 @@ class PrototypeDscIdentityRepairInput(PrototypeContinuationInput):
     expected_supplement_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
+class PrototypeCandidateFormatInput(PrototypeContinuationInput):
+    model_config = {'extra': 'forbid'}
+    expected_terminal_closure_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_raw_candidate_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_candidate_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_normalization_receipt_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 def source_documents(sources):
     documents = []
     for source in sources:
@@ -225,7 +233,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             approved_chunk_hashes=selected['approved_chunk_hashes'],
             target_profile_sha256=target['target_profile_sha256'],
             approved_redacted_source=True, approved_external_ai=True,
-            approved_prototype_scope=True, schema_version=2,metadata_task_policy=selected.get('metadata_task_policy'))
+            approved_prototype_scope=True, schema_version=2,metadata_task_policy=selected.get('metadata_task_policy'),
+            candidate_format_policy=selected.get('candidate_format_policy'))
         child_id = retry_run_id(rid)
         child = c.execute('SELECT * FROM runs WHERE id=?', (child_id,)).fetchone()
         child_job = root / 'jobs' / child_id
@@ -471,7 +480,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'Continuation was not queued: checkpoint approval or durable state could not be verified. Original outcomes remain preserved; uncertain operations were not replayed.') from None
 
-    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False, review_correction=False, dsc_identity_repair=False):
+    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False, review_correction=False, dsc_identity_repair=False, candidate_format_continuation=False):
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
         from .prototype_mapping_recovery import RUN_ID
         from .prototype_mapping_epochs import inspect_next_epoch, SCOPE, STRATEGY, NUMBER
@@ -490,7 +499,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         target = target_reader()
         pre_epoch = not any(path.exists() or path.is_symlink() for path in (
             job / 'mapping-epochs', job / 'prototype-pipeline/epochs', job / 'mapping-continuation.json'))
-        if ((review_correction or dsc_identity_repair) and pre_epoch
+        if ((review_correction or dsc_identity_repair or candidate_format_continuation) and pre_epoch
                 and target['target_profile_sha256'] != selected['target_profile_sha256']):
             # Only the existing older recovery contract permits a role-graph
             # replacement. Destination/model/scope changes still fail closed.
@@ -505,6 +514,11 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 from .prototype_dsc_identity_repair import SCOPE as DSC_SCOPE
                 projection.pop('correction_recorded')
                 projection.update(scope=DSC_SCOPE,identity_repair_recorded=False)
+            if candidate_format_continuation:
+                from .prototype_candidate_continuation import SCOPE as FORMAT_SCOPE
+                projection.pop('correction_recorded',None)
+                projection.update(scope=FORMAT_SCOPE,continuation_recorded=False,id=rid,state=run['state'],
+                    business_behavior_accepted=False)
             return projection, snapshot, original, None, None, None, run
         if (not locked or locked['owner'] != owner or snapshot['approvals']['owner'] != owner
                 or snapshot['project_id'] != pid or snapshot['project'] != pid
@@ -528,6 +542,37 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             if table in tables and c.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (rid,)).fetchone():
                 raise ValueError('Later verification or acceptance work conflicts with this epoch.')
         from . import prototype_context_screen_epoch as screen
+        if candidate_format_continuation:
+            from . import prototype_candidate_continuation as candidate_format
+            from . import prototype_dsc_identity_repair as dsc
+            from .prototype_read_scope import epoch_read_scope
+            if (not candidate_format.present(job/'prototype-pipeline') and
+                    (not dsc.present(job/'prototype-pipeline') or (job/dsc.RESULT_BASE/'publication.json').exists())):
+                # Reuse an EXISTING strict lineage validator. Only this proven
+                # branch is ineligible; unknown/corrupt errors still propagate.
+                prior=epoch_context(c,pid,rid,owner,dsc_identity_repair=True)[0]
+                return ({'schema_version':1,'scope':candidate_format.SCOPE,'project_id':pid,'run_id':rid,'id':rid,
+                    'state':run['state'],'source_hash':snapshot['source_hash'],'source_binding':selected['source_binding'],
+                    'selected_source_set_id':snapshot['selected_source_set_id'],'target_profile_sha256':selected['target_profile_sha256'],
+                    'approved_chunk_hashes':dict(selected['approved_chunk_hashes']),'eligible':False,
+                    'continuation_recorded':False,'business_behavior_accepted':False,
+                    'next_action':'check_mapping_recovery' if prior.get('next_action')=='check_mapping_recovery' else 'check_existing_repairs',
+                    'reason':'This known run uses its existing repair workflow; no candidate format continuation was applied.'},
+                    snapshot,original,None,None,None,run)
+            with epoch_read_scope(job/'prototype-pipeline'):
+                plan,before,child,checkpoint,artifacts,epoch=candidate_format.inspect(job,snapshot,original,target['target_profile'],c)
+            if read_prototype_snapshot(job)[1] != original: raise ValueError('Candidate continuation source changed.')
+            projection={'schema_version':1,'scope':candidate_format.SCOPE,'project_id':pid,'run_id':rid,'id':rid,
+                'state':run['state'],'source_hash':snapshot['source_hash'],'source_binding':selected['source_binding'],
+                'selected_source_set_id':snapshot['selected_source_set_id'],'target_profile_sha256':selected['target_profile_sha256'],
+                'approved_chunk_hashes':dict(selected['approved_chunk_hashes']),**plan,
+                'checkpoint_sha256':checkpoint,'terminal_closure_sha256':canonical_hash(before),
+                'eligible':child is None,'continuation_recorded':child is not None,
+                'unstarted_focus_count':plan['remaining_focus_count'],'first_next_operation':'reviewer',
+                'next_action':'confirm_candidate_format_continuation' if child is None else 'open_run',
+                'reason':'Review the saved mapping with source-proven metadata names; no mapping is repeated.' if child is None else
+                    'This continuation is already recorded. Open the same run; no operation was replayed.'}
+            return projection,snapshot,original,(plan,artifacts,epoch),before,child,run
         if dsc_identity_repair:
             from . import prototype_dsc_identity_repair as dsc
             from .prototype_read_scope import epoch_read_scope
@@ -745,6 +790,68 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raise
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'The epoch was not queued: source approval or durable epoch state could not be verified. Original operations remain preserved; uncertain calls were not replayed.') from None
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/candidate-format-continuation')
+    def candidate_format_plan(pid: str, rid: str, request: Request):
+        p=project(request,pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection=epoch_context(c,pid,rid,p['owner'],candidate_format_continuation=True)[0]
+            return Response(json.dumps(projection),media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'The saved candidate format checkpoint cannot be safely planned. No operation was replayed.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/candidate-format-continuation')
+    def confirm_candidate_format(pid: str, rid: str, body: PrototypeCandidateFormatInput, request: Request):
+        p=project(request,pid)
+        from . import prototype_candidate_continuation as candidate_format, prototype_mapping_epochs as epochs
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection,snapshot,original,data,before,child,run=epoch_context(c,pid,rid,p['owner'],candidate_format_continuation=True)
+                if not (projection['eligible'] or projection['continuation_recorded']):
+                    raise ValueError('This known checkpoint uses its existing repair workflow.')
+                if (body.checkpoint_sha256!=projection['checkpoint_sha256']
+                        or body.expected_terminal_closure_sha256!=projection['terminal_closure_sha256']
+                        or body.expected_raw_candidate_sha256!=projection['raw_candidate_sha256']
+                        or body.expected_candidate_sha256!=projection['candidate_sha256']
+                        or body.expected_normalization_receipt_sha256!=projection['normalization_receipt_sha256']
+                        or body.source_hash!=projection['source_hash'] or body.source_binding!=projection['source_binding']
+                        or body.expected_current_source_set_id!=projection['selected_source_set_id']
+                        or body.target_profile_sha256!=projection['target_profile_sha256']
+                        or body.approved_chunk_hashes!=projection['approved_chunk_hashes']
+                        or not all(v is True for v in (body.approved_redacted_source,body.approved_external_ai,body.approved_prototype_scope))):
+                    raise ValueError('Exact saved candidate and three fresh consents required.')
+                result={'schema_version':1,'id':rid,'run_id':rid,'project_id':pid,
+                    'state':run['state'] if child else 'QUEUED','conversion_profile':PROFILE_ID,
+                    'continued':True,'continuation_recorded':True,'next_action':'open_run','business_behavior_accepted':False}
+                if child:
+                    return Response(json.dumps(result),status_code=200,media_type='application/json',headers={'Cache-Control':'no-store'})
+                # Server-only exclusion follows exact closure/frontier and all
+                # current-owner/source/target/consent checks. No client bypass.
+                if not admission_allowed(c,excluded_stopped_job_id=rid):
+                    raise HTTPException(429,'Other unresolved work blocks continuation. The saved mapping is preserved.')
+                plan,artifacts,epoch=data;now=time.time();job=root/'jobs'/rid
+                record={'schema_version':1,'scope':candidate_format.SCOPE,'policy':candidate_format.POLICY,
+                    'job_id':rid,'project_id':pid,'snapshot_sha256':hashlib.sha256(original).hexdigest(),
+                    'source_hash':snapshot['source_hash'],'source_binding':projection['source_binding'],
+                    'target_profile_sha256':projection['target_profile_sha256'],'owner':p['owner'],'approved_at':now,
+                    'approvals':{'redacted_source':True,'external_ai':True,'synthetic_prototype':True},
+                    'epoch_sha256':canonical_hash(epoch),'before_files':before,'plan':plan,'checkpoint_sha256':projection['checkpoint_sha256']}
+                artifacts.materialize()
+                epochs.save(job/'prototype-pipeline'/candidate_format.RECORD,record,True)
+                if (job/'source-snapshot.json').read_bytes()!=original: raise ValueError('Source changed before queueing.')
+                changed=c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Independently reviewing the saved mapping after exact source-bound metadata normalization.',now,rid))
+                if changed.rowcount!=1: raise ValueError('Run changed before queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                    (p['owner'],candidate_format.EVENT,candidate_format.event_id(rid,record),now))
+            return Response(json.dumps(result),status_code=202,media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'Candidate format continuation was not queued: exact approval or retained evidence changed. No uncertain call was replayed.') from None
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/dsc-identity-repair')
     def dsc_identity_repair_plan(pid: str, rid: str, request: Request):
@@ -977,7 +1084,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     approved_redacted_source=body.approved_redacted_source,
                     approved_external_ai=body.approved_external_ai,
                     approved_prototype_scope=body.approved_prototype_scope, schema_version=2,
-                    metadata_task_policy='same-byte-dsc-identity-metadata-v1')
+                    metadata_task_policy='same-byte-dsc-identity-metadata-v1',
+                    candidate_format_policy='exact-source-envelope-and-item-fact-aliases-v1')
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Source approval is missing or changed. Review the exact files, code selection and processing permissions again.') from None
             old = c.execute('SELECT id,state FROM runs WHERE project=? AND source_hash=?', (pid, body.source_hash)).fetchone()

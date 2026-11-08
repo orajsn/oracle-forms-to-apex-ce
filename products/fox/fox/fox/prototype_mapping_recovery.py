@@ -108,6 +108,10 @@ def mapping_recovery_proof(job: Path, snapshot, original: bytes):
     if selected['schema_version'] == 2:
         binding['max_owned_objects'] = bound_focus_limit(selected)
     if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
+    if 'candidate_format_policy' in selected:
+        from .prototype_candidate_format import POLICY
+        if selected['candidate_format_policy'] != POLICY: raise OpafError('Unknown recovery candidate format policy.')
+        binding['candidate_format_policy']=selected['candidate_format_policy']
     if _json(checkpoints / 'binding.json') != binding:
         raise OpafError('Mapping-recovery pipeline binding changed.')
     manifest = {'source_binding': selected['source_binding'],

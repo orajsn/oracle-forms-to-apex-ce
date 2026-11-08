@@ -65,6 +65,10 @@ def validate_prototype_snapshot(snapshot):
             from .prototype_dsc_identity_repair import TASK_POLICY
             if selected['metadata_task_policy'] != TASK_POLICY: raise ValueError()
             selected_keys.add('metadata_task_policy')
+        if 'candidate_format_policy' in selected:
+            from .prototype_candidate_format import POLICY
+            if selected['candidate_format_policy'] != POLICY: raise ValueError()
+            selected_keys.add('candidate_format_policy')
         if (not isinstance(approvals, dict) or any(approvals.get(key) is not True for key in
                 ('redacted_source', 'external_ai', 'synthetic_prototype'))
                 or not isinstance(approvals.get('owner'), str) or not 1 <= len(approvals['owner']) <= 180
@@ -86,7 +90,8 @@ def validate_prototype_snapshot(snapshot):
             approved_redacted_source=approvals['redacted_source'],
             approved_external_ai=approvals['external_ai'],
             approved_prototype_scope=approvals['synthetic_prototype'],
-            schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'))
+            schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
+            candidate_format_policy=selected.get('candidate_format_policy'))
         if rebuilt['prototype'] != selected:
             raise ValueError()
         from .prototype_mapping_recovery import validate_retry_lineage
@@ -240,7 +245,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         opaf_client=runtime['opaf_client'], profile=runtime['profile'],
         target_profile_loader=runtime['target_profile_loader'], processing_approval_check=still_approved,
         converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
-        focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'))
+        focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
+        candidate_format_policy=selected.get('candidate_format_policy'))
     still_approved()
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record

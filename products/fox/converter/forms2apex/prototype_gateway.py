@@ -44,9 +44,10 @@ _RESOLUTION_FILES = ("mapper-resolved", "mapper-resolution")
 _METADATA_FILES = ('mapper-metadata-task','reviewer-metadata-task')
 _EPOCH_FILES = ('mapper-request', 'reviewer-request', 'projection-candidate', 'projection-receipt', *_METADATA_FILES)
 _LEGACY_AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-                                  + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES) + r")\.json)\Z")
+                                  + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES +
+                                      ('mapper-intent','reviewer-intent','reviewer-request','projection-candidate','projection-receipt')) + r")\.json)\Z")
 _AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-    + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES + ('mapper-intent', 'reviewer-intent')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
+    + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES + ('mapper-intent', 'reviewer-intent','reviewer-request','projection-candidate','projection-receipt')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
     r'(?:epoch-record|predecessor-record)\.json|source-facts/focus-[a-f0-9]{24}\.json|focus-[a-f0-9]{24}/(?:'
     + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES + ('mapper-intent', 'reviewer-intent')) + r')\.json))\Z')
 # Explicit epoch three adds ONLY its reviewed fixed JSON contract. It never
@@ -80,6 +81,7 @@ _PARTITION_FOCUS_PATH = re.compile(r'epochs/epoch-000005/(?:source-facts/focus-[
     + ('mapper-intent', 'reviewer-intent', 'full-audit-context')) + r')\.json)\Z')
 _SCREEN_FIXED_PATHS = {'epochs/epoch-000006/' + name for name in (
     'epoch-record.json', 'predecessor-record.json', 'screen-projection-receipt.json')}
+_SCREEN_FIXED_PATHS.add('candidate-format-continuation.json')
 _SCREEN_FIXED_PATHS |= {'epochs/epoch-000006/review-correction/' + name for name in (
     'authorization.json', 'attempt-000001/reviewer-request.json', 'attempt-000001/reviewer-target.json',
     'attempt-000001/reviewer-intent.json', 'attempt-000001/reviewer.json', 'attempt-000001/review-receipt.json')}
@@ -181,7 +183,10 @@ def _check_authority_members(descriptor, members):
               "PROTOTYPE_AUTHORITY_SOURCE_BYTES_CHANGED")
         expected.add(name)
     focuses = set()
-    if index.get('schema_version') == 2:
+    if index.get('schema_version') in (2,3):
+        if index.get('schema_version') == 3:
+            _need(binding.get('candidate_format_policy') == index.get('candidate_format_policy') ==
+                'exact-source-envelope-and-item-fact-aliases-v1','PROTOTYPE_CANDIDATE_FORMAT_POLICY_INVALID')
         _need(type(index.get('provenance_files')) is list and 1 <= len(index['provenance_files']) <= 2048,
               'PROTOTYPE_EPOCH_PROVENANCE_REQUIRED')
         for row in index['provenance_files']:

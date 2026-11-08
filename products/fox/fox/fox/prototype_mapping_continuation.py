@@ -110,6 +110,10 @@ def inspect_continuation(job, snapshot, original, target):
         from .prototype_dsc_identity_repair import TASK_POLICY
         if metadata_policy != TASK_POLICY: raise OpafError('Unknown continuation metadata task policy.')
         expected['metadata_task_policy'] = metadata_policy
+    if 'candidate_format_policy' in selected:
+        from .prototype_candidate_format import POLICY
+        if selected['candidate_format_policy'] != POLICY: raise OpafError('Unknown continuation candidate format policy.')
+        expected['candidate_format_policy']=selected['candidate_format_policy']
     manifest = {'source_binding': selected['source_binding'], 'selected_chunk_hashes': selected['approved_chunk_hashes'],
         'files': [{'name': name, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)} for name, raw in documents]}
     if (binding != expected or _json(root / 'sources-manifest.json') != manifest

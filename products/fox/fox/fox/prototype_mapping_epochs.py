@@ -138,6 +138,9 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
         'merged-blueprint.json', 'native-plan.json', 'review-index.json', 'rendered.json', 'candidate-apexlang.zip',
         *{stage + suffix for stage in ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
           for suffix in ('.json', '-intent.json')}}
+    from . import prototype_candidate_continuation as candidate_format
+    if candidate_format.present(job/'prototype-pipeline'):
+        pipeline_files.add(candidate_format.RECORD)
     focus_files = {'request.json', 'mapper-request.json', 'mapper.json', 'mapper-intent.json', 'mapper-target.json',
         'reviewer-request.json', 'reviewer.json', 'reviewer-intent.json', 'reviewer-target.json', 'review-receipt.json',
         'mapper-resolved.json', 'mapper-resolution.json', 'projection-candidate.json', 'projection-receipt.json'}
@@ -499,6 +502,7 @@ def reconstruct(job, snapshot, original, target):
         'approved_policy_id': selected['approved_policy_id']}
     if selected['schema_version'] == 2: binding['max_owned_objects'] = 32
     if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
+    if 'candidate_format_policy' in selected: binding['candidate_format_policy']=selected['candidate_format_policy']
     same(read(root / 'binding.json'), binding)
     same(read(root / 'packet.json'), packet)
     same(read(root / 'sources-manifest.json'), {'source_binding': selected['source_binding'],
@@ -695,6 +699,9 @@ def active_focus(root, packet, plan, request, target, previous, *, runtime=None)
 
 
 def _dispatch_active_focus(root, packet, plan, request, target, previous, *, runtime=None):
+    from . import prototype_candidate_continuation as candidate_format
+    if candidate_format.present(root):
+        candidate_format.validate_technical_record(root,packet,plan,target)
     record = technical_record(root)
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
@@ -711,8 +718,14 @@ def _dispatch_active_focus(root, packet, plan, request, target, previous, *, run
     return _active_focus(root, packet, plan, request, target, previous, record, PREFIX, runtime=runtime)
 
 
-def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False, review_context=None, candidate_projection=None):
+def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False, review_context=None, candidate_projection=None, artifact_plan=None, allow_format=False):
     write = runtime is not None
+    if (artifact_plan is not None and (runtime is not None or not preview)
+            or allow_format and (runtime is not None or not preview or artifact_plan is None)):
+        raise OpafError('A pure pre-review plan cannot execute model work.')
+    def store(path, value, _write=write):
+        if artifact_plan is not None: artifact_plan.save(path,value)
+        else: save(path,value,_write)
     index = next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id'])
     repair = next(i for i, row in enumerate(plan['requests']) if record and row['focus_id'] == record['plan']['repair_focus_id']) if record else None
     identity = {'job_id': root.parent.name, 'source_hash': plan['source_binding']}
@@ -721,13 +734,30 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
     if write: directory.mkdir(parents=True, exist_ok=True)
     if directory.is_symlink(): raise OpafError('Active epoch focus storage is unsafe.')
     if not record or index < repair:
-        if write: save(original / 'request.json', request, True)
+        save(original / 'request.json', request, write)
         raw, mapper = _role(original, 'mapper', request, target, identity, runtime)
-        candidate, _ = resolved_mapper(original, request, raw, write=write)
-        gate = source_fact_gate(packet, request, candidate)
-        payload = {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)}
-        review, reviewer = _role(original, 'reviewer', payload, target, identity, runtime)
         evidence = None
+        owner_candidate, owner_receipt = None, None
+        try:
+            candidate, owner_receipt = resolved_mapper(original, request, raw, write=write)
+            owner_candidate = candidate
+            gate = source_fact_gate(packet, request, candidate)
+        except ValueError:
+            from .prototype_candidate_continuation import normalize_remaining, enabled
+            if not enabled(root,request,raw): raise
+            candidate,evidence = normalize_remaining(root,request,raw,owner_candidate,owner_receipt)
+            gate = source_fact_gate(packet,request,candidate)
+        if evidence is not None:
+            save(original/'projection-candidate.json',candidate,write)
+            save(original/'projection-receipt.json',evidence,write)
+            payload = extended_review(request,candidate,raw,'projection_review',evidence)
+            save(original/'reviewer-request.json',payload,write)
+        else:
+            if any((original/name).exists() or (original/name).is_symlink() for name in
+                    ('projection-candidate.json','projection-receipt.json','reviewer-request.json')):
+                raise OpafError('Unexpected initial candidate normalization evidence.')
+            payload = {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)}
+        review, reviewer = _role(original, 'reviewer', payload, target, identity, runtime)
     elif index == repair:
         historical = read(original / 'mapper.json')['output']
         historical, _ = resolved_mapper(original, request, historical)
@@ -752,9 +782,11 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
         if index == projection_index and canonical_hash(raw) != record['plan']['projection_raw_candidate_sha256']:
             raise OpafError('Projection raw response changed.')
         candidate, evidence = raw, None
+        owner_candidate, owner_receipt, format_evidence = None, None, None
         if index != projection_index:
             try:
                 candidate, owner_receipt = resolve_claim_owners(request, raw)
+                owner_candidate = candidate
                 gate = source_fact_gate(packet, request, candidate)
                 if owner_receipt is not None:
                     evidence = {'schema_version': 1, 'scope': 'fox-focus-technical-normalization-v2',
@@ -770,28 +802,40 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
                 if len(dependencies) != 1 or not dependencies[0]['checked']['approved_structured_design']:
                     raise OpafError('Projection has no unique active approved owner proof.')
                 dependency = dependencies[0]
-            candidate, projection = project_context(packet, request, raw, dependency['candidate'] if dependency else None,
-                canonical_hash(dependency['proof']) if dependency else None, [view['candidate'] for view in previous],
-                strict_known_case=index == projection_index)
-            evidence = {'projection': projection, 'prior_active_proof': dependency['proof'] if dependency else None}
-            gate = source_fact_gate(packet, request, candidate)
+            try:
+                candidate, projection = project_context(packet, request, raw, dependency['candidate'] if dependency else None,
+                    canonical_hash(dependency['proof']) if dependency else None, [view['candidate'] for view in previous],
+                    strict_known_case=index == projection_index)
+                evidence = {'projection': projection, 'prior_active_proof': dependency['proof'] if dependency else None}
+                gate = source_fact_gate(packet, request, candidate)
+            except ValueError:
+                if index == projection_index: raise
+                from .prototype_candidate_continuation import normalize_remaining, enabled
+                if not allow_format and not enabled(root,request,raw): raise
+                candidate, evidence = normalize_remaining(root,request,raw,owner_candidate,owner_receipt,authorized=allow_format)
+                format_evidence = evidence
+                gate = source_fact_gate(packet,request,candidate)
         if candidate_projection is not None:
             candidate, evidence = candidate_projection(candidate, raw, evidence)
             gate = source_fact_gate(packet, request, candidate)
         if evidence is not None:
-            save(directory / 'projection-candidate.json', candidate, write)
-            save(directory / 'projection-receipt.json', evidence, write)
+            store(directory / 'projection-candidate.json', candidate)
+            store(directory / 'projection-receipt.json', evidence)
             payload = extended_review(request, candidate, raw, 'projection_review', evidence)
         else:
             payload = {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)}
         if review_context is not None:
             payload = review_context(candidate, payload)
-        save(directory / 'reviewer-request.json', payload, write)
+        store(directory / 'reviewer-request.json', payload)
         if preview:
-            return {'review_request': payload}
+            if artifact_plan is not None:
+                return {'review_request': payload, 'candidate':candidate, 'format_evidence':format_evidence}
+            return {'review_request':payload}
         review, reviewer = _role(directory, 'reviewer', payload, target, identity, runtime)
     if mapper['room_id'] == reviewer['room_id']:
         raise OpafError('Active version requires an independent reviewer invocation.')
+    from .prototype_candidate_continuation import independent_reviewer
+    independent_reviewer(previous,mapper,reviewer,evidence)
     checked = _review(request, candidate, review, directory)
     save(directory / 'review-receipt.json', checked, write)
     if record:

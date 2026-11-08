@@ -140,8 +140,18 @@ exec(compile(raw,'<measured-transition-reader>','exec'),m.__dict__)
 store=m.VerificationRecovery(pathlib.Path(p['data'])/'fox.sqlite3',enabled=True)
 with store._db(False) as db:
  db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
- ids=store._job_ids(db);eligibility={job:store._eligibility(db,job) for job in sorted(ids)}
- assert len(ids)<=10000 and all(v['blocks_admission'] is False for v in eligibility.values())
+ ids=store._job_ids(db)
+ protected={job:store._protected_read_status(db,job,purpose='maintenance_preservation') for job in sorted(ids)}
+ eligibility={job:value['admission'] for job,value in protected.items()}
+ preservation={}
+ assert len(ids)<=10000
+ for job,value in protected.items():
+  if value['preservation_allowed']:
+   run=dict(db.execute('SELECT * FROM runs WHERE id=?',(job,)).fetchone())
+   assert value['admission']['blocks_admission'] is True and value['admission']['retry_eligible'] is False
+   assert value['preservation_state']=='closed_provider_history' and m.terminal_closed_provider_preservation(store.database,db,run) is True
+   preservation[job]='closed_provider_history'
+  else:assert value['admission']['blocks_admission'] is False
  closed={}
  if store._precheck_schema(db):
   for row in db.execute('SELECT assessment_raw FROM verification_precheck_failures'):
@@ -160,7 +170,7 @@ with store._db(False) as db:
    a=m._load(row[0]);job=a['binding']['job_id'];store._closed_project_prewrite(db,job)
    assert a['session'] not in prewrite and a['session'] not in closed and a['session'] not in stages
    prewrite[a['session']]={'job_id':job,'assessment_sha256':m.digest(row[0]),'retained_sha256':a['retained_sha256']}
- print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed,'closed_qa_stages':stages,'closed_project_prewrite':prewrite},sort_keys=True))
+ print(json.dumps({'jobs':sorted(ids),'eligibility':eligibility,'preservation':preservation,'outcomes':store._precheck_original_rows(db),'closed_prechecks':closed,'closed_qa_stages':stages,'closed_project_prewrite':prewrite},sort_keys=True))
 '''
 
 

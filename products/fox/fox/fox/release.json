@@ -1,12 +1,12 @@
 {
-  "version": "0.19.1",
-  "released_on": "2026-11-08",
-  "title": "Preserve completed review failures during upgrades",
+  "version": "0.20.0",
+  "released_on": "2026-11-09",
+  "title": "Review corrected mapping format and continue",
   "changes": [
-    "Recognize a sealed post-correction negative review as stopped work for upgrade preservation, not as a successful conversion.",
-    "Validate the original history, correction approval, completed review sequence and final result publication before classifying the run.",
-    "Keep pending calls, new repair activity, Oracle-stage artifacts and changed evidence blocking the upgrade.",
-    "Preserve separate processing consent, retry authority, technical verification and business acceptance."
+    "Normalize only an exactly matching source-binding echo and two source-proven Item fact aliases; preserve original model output and business content.",
+    "Continue an eligible saved mapping through a fresh independent review without repeating completed mapping calls.",
+    "Show reviewed, saved and unstarted work with locked source selection and three explicit processing confirmations.",
+    "Keep maintenance preservation of closed provider history separate from ordinary conversion admission, retry and business acceptance."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

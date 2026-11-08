@@ -202,7 +202,8 @@ def _authorize_current(root, db, profile_path, request):
     binding = _json(binding_path.read_bytes())
     if (binding.get('profile_sha256') != canonical_hash(envelope['target_profile']['opaf']['roles'])
             or binding.get('focus_plan_sha256') != snapshot['prototype']['focus_plan_sha256']
-            or binding.get('metadata_task_policy') != snapshot['prototype'].get('metadata_task_policy')):
+            or binding.get('metadata_task_policy') != snapshot['prototype'].get('metadata_task_policy')
+            or binding.get('candidate_format_policy') != snapshot['prototype'].get('candidate_format_policy')):
         raise ValueError('Reviewed roles or focus changed')
     authorize_prototype_request(job, request)
     # Current DB/event authority additionally rechecks the operator's fixed

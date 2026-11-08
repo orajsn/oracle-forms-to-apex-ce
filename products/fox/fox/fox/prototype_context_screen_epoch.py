@@ -297,16 +297,24 @@ def validate_record(job, snapshot, original, db=None):
         epochs._before_unchanged(job, {n: d for n, d in record['before_files'].items() if n != 'prototype-result.json'})
         from .prototype_result_publication import validate_publication
         validate_publication(job, record)
+        from . import prototype_candidate_continuation as candidate_format
+        current = None
+        if candidate_format.present(job/'prototype-pipeline'):
+            current = candidate_format.validate_record(job,snapshot,original,target,db)
+        else:
+            candidate_format.validate_event(job/'prototype-pipeline',None,db)
         return record
     finally:
         if close: db.close()
 
 
-def _review_task(root, packet, plan, request, target, previous, candidate, evidence, write):
+def _review_task(root, packet, plan, request, target, previous, candidate, evidence, write, artifact_plan=None):
     payload, audit = build_partition_review_task(packet, plan, [v['candidate'] for v in previous] + [candidate],
         container._refs(plan, previous, target), expected_target_sha256=canonical_hash(target),
         expected_candidate_sha256=canonical_hash(candidate), review_context=evidence)
-    epochs.save(root / PREFIX / request['focus_id'] / 'full-audit-context.json', audit, write)
+    path = root / PREFIX / request['focus_id'] / 'full-audit-context.json'
+    if artifact_plan is not None: artifact_plan.save(path,audit)
+    else: epochs.save(path,audit,write)
     from . import prototype_review_correction as correction
     if (correction.present(root)
             and next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id']) > 8):
@@ -314,11 +322,12 @@ def _review_task(root, packet, plan, request, target, previous, candidate, evide
     return payload
 
 
-def _projection(root, packet, plan, request, target, previous, candidate, raw, base_evidence, write):
+def _projection(root, packet, plan, request, target, previous, candidate, raw, base_evidence, write, artifact_plan=None):
     projected, receipt = _project(packet, plan, request, candidate, previous, target)
     directory = root / PREFIX / request['focus_id']
-    epochs.save(directory / 'screen-input-candidate.json', candidate, write)
-    epochs.save(directory / 'screen-projection-receipt.json', receipt, write)
+    for name,value in (('screen-input-candidate.json',candidate),('screen-projection-receipt.json',receipt)):
+        if artifact_plan is not None: artifact_plan.save(directory/name,value)
+        else: epochs.save(directory/name,value,write)
     return projected, {'schema_version': 1, 'scope': 'fox-focus-context-screen-normalization-v1',
         'base_technical_evidence': deepcopy(base_evidence), 'context_screen_projection': receipt,
         'raw_mapper_candidate_sha256': canonical_hash(raw)}
@@ -331,7 +340,7 @@ def active_focus(root, packet, plan, request, target, previous, record, *, runti
     return _legacy_active_focus(root,packet,plan,request,target,previous,record,runtime=runtime,preview=preview)
 
 
-def _legacy_active_focus(root, packet, plan, request, target, previous, record, *, runtime=None, preview=False):
+def _legacy_active_focus(root, packet, plan, request, target, previous, record, *, runtime=None, preview=False, artifact_plan=None, allow_format=False):
     index = next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id'])
     if len(previous) != index: _fail()
     if previous: container._prefix(packet, plan, previous, target)
@@ -383,11 +392,12 @@ def _legacy_active_focus(root, packet, plan, request, target, previous, record, 
             proof.update(kind='REVIEWED_SCOPE_CORRECTION', review_correction_sha256=child_sha256)
         return {'candidate': candidate, 'checked': checked, 'proof': proof}
     def projection(candidate, raw, evidence):
-        return _projection(root, packet, plan, request, target, previous, candidate, raw, evidence, write)
+        return _projection(root, packet, plan, request, target, previous, candidate, raw, evidence, write,artifact_plan)
     def context(candidate, payload):
-        return _review_task(root, packet, plan, request, target, previous, candidate, payload.get('review_context'), write)
+        return _review_task(root, packet, plan, request, target, previous, candidate, payload.get('review_context'), write,artifact_plan)
     return epochs._active_focus(root, packet, plan, request, target, previous, record, PREFIX,
-        runtime=runtime, preview=preview, review_context=context, candidate_projection=projection)
+        runtime=runtime, preview=preview, review_context=context, candidate_projection=projection,
+        artifact_plan=artifact_plan,allow_format=allow_format)
 
 
 def model_fence(job, snapshot, record):

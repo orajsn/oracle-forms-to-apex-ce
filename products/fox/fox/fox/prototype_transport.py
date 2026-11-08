@@ -52,9 +52,11 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
         return False
     if name in {*_ROOT_FILES, 'assessment.json'} or re.fullmatch(r'sources/source-00[0-3]\.xml', name):
         return True
+    if screen_epoch and name == 'candidate-format-continuation.json': return True
     pieces = name.split('/')
     basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json',
-             'mapper-metadata-task.json','reviewer-metadata-task.json'}
+             'mapper-metadata-task.json','reviewer-metadata-task.json',
+             'reviewer-request.json','projection-candidate.json','projection-receipt.json'}
     if len(pieces) == 2 and _FOCUS.fullmatch(pieces[0]) and pieces[1] in basic:
         return True
     if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003', 'epoch-000004', 'epoch-000005', 'epoch-000006'):
@@ -158,7 +160,7 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
     focuses = [row['focus_id'] for row in review_index['focuses']]
     if len(focuses) != len(set(focuses)) or any(not _FOCUS.fullmatch(focus) for focus in focuses):
         raise OpafError('Prototype authority focus index is invalid.')
-    if review_index.get('schema_version') == 2:
+    if review_index.get('schema_version') in (2,3):
         names.extend(row['path'] for row in review_index['provenance_files'])
         names = sorted(set(names))
         # Evidence source code is archive-only, never converter transport.

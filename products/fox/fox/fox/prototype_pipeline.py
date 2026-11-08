@@ -159,8 +159,41 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
 
 
 def _review_index(checkpoints, plan):
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(checkpoints):
+        return _scoped_review_index(checkpoints,plan)
+
+
+def _policy_roles(binding, target):
+    """New-policy reconstruction retains the original role trust boundary."""
+    roles=target['opaf']['roles']
+    if (canonical_hash(roles)!=binding.get('profile_sha256')
+            or roles['mapper']['workflow_id'].upper()==roles['reviewer']['workflow_id'].upper()):
+        raise OpafError('Candidate format authority requires the exact independently executed roles.')
+
+
+def _scoped_review_index(checkpoints, plan):
     from .prototype_mapping_epochs import technical_record, active_focus, read
     epoch = technical_record(checkpoints)
+    binding = _json(checkpoints/'binding.json')
+    from .prototype_candidate_format import POLICY as FORMAT_POLICY
+    format_policy = binding.get('candidate_format_policy')
+    if 'candidate_format_policy' in binding and format_policy != FORMAT_POLICY:
+        raise OpafError('Unknown immutable candidate format policy.')
+    if epoch is None and format_policy is not None:
+        packet = _artifact_json(checkpoints/'packet.json')
+        target = read(checkpoints/plan['requests'][0]['focus_id']/'mapper-target.json')
+        _policy_roles(binding,target)
+        views, files = [], []
+        for request in plan['requests']:
+            view = active_focus(checkpoints,packet,plan,request,target,views)
+            if not view['checked']['approved_structured_design']: raise OpafError('Source design is not independently approved.')
+            views.append(view)
+            for path in sorted((checkpoints/request['focus_id']).iterdir()):
+                if path.is_symlink() or not path.is_file(): raise OpafError('Unknown candidate provenance member.')
+                files.append({'path':path.relative_to(checkpoints).as_posix(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        return {'schema_version':3,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
+            'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
     if epoch is not None:
         packet = _artifact_json(checkpoints / 'packet.json')
         target = read(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
@@ -176,6 +209,8 @@ def _review_index(checkpoints, plan):
         names = {name[len('prototype-pipeline/'):] for name in epoch['before_files'] if name.startswith('prototype-pipeline/')}
         base = checkpoints / 'epochs' / f"epoch-{epoch['epoch_number']:06d}"
         names.update(path.relative_to(checkpoints).as_posix() for path in base.rglob('*') if path.is_file())
+        from . import prototype_candidate_continuation as candidate_format
+        if candidate_format.present(checkpoints): names.add(candidate_format.RECORD)
         for name in sorted(names):
             path = checkpoints / name
             if path.is_symlink() or not path.is_file():
@@ -261,8 +296,9 @@ def _authorize_prototype_request(job: Path, request: dict) -> dict:
     epoch = technical_record(checkpoints)
     views = []
     for focus in plan['requests']:
-        if epoch is not None:
+        if epoch is not None or binding.get('candidate_format_policy') is not None:
             target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
+            if binding.get('candidate_format_policy') is not None: _policy_roles(binding,target)
             view = active_focus(checkpoints, packet, plan, focus, target, views)
             if not view['checked']['approved_structured_design']:
                 raise OpafError('Active epoch source design is not approved.')
@@ -345,7 +381,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            project_id, project_name, expected_source_binding,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
-                           converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None):
+                           converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -372,6 +408,10 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         if metadata_task_policy is None: metadata_task_policy=persisted_policy
         elif metadata_task_policy!=persisted_policy:
             raise OpafError('Metadata task policy differs from the immutable source snapshot.')
+        persisted_format=_json(job/'source-snapshot.json').get('prototype',{}).get('candidate_format_policy')
+        if candidate_format_policy is None: candidate_format_policy=persisted_format
+        elif candidate_format_policy != persisted_format:
+            raise OpafError('Candidate format policy differs from the immutable source snapshot.')
     strategy = {'schema_version': focus_schema_version}
     if type(focus_schema_version) is int and focus_schema_version == 2:
         strategy['max_owned_objects'] = FOCUS_MAX_OWNED_OBJECTS
@@ -390,6 +430,10 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         from .prototype_dsc_identity_repair import TASK_POLICY
         if metadata_task_policy != TASK_POLICY: raise OpafError('Unknown immutable prototype metadata task policy.')
         binding['metadata_task_policy'] = metadata_task_policy
+    if candidate_format_policy is not None:
+        from .prototype_candidate_format import POLICY as FORMAT_POLICY
+        if candidate_format_policy != FORMAT_POLICY: raise OpafError('Unknown immutable candidate format policy.')
+        binding['candidate_format_policy'] = candidate_format_policy
     _save_once(checkpoints / 'binding.json', binding)
     sources = checkpoints / 'sources'
     _directory(sources)

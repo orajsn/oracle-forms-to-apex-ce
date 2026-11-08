@@ -54,6 +54,7 @@ def _retained_export_request(job, snapshot, target):
             or binding.get('source_binding') != selected['source_binding']
             or binding.get('focus_plan_sha256') != selected['focus_plan_sha256']
             or binding.get('metadata_task_policy') != selected.get('metadata_task_policy')
+            or binding.get('candidate_format_policy') != selected.get('candidate_format_policy')
             or binding.get('approved_policy_id') != selected['approved_policy_id']
             or binding.get('profile_sha256') != canonical_hash(target['target_profile']['opaf']['roles'])
             or manifest.get('files') != expected_files

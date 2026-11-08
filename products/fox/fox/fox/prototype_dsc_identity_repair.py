@@ -376,7 +376,14 @@ def model_fence(job,snapshot,epoch):
             if name=='mapper':
                 epochs.same(epochs.read(paths[0]),request)
                 epochs._role(directory,name,request,target,{'job_id':job.name,'source_hash':plan['source_binding']})
-                active_focus(root,packet,plan,request,target,previous,epoch,preview=True)
+                if not (directory/'reviewer.json').exists():
+                    # Pure frontier planning checks existing sidecars but never
+                    # assumes missing deterministic artifacts already exist.
+                    from .prototype_candidate_continuation import ArtifactPlan
+                    screen._legacy_active_focus(root,packet,plan,request,target,previous,epoch,
+                        preview=True,artifact_plan=ArtifactPlan(root))
+                else:
+                    active_focus(root,packet,plan,request,target,previous,epoch,preview=True)
         if not incomplete:
             view=active_focus(root,packet,plan,request,target,previous,epoch)
             previous.append(view)

@@ -1043,8 +1043,22 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         return Response(raw,media_type='application/zip',
                         headers={'Content-Disposition':'attachment; filename="'+rid+'-apex.zip"'})
     from .prototype_project_routes import attach_prototype_project_routes
-    def prototype_admission_allowed(connection):
+    def prototype_admission_allowed(connection, *, excluded_stopped_job_id=None):
         from .verification_recovery import VerificationRecovery
+        if excluded_stopped_job_id is not None:
+            row=connection.execute('SELECT state,artifact FROM runs WHERE id=?',(excluded_stopped_job_id,)).fetchone()
+            if row is None or row['state']!='ATTENTION' or row['artifact'] is not None: return False
+            if not verifier_config.enabled:
+                # Even a verifier-disabled installation must not hide another
+                # unresolved conversion behind this exact server-only exclusion.
+                return connection.execute("SELECT 1 FROM runs WHERE id<>? AND state NOT IN ('GENERATED','ACCEPTED','CANCELLED') LIMIT 1",
+                    (excluded_stopped_job_id,)).fetchone() is None
+            recovery=VerificationRecovery(database,enabled=True)
+            try:
+                recovery._transaction(connection)
+                return recovery._other_work_allows(connection,except_job_id=excluded_stopped_job_id)
+            except Exception:
+                return False
         return (not verifier_config.enabled or
                 VerificationRecovery(database, enabled=True).admission_allowed(connection))
     attach_prototype_project_routes(app, root=root, db=db, project=project,
