@@ -377,6 +377,33 @@ def _check_converter_receipt(stage, request, value):
     return value
 
 
+def _retained_candidate_prefix(checkpoints, packet, plan, target):
+    """Read exactly the CF-authorized closed prefix in one immutable scope.
+
+    This returns technical evidence, never fresh owner/processing permission.
+    The caller must leave this scope before existing runtime work/approval.
+    Missing or changed evidence fails closed; it is not an execution fallback.
+    """
+    from . import prototype_candidate_continuation as candidate_format
+    from .prototype_mapping_epochs import active_focus
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(checkpoints):
+        record = candidate_format.validate_technical_record(checkpoints,packet,plan,target)
+        count = record['plan']['completed_focus_count']
+        if (type(count) is not int or not 0 < count < len(plan['requests'])
+                or record['plan']['focus_id'] != plan['requests'][count]['focus_id']):
+            raise OpafError('Retained candidate prefix does not bind the current focus plan.')
+        views = []
+        for request in plan['requests'][:count]:
+            view = active_focus(checkpoints,packet,plan,request,target,views)
+            if not view['checked']['approved_structured_design']:
+                raise OpafError('Retained candidate prefix lacks an approved source-bound review.')
+            views.append(view)
+        if canonical_hash([view['proof'] for view in views]) != record['plan']['prior_proofs_sha256']:
+            raise OpafError('Retained candidate prefix differs from its authorized proofs.')
+        return views
+
+
 def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            project_id, project_name, expected_source_binding,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
@@ -475,7 +502,14 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     approval_context = {**binding, 'selected_chunk_hashes': dict(approved_chunk_hashes)}
     from .prototype_mapping_epochs import active_focus
     views = []
-    for request in plan['requests']:
+    from . import prototype_candidate_continuation as candidate_format
+    if candidate_format.present(checkpoints):
+        target = (target_profile_loader() if target_profile_loader is not None else
+                  _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
+        views = _retained_candidate_prefix(checkpoints,packet,plan,target)
+        candidates = [view['candidate'] for view in views]
+        reviews = [view['checked'] for view in views]
+    for request in plan['requests'][len(views):]:
         target = (target_profile_loader() if target_profile_loader is not None else
                   _json(checkpoints / request['focus_id'] / 'mapper-target.json'))
         view = active_focus(checkpoints, packet, plan, request, target, views,

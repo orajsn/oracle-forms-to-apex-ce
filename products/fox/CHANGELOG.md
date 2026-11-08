@@ -4,6 +4,25 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.20.1] - 2026-11-09
+
+### Reduce repeated checks when resuming
+
+- Reconstruct the exact already-reviewed prefix together when continuing a
+  saved mapping. Its validated continuation record, frontier and proof hashes
+  determine the boundary; file presence alone is not enough.
+- Keep every source and review check. Missing, negative or changed evidence
+  stops processing instead of falling back to another model call.
+- Close the bounded read-only scope before new work. Fresh owner, consent,
+  source and target checks remain in the existing execution path; no persistent
+  cache or cached processing permission is introduced.
+
+111 targeted tests passed. A read-only synthetic benchmark reconstructed all
+14 authorized retained views in 4.99 seconds with unchanged proofs/files and
+no provider or database operations. This is not a live latency guarantee.
+Source publication does not change an already-running conversion or prove
+deployment, APEX output, or business acceptance.
+
 ## [0.20.0] - 2026-11-09
 
 ### Review corrected mapping format and continue
