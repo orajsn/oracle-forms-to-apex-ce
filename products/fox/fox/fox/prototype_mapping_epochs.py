@@ -485,6 +485,12 @@ def _review(request, candidate, review, directory):
 
 def inspect_next_epoch(job, snapshot, original, target, db):
     """Pure plan for exact known repair/projection; no model or artifact writes."""
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
+        return _inspect_next_epoch(job, snapshot, original, target, db)
+
+
+def _inspect_next_epoch(job, snapshot, original, target, db):
     packet, plan = reconstruct(job, snapshot, original, target)
     record = validate_epoch_chain(job, snapshot, original, db)
     if record:
@@ -620,6 +626,12 @@ def active_focus(root, packet, plan, request, target, previous, *, runtime=None)
     if runtime is not None:
         forbid_execution()
         return _dispatch_active_focus(root, packet, plan, request, target, previous, runtime=runtime)
+    from . import prototype_container_epoch as container
+    four = Path(root) / container.PREFIX
+    if four.exists() or four.is_symlink():
+        record = technical_record(root)
+        if record is not None and record.get('epoch_number') == container.NUMBER:
+            return container._historical_active_focus(root, packet, plan, request, target, previous, record)
     return cached_read(root, 'active_focus', {'packet': packet, 'plan': plan, 'request': request,
         'target': target, 'previous': previous},
         lambda: _dispatch_active_focus(root, packet, plan, request, target, previous))

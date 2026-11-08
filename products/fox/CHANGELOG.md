@@ -4,6 +4,27 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.16.1] - 2026-11-08
+
+### Faster checked continuation requests
+
+- Reuse the same exact historical review view within one read-only planning
+  operation. Keep its record identity in the cache key, separate from current
+  results, previews and live model execution.
+- Close the read-only scope before adoption writes. File-integrity checks still
+  run at its boundaries; ownership and approval events are not cached permission.
+- Give only continuation-plan reads and continuation submissions a bounded
+  45-second wait. Other prototype requests retain their 15-second budget.
+- Explain when a read-only plan check times out without suggesting that
+  conversion started. An uncertain submission still requires checking the
+  existing run and cannot be automatically submitted again.
+
+This patch addresses a measured timing mismatch between a valid retained-plan
+response and the browser's earlier request budget. It changes neither the saved
+candidate nor the independent approval, and does not bypass APEX validation,
+import, runtime checks or human business review. Source publication, deployment
+and completed real-file conversion remain separately verified milestones.
+
 ## [0.16.0] - 2026-11-08
 
 ### Continue remaining sections

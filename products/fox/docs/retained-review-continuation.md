@@ -11,6 +11,11 @@ sections have retained approvals and how many remain. The original sources stay
 locked. The user confirms the displayed processing scope before continuing.
 Earlier failed reviews remain visible as history rather than being relabelled.
 
+Checking a large saved run can take time. Continuation-plan checks and submission
+wait up to 45 seconds for the verified response. A timed-out plan check has not
+started conversion. A timed-out submission is different: check the existing run
+before taking another action, because the server may already have recorded it.
+
 If the submission outcome is uncertain, inspect the existing run. Do not create
 a second run or repeat completed work to force progress. Missing or inconsistent
 proof requires operator attention, not a business user's manual file editing.

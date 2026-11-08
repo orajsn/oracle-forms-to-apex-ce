@@ -257,7 +257,7 @@ def _validated_historical_four(job, snapshot, original, db):
 
 
 def _historical_active_focus(root, packet, plan, request, target, previous, record):
-    """Readonly fixed4 views cannot share a current-head cache identity."""
+    """Reuse exact readonly record4 views for current4 or sealed4, never current5."""
     if record['epoch_number'] != NUMBER:
         _fail()
     from .prototype_read_scope import cached_read
@@ -372,7 +372,7 @@ def model_fence(job, snapshot, record):
     previous, incomplete = [], False
     for index, request in enumerate(plan['requests']):
         if index < 7:
-            previous.append(active_focus(root, packet, plan, request, target, previous, record))
+            previous.append(_historical_active_focus(root, packet, plan, request, target, previous, record))
             continue
         if not incomplete:
             _prefix(packet, plan, previous, target)
@@ -405,7 +405,7 @@ def model_fence(job, snapshot, record):
                 # context gate before provider configuration is ever loaded.
                 active_focus(root, packet, plan, request, target, previous, record, preview=True)
         if not incomplete:
-            view = active_focus(root, packet, plan, request, target, previous, record)
+            view = _historical_active_focus(root, packet, plan, request, target, previous, record)
             previous.append(view)
             if not view['checked']['approved_structured_design']:
                 incomplete = True
