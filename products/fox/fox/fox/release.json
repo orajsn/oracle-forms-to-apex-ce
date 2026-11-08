@@ -1,13 +1,13 @@
 {
-  "version": "0.16.1",
+  "version": "0.17.0",
   "released_on": "2026-11-08",
-  "title": "Faster checked continuation requests",
+  "title": "Review saved mapping without repeated generation",
   "changes": [
-    "Reuse exact checked historical views within one read-only continuation request instead of rebuilding them repeatedly.",
-    "Keep historical views separate from current results, preview paths and live execution.",
-    "Allow a bounded 45-second wait for checked continuation plans and submissions while keeping ordinary requests at 15 seconds.",
-    "Explain a read-only plan timeout without implying processing started; uncertain submissions remain locked against replay.",
-    "Preserve fresh ownership, consent, source integrity, independent review and all APEX validation and export gates."
+    "Recognize exact screen declarations repeated from a previously reviewed source Block without changing owned objects or behavior claims.",
+    "Preserve the original mapping and bind any screen-only projection to its source and prior owner evidence.",
+    "Offer Review saved mapping and continue for the recognized stopped checkpoint, with fresh processing confirmations.",
+    "Review the saved mapping first; only an approved result permits generation of the next section. Completed model calls are not repeated.",
+    "Keep prior failures and absent result publications intact, with current authority and all APEX validation, import and export gates preserved."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

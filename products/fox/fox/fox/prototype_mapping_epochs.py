@@ -111,11 +111,13 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
-    partition_epoch = record is not None and record.get('epoch_number') == partition.NUMBER
-    container_epoch = record is not None and record.get('epoch_number') in (container.NUMBER, partition.NUMBER)
-    clause_epoch = record is not None and record.get('epoch_number') in (clause.NUMBER, container.NUMBER, partition.NUMBER)
+    from . import prototype_context_screen_epoch as screen
+    screen_epoch = record is not None and record.get('epoch_number') == screen.NUMBER
+    partition_epoch = record is not None and record.get('epoch_number') in (partition.NUMBER, screen.NUMBER)
+    container_epoch = record is not None and record.get('epoch_number') in (container.NUMBER, partition.NUMBER, screen.NUMBER)
+    clause_epoch = record is not None and record.get('epoch_number') in (clause.NUMBER, container.NUMBER, partition.NUMBER, screen.NUMBER)
     prefixes = '(?:' + '|'.join([PREFIX, clause.PREFIX] + ([container.PREFIX] if container_epoch else [])
-        + ([partition.PREFIX] if partition_epoch else [])) + ')' if clause_epoch else PREFIX
+        + ([partition.PREFIX] if partition_epoch else []) + ([screen.PREFIX] if screen_epoch else [])) + ')' if clause_epoch else PREFIX
     root_files = {'source-snapshot.json', 'mapping-continuation.json', 'prototype-result.json', RECORD}
     if clause_epoch:
         root_files.add(clause.RECORD)
@@ -125,6 +127,9 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     if partition_epoch:
         root_files.add(partition.RECORD)
         root_files.update(partition.RESULT_FILES)
+    if screen_epoch:
+        root_files.add(screen.RECORD)
+        root_files.update(screen.RESULT_FILES)
     pipeline_files = {'binding.json', 'sources-manifest.json', 'packet.json', 'assessment.json',
         'merged-blueprint.json', 'native-plan.json', 'review-index.json', 'rendered.json', 'candidate-apexlang.zip',
         *{stage + suffix for stage in ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
@@ -148,6 +153,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                         *{'prototype-pipeline/' + clause.PREFIX + '/clause-proof' + suffix for suffix in ('', '/analysis', '/review')}}
                     or container_epoch and rel in container.DIRECTORIES
                     or partition_epoch and rel in partition.DIRECTORIES
+                    or screen_epoch and rel in screen.DIRECTORIES
                     or re.fullmatch(r'prototype-pipeline/(?:' + prefixes + r'/)?focus-[a-f0-9]{24}', rel))
                 if not valid or initial and rel.startswith(('mapping-epochs', 'prototype-pipeline/epochs')):
                     raise OpafError('Unknown epoch directory or competing head requires reconciliation.')
@@ -160,7 +166,8 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                             and any(name.startswith(original_prefix) for name in record['before_files'])):
                         raise OpafError('Retained container and prefix proofs cannot masquerade as new calls.')
                 if partition_epoch and rel.startswith('prototype-pipeline/epochs/'):
-                    if rel == 'prototype-pipeline/' + partition.PREFIX or rel.startswith('prototype-pipeline/' + partition.PREFIX + '/'):
+                    active_prefix = screen.PREFIX if screen_epoch else partition.PREFIX
+                    if rel == 'prototype-pipeline/' + active_prefix or rel.startswith('prototype-pipeline/' + active_prefix + '/'):
                         if match and any(name.startswith('prototype-pipeline/' + match[1] + '/') for name in record['before_files']):
                             raise OpafError('Retained partition approval cannot masquerade as a repeated model call.')
                     elif not any(name.startswith(rel + '/') for name in record['before_files']):
@@ -170,8 +177,10 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                 pending.append(path)
                 continue
             valid = rel in root_files
+            if (screen_epoch and rel.startswith('prototype-pipeline/' + screen.PREFIX + '/' + record['plan']['pending_review_focus_id'] + '/mapper')):
+                raise OpafError('Saved mapper9 cannot be repeated or copied into the new epoch.')
             if (partition_epoch and rel.startswith('prototype-pipeline/epochs/')
-                    and not rel.startswith('prototype-pipeline/' + partition.PREFIX + '/')
+                    and not rel.startswith('prototype-pipeline/' + (screen.PREFIX if screen_epoch else partition.PREFIX) + '/')
                     and rel not in record['before_files']):
                 raise OpafError('New work appeared under a frozen historical epoch.')
             if record is not None and re.match(r'prototype-pipeline/focus-[a-f0-9]{24}/', rel) and rel not in record['before_files']:
@@ -184,7 +193,9 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or clause_epoch and tail in {clause.PREFIX + '/' + name for name in clause.TECHNICAL_FILES}
                     or container_epoch and tail in {container.PREFIX + '/' + name for name in container.TECHNICAL_FILES}
                     or partition_epoch and tail in {partition.PREFIX + '/' + name for name in partition.TECHNICAL_FILES}
-                    or partition_epoch and re.fullmatch(partition.PREFIX + r'/focus-[a-f0-9]{24}/full-audit-context\.json', tail)
+                    or screen_epoch and tail in {screen.PREFIX + '/' + name for name in screen.TECHNICAL_FILES}
+                    or partition_epoch and re.fullmatch((screen.PREFIX if screen_epoch else partition.PREFIX) + r'/focus-[a-f0-9]{24}/full-audit-context\.json', tail)
+                    or screen_epoch and re.fullmatch(screen.PREFIX + r'/focus-[a-f0-9]{24}/(?:' + '|'.join(re.escape(n) for n in screen.SCREEN_FILES) + ')', tail)
                     or re.fullmatch(prefixes + r'/source-facts/focus-[a-f0-9]{24}\.json', tail))
             elif rel.startswith('prototype-results/'):
                 valid = re.fullmatch(r'prototype-results/[a-f0-9]{64}\.json', rel) is not None
@@ -223,6 +234,9 @@ def _model_fence(job, snapshot, record):
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
+    from . import prototype_context_screen_epoch as screen
+    if record.get('epoch_number') == screen.NUMBER:
+        return screen.model_fence(job, snapshot, record)
     if record.get('epoch_number') == partition.NUMBER:
         return partition.model_fence(job, snapshot, record)
     if record.get('epoch_number') == container.NUMBER:
@@ -305,6 +319,9 @@ def _validated_epoch_record(job, snapshot, original, db=None, *, historical=Fals
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
+    from . import prototype_context_screen_epoch as screen
+    if not historical and ((job / screen.RECORD).exists() or (job / screen.RECORD).is_symlink()):
+        return screen.validate_record(job, snapshot, original, db)
     if not historical and ((job / partition.RECORD).exists() or (job / partition.RECORD).is_symlink()):
         return partition.validate_record(job, snapshot, original, db)
     if not historical and ((job / container.RECORD).exists() or (job / container.RECORD).is_symlink()):
@@ -330,10 +347,12 @@ def _validated_epoch_record(job, snapshot, original, db=None, *, historical=Fals
                 raise OpafError('Epoch event or technical head lost its durable record.')
             return None
         expected_names = {NAME + '.json', clause.NAME + '.json'} if historical else {NAME + '.json'}
-        if historical and historical_head in (container.NUMBER, partition.NUMBER):
+        if historical and historical_head in (container.NUMBER, partition.NUMBER, screen.NUMBER):
             expected_names.add(container.NAME + '.json')
-        if historical and historical_head == partition.NUMBER:
+        if historical and historical_head in (partition.NUMBER, screen.NUMBER):
             expected_names.add(partition.NAME + '.json')
+        if historical and historical_head == screen.NUMBER:
+            expected_names.add(screen.NAME + '.json')
         if root_dir.is_symlink() or {item.name for item in root_dir.iterdir()} != expected_names:
             raise OpafError('Epoch chain is noncontiguous or has a competing head.')
         if historical:
@@ -492,11 +511,16 @@ def inspect_next_epoch(job, snapshot, original, target, db):
 
 def _inspect_next_epoch(job, snapshot, original, target, db):
     packet, plan = reconstruct(job, snapshot, original, target)
+    from . import prototype_context_screen_epoch as screen
+    if screen.terminal_candidate_present(job, plan, db):
+        return screen.inspect_next(job, snapshot, original, target, db)
     record = validate_epoch_chain(job, snapshot, original, db)
     if record:
         from . import prototype_clause_epoch as clause
         from . import prototype_container_epoch as container
         from . import prototype_partition_review_epoch as partition
+        if record.get('epoch_number') == screen.NUMBER:
+            return screen.inspect_next(job, snapshot, original, target, db, record)
         if record.get('epoch_number') == partition.NUMBER or partition.staging_present(job):
             return partition.inspect_next(job, snapshot, original, target, db, record)
         if record.get('epoch_number') == container.NUMBER or container.staging_present(job):
@@ -589,6 +613,9 @@ def _technical_record(root):
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
+    from . import prototype_context_screen_epoch as screen
+    if (Path(root) / screen.PREFIX).exists() or (Path(root) / screen.PREFIX).is_symlink():
+        return screen.technical_record(Path(root))
     if (Path(root) / partition.PREFIX).exists() or (Path(root) / partition.PREFIX).is_symlink():
         return partition.technical_record(Path(root))
     if (Path(root) / container.PREFIX).exists() or (Path(root) / container.PREFIX).is_symlink():
@@ -642,6 +669,9 @@ def _dispatch_active_focus(root, packet, plan, request, target, previous, *, run
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
+    from . import prototype_context_screen_epoch as screen
+    if record is not None and record.get('epoch_number') == screen.NUMBER:
+        return screen.active_focus(root, packet, plan, request, target, previous, record, runtime=runtime)
     if record is not None and record.get('epoch_number') == partition.NUMBER:
         return partition.active_focus(root, packet, plan, request, target, previous, record, runtime=runtime)
     if record is not None and record.get('epoch_number') == container.NUMBER:
@@ -651,7 +681,7 @@ def _dispatch_active_focus(root, packet, plan, request, target, previous, *, run
     return _active_focus(root, packet, plan, request, target, previous, record, PREFIX, runtime=runtime)
 
 
-def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False, review_context=None):
+def _active_focus(root, packet, plan, request, target, previous, record, prefix, *, runtime=None, preview=False, review_context=None, candidate_projection=None):
     write = runtime is not None
     index = next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id'])
     repair = next(i for i, row in enumerate(plan['requests']) if record and row['focus_id'] == record['plan']['repair_focus_id']) if record else None
@@ -714,6 +744,9 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
                 canonical_hash(dependency['proof']) if dependency else None, [view['candidate'] for view in previous],
                 strict_known_case=index == projection_index)
             evidence = {'projection': projection, 'prior_active_proof': dependency['proof'] if dependency else None}
+            gate = source_fact_gate(packet, request, candidate)
+        if candidate_projection is not None:
+            candidate, evidence = candidate_projection(candidate, raw, evidence)
             gate = source_fact_gate(packet, request, candidate)
         if evidence is not None:
             save(directory / 'projection-candidate.json', candidate, write)

@@ -60,10 +60,13 @@ def _binding(job, record, result):
 
 def _result_module(record):
     from . import prototype_container_epoch as container, prototype_partition_review_epoch as partition
+    from . import prototype_context_screen_epoch as screen
     if type(record['epoch_number']) is int and record['epoch_number'] == container.NUMBER:
         return container
     if type(record['epoch_number']) is int and record['epoch_number'] == partition.NUMBER:
         return partition
+    if type(record['epoch_number']) is int and record['epoch_number'] == screen.NUMBER:
+        return screen
     _fail()
 
 
@@ -132,7 +135,8 @@ def _reconstruct_binding(job, record, result, *, historical_four=False):
         expected.update(status='APEX_GENERATED', stage='complete', converter_receipts=prior,
             reason='APEX generated; exact-package reimport and clean-schema installation proof remain pending.')
     epochs.same(result, expected)
-    proof_key = 'partition_proof_sha256' if record['epoch_number'] == 5 else 'container_proof_sha256'
+    proof_key = ('screen_projection_sha256' if record['epoch_number'] == 6 else
+        'partition_proof_sha256' if record['epoch_number'] == 5 else 'container_proof_sha256')
     return {'schema_version': 1, 'scope': 'fox-prototype-epoch-result-publication-v1',
         'job_id': job.name, 'project_id': record['project_id'], 'source_hash': record['source_hash'],
         'source_binding': record['source_binding'], 'epoch_sha256': canonical_hash(record),

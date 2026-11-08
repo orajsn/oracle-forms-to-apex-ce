@@ -713,7 +713,8 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
                                      analysis_epoch_failure=False, clause_repair_failure=False,
-                                     container_review_failure=False, partition_review_failure=False):
+                                     container_review_failure=False, partition_review_failure=False,
+                                     context_screen_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge loads this
@@ -732,6 +733,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     No mutable epoch-head selector, runtime client or archived Python is used.
     The separate epoch-four opt-in recognizes only its sealed unchanged rejection
     and complete result publication. Outside-job reviews grant no authority here.
+    The epoch-five opt-in preserves the known pre-review duplicate-screen stop,
+    including the absence of a new result publication. It never projects a design.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -791,10 +794,11 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     try:
         need(all(type(value) is bool for value in
                  (claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                  container_review_failure, partition_review_failure))
+                  container_review_failure, partition_review_failure, context_screen_failure))
              and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                      container_review_failure, partition_review_failure)) <= 1)
-        container_family = container_review_failure or partition_review_failure
+                      container_review_failure, partition_review_failure, context_screen_failure)) <= 1)
+        partition_family = partition_review_failure or context_screen_failure
+        container_family = container_review_failure or partition_family
         clause_family = clause_repair_failure or container_family
         analysis_family = analysis_epoch_failure or clause_family
         need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
@@ -1297,7 +1301,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     run['id'], run['id'] + ':%')).fetchall()
                 epoch_two_event = (owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])
                 if container_family:
-                    need(len(events) == (3 if partition_review_failure else 2)
+                    need(len(events) == (4 if context_screen_failure else 3 if partition_review_failure else 2)
                          and sum(tuple(row) == epoch_two_event for row in events) == 1)
                 else:
                     need([tuple(row) for row in events] == [epoch_two_event])
@@ -1305,7 +1309,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     (run['id'], run['id'] + ':%')).fetchall()
                 need(sorted(row[0] for row in event_actions) == sorted((origin,
                     'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
-                    *(['approved_prototype_mapping_epoch'] * (2 if partition_review_failure else 1)
+                    *(['approved_prototype_mapping_epoch'] * (3 if context_screen_failure else 2 if partition_review_failure else 1)
                       if container_family else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
@@ -1519,7 +1523,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                      and math.isfinite(third['approved_at']) and third['approved_at'] > epoch['approved_at'])
                 expected_events = {epoch_two_event,
                     (owner[0], run['id'] + ':epoch:000003:' + hashed(third), third['approved_at'])}
-                need(expected_events <= {tuple(row) for row in events} if partition_review_failure
+                need(expected_events <= {tuple(row) for row in events} if partition_family
                      else {tuple(row) for row in events} == expected_events)
                 same(document(third_root / 'epoch-record.json'), third)
                 same(document(third_root / 'predecessor-record.json'), epoch)
@@ -1598,7 +1602,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 same(document(third_root / 'source-facts' / (projection_request['focus_id'] + '.json')),
                      gate(projected, projection_request, 2))
                 archived_result = 'prototype-result-publications/epoch-000004/previous-result.json'
-                result = document(job / archived_result if partition_review_failure else job / 'prototype-result.json')
+                result = document(job / archived_result if partition_family else job / 'prototype-result.json')
                 checkpoint = result['artifacts']['checkpoint_directory']
                 need(type(checkpoint) is str and 0 < len(checkpoint) <= 1024)
                 portable = checkpoint.replace('\\', '/')
@@ -1616,7 +1620,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 need(type(result['schema_version']) is int)
                 same(document(job / 'prototype-results' / (hashed(result) + '.json')), result)
                 epoch_directories |= third_dirs
-                if partition_review_failure:
+                if partition_family:
                     # Admission-only structural chain. No semantic module import,
                     # current-head dispatch, outside-job proof or execution grant.
                     context_sha = 'b48195fc859f52a7786e999350af3c7ec96c737d516caef906ea093347d2498c'
@@ -1825,8 +1829,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     need(type(fourth['epoch_number']) is int and type(fourth['approved_at']) in (int, float)
                          and math.isfinite(fourth['approved_at']) and fourth['approved_at'] > third['approved_at'])
                     same(fourth, expected_fourth)
-                    need({tuple(row) for row in events} == expected_events | {
-                        (owner[0], run['id'] + ':epoch:000004:' + hashed(fourth), fourth['approved_at'])})
+                    expected_four_events = expected_events | {
+                        (owner[0], run['id'] + ':epoch:000004:' + hashed(fourth), fourth['approved_at'])}
+                    need(expected_four_events <= {tuple(row) for row in events} if context_screen_failure
+                         else {tuple(row) for row in events} == expected_four_events)
                     same(document(fourth_root / 'epoch-record.json'), fourth)
                     same(document(fourth_root / 'predecessor-record.json'), third)
                     root_active_proof = {'focus_id': root_request['focus_id'], 'kind': 'DERIVED_APPROVED_CONTAINER_PROPOSAL',
@@ -1876,6 +1882,280 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         'result_sha256': hashed(latest), 'history_path': history_path, 'status': 'CHANGES_REQUIRED',
                         'stage': 'reviewing', 'active_proofs_sha256': hashed(active_proofs), 'stage_files': {}, 'previous_result': pin})
                     epoch_directories |= fourth_dirs
+                    if context_screen_failure:
+                        # Fixed head-five pre-review stop only. These checks do not
+                        # invoke the formatter/projector or issue reuse authority.
+                        baseline_five = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                        need(len(baseline_five) == 135)
+                        fifth_prefix = 'prototype-pipeline/epochs/epoch-000005'
+                        fifth_root = job / fifth_prefix
+                        fifth_dirs = {fifth_prefix, fifth_prefix + '/partition-proof',
+                            fifth_prefix + '/partition-proof/review', 'prototype-result-publications/epoch-000005'}
+                        for name in sorted(fifth_dirs, key=lambda value: (value.count('/'), value)):
+                            need((job / name).is_dir()); protected(job / name)
+                        compact_names = {'diagnostic-intent.json', 'original-files.json', 'review-request.json',
+                            'full-audit-context.json', 'review-receipt.json', 'result.json',
+                            'review/reviewer-target.json', 'review/reviewer-intent.json', 'review/reviewer.json'}
+                        fifth_descriptor = document(fifth_root / 'partition-proof-descriptor.json')
+                        compact_manifest = fifth_descriptor['original_manifest']
+                        need(type(compact_manifest) is dict and set(compact_manifest) == compact_names
+                             and hashed(compact_manifest) == fifth_descriptor['original_manifest_sha256'])
+                        for item in compact_manifest.values():
+                            need(type(item) is dict and set(item) == {'sha256', 'bytes'} and sha(item['sha256'])
+                                 and type(item['bytes']) is int and 0 < item['bytes'] <= 2_000_000)
+                        need(sum(item['bytes'] for item in compact_manifest.values()) <= 8_000_000)
+                        compact_root = fifth_root / 'partition-proof'
+                        compact_values = {name: document(compact_root / name) for name in sorted(compact_names)}
+                        for name in compact_names:
+                            raw = observed[(compact_root / name).relative_to(job).as_posix()]
+                            need(len(raw) == compact_manifest[name]['bytes']
+                                 and hashlib.sha256(raw).hexdigest() == compact_manifest[name]['sha256'])
+                        formatter_pin = 'b81ec2cdd463c2db5b35d3fa1846f779d5191d079e07b1da94e89ae087785f57'
+                        fourth_checkpoint = document(current_dir / 'reviewer.json')
+                        history_pins = {'request_sha256': hashed(payload_four), 'receipt_sha256': hashed(fourth_checkpoint),
+                                        'output_sha256': hashed(current_review)}
+                        task = compact_values['review-request.json']
+                        guidance = task['task_guidance']
+                        need(type(guidance) is str and hashlib.sha256(guidance.encode()).hexdigest() ==
+                             'ad358584583a51a81f2984af008aa38b7caab67fa080a174f0f08e2cf46e712e')
+                        same(compact_values['full-audit-context.json'], design_context)
+                        # Lossless pinned FORMAT validation, not an imported semantic
+                        # validator. Natural keyed references forbid aliases/extras.
+                        compact = task['design_context']
+                        need(set(compact) == {'schema_version', 'scope', 'header', 'tables', 'owned_rows'}
+                             and type(compact['schema_version']) is int and compact['schema_version'] == 1
+                             and compact['scope'] == 'fox-compact-design-review-context-v1'
+                             and set(compact['tables']) == {'sources', 'mappings', 'screens', 'owner_bindings'}
+                             and len(canonical(compact)) <= 500000)
+                        tables, used = compact['tables'], {key: set() for key in compact['tables']}
+                        def lookup(table, key):
+                            need(type(key) is str and type(tables[table]) is dict and key in tables[table])
+                            value = tables[table][key]; used[table].add(key)
+                            natural = 'source_object_id' if table == 'mappings' else 'focus_id' if table == 'owner_bindings' else 'id'
+                            need(value[natural] == key)
+                            return value
+                        def triple(value):
+                            need(set(value) == {'source_ref', 'mapping_ref', 'owner_ref'})
+                            return {'source': lookup('sources', value['source_ref']),
+                                'mapping': lookup('mappings', value['mapping_ref']),
+                                'owner_binding': lookup('owner_bindings', value['owner_ref'])}
+                        full = json.loads(canonical(compact['header']))
+                        full['prefix_check']['reference_bindings'] = {key: lookup('owner_bindings', ref)
+                            for key, ref in full['prefix_check']['reference_bindings'].items()}
+                        full['owned_rows'] = []
+                        for row in compact['owned_rows']:
+                            need(set(row) == {'focus_id', 'source_ref', 'mapping_ref', 'owner_ref', 'ancestors',
+                                             'screen_context', 'unit_coverage'})
+                            screen = row['screen_context']; screen_value = None
+                            if screen is not None:
+                                need(set(screen) == {'source_ref', 'mapping_ref', 'owner_ref', 'screen_ref', 'borrowed_from_prior_focus'})
+                                expanded = triple({key: screen[key] for key in ('source_ref', 'mapping_ref', 'owner_ref')})
+                                screen_value = {'declaration': lookup('screens', screen['screen_ref']),
+                                    'source_block': expanded['source'], 'owner_mapping': expanded['mapping'],
+                                    'owner_binding': expanded['owner_binding'],
+                                    'borrowed_from_prior_focus': screen['borrowed_from_prior_focus']}
+                            full['owned_rows'].append({'focus_id': row['focus_id'],
+                                **triple({key: row[key] for key in ('source_ref', 'mapping_ref', 'owner_ref')}),
+                                'ancestors': [triple(value) for value in row['ancestors']], 'screen_context': screen_value,
+                                'unit_coverage': row['unit_coverage']})
+                        need(all(set(tables[key]) == used[key] for key in tables))
+                        same(full, design_context)
+                        expected_task = {'schema_version': 1, 'scope': 'fox-partition-review-task-v1',
+                            'request': projection_request, 'candidate': projected, 'candidate_sha256': hashed(projected),
+                            'target_profile_sha256': selected['target_profile_sha256'], 'design_context_sha256': hashed(design_context),
+                            'design_context': compact, 'task_guidance': guidance, 'independent_semantic_review_required': True,
+                            'historical_allegations': {'status': 'PAST_ALLEGATIONS_FOR_FRESH_REASSESSMENT', **history_pins,
+                                'target_profile_sha256': selected['target_profile_sha256'], 'candidate_sha256': hashed(projected),
+                                'allegations': [{'source_object_id': finding['source_object_id'], 'code': finding['code'],
+                                    'allegation': finding['detail']} for finding in current_review['findings']],
+                                'historical_conclusion_is_not_current_evidence': True,
+                                'caller_must_preserve_original_request_receipt_and_output': True},
+                            **context_false, 'review_context': payload_four['review_context']}
+                        expected_task['task_binding'] = hashed(expected_task)
+                        same(task, expected_task)
+                        need(len(json.dumps(task, ensure_ascii=False, allow_nan=False).encode()) <= 650000)
+                        same(compact_values['original-files.json'], baseline_five)
+                        same(fifth_descriptor, {'schema_version': 1, 'scope': 'fox-prototype-partition-proof-staging-v1',
+                            'job_id': run['id'], 'project_id': run['project'], 'owner': owner[0],
+                            'snapshot_sha256': hashlib.sha256(observed['source-snapshot.json']).hexdigest(),
+                            'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                            'original_target_sha256': selected['target_profile_sha256'], 'predecessor_sha256': hashed(fourth),
+                            'formatter_sha256': formatter_pin, 'original_manifest': compact_manifest,
+                            'original_manifest_sha256': hashed(compact_manifest), 'original_files': baseline_five,
+                            'original_files_sha256': hashed(baseline_five), 'candidate_sha256': hashed(projected),
+                            'review_task_sha256': hashed(task), 'expected_history_pins': history_pins})
+                        compact_review, compact_room = role_output(compact_root / 'review', 'reviewer', task)
+                        need(compact_room not in rooms | {room, analysis_room, clause_review_room, review_room, root_room, current_room})
+                        same(compact_review, {'source_binding': selected['source_binding'], 'focus_binding': projection_request['focus_binding'],
+                            'candidate_sha256': hashed(projected), 'verdict': 'APPROVED', 'findings': []})
+                        same(compact_values['review-receipt.json'], review_receipt(projected, projection_request, 'APPROVED'))
+                        diagnostic = {'schema_version': 1, 'scope': 'one-unadopted-compact-partition-review',
+                            'job_id': run['id'], 'source_binding': selected['source_binding'],
+                            'target_profile_sha256': selected['target_profile_sha256'], 'module_sha256': formatter_pin,
+                            'candidate_sha256': hashed(projected), 'original_request_sha256': hashed(payload_four),
+                            'new_request_sha256': hashed(task), 'prior_review_receipt_sha256': hashed(fourth_checkpoint),
+                            'original_files_sha256': hashed(baseline_five), 'maximum_new_model_calls': 1,
+                            'generation_calls': 0, 'automatic_retry': False, 'production_run_resumed': False, 'proposal_adopted': False}
+                        same(compact_values['diagnostic-intent.json'], diagnostic)
+                        same(compact_values['result.json'], {**diagnostic, 'status': 'COMPACT_PARTITION_REVIEW_COMPLETED_UNADOPTED',
+                            'structured_review_valid': True, 'review_verdict': 'APPROVED', 'review_approved': True,
+                            'review_room_id': compact_room, 'review_output_sha256': hashed(compact_review), 'finding_codes': [],
+                            'original_job_files_unchanged': len(baseline_five), 'apex_imported': False, 'business_behavior_accepted': False})
+                        fifth_pin = {'raw_sha256': hashlib.sha256(observed['prototype-result.json']).hexdigest(),
+                            'canonical_sha256': hashed(latest), 'history_path': history_path,
+                            'history_raw_sha256': hashlib.sha256(observed[history_path]).hexdigest()}
+                        fifth_policy = {**fourth_policy, 'partition_review': 'retained-compact-review-v1',
+                            'corrective_projection_review_calls': 0, 'new_corrective_model_calls': 0,
+                            'repeated_mapper_calls': 0, 'repeated_reviewer_calls': 0}
+                        fifth_plan = {**fourth_plan, 'ai_approved_focuses': 8, 'source_checked_focuses': 8, 'source_fact_violations': 0,
+                            'partition_proof_sha256': hashed(fifth_descriptor), 'reused_review_focuses': 1,
+                            'new_corrective_model_calls': 0, 'repeated_mapper_calls': 0, 'repeated_reviewer_calls': 0,
+                            'planned_corrective_operations': [], 'previous_result': fifth_pin}
+                        fifth = document(job / 'mapping-epochs/epoch-000005.json')
+                        expected_fifth = {key: value for key, value in fourth.items() if key != 'container_proof_sha256'}
+                        expected_fifth.update(epoch_number=5, strategy='retained-compact-review-v1', predecessor_sha256=hashed(fourth),
+                            approved_at=fifth['approved_at'], before_files=baseline_five, plan=fifth_plan, normalization_policy=fifth_policy,
+                            partition_proof_sha256=hashed(fifth_descriptor), checkpoint_sha256=hashed({'epoch_number': 5,
+                                'predecessor_sha256': hashed(fourth), 'before_files': baseline_five,
+                                'plan': fifth_plan, 'normalization_policy': fifth_policy}))
+                        need(type(fifth['epoch_number']) is int and type(fifth['approved_at']) in (int, float)
+                             and math.isfinite(fifth['approved_at']) and fifth['approved_at'] > fourth['approved_at'])
+                        same(fifth, expected_fifth)
+                        need({tuple(row) for row in events} == expected_four_events | {
+                            (owner[0], run['id'] + ':epoch:000005:' + hashed(fifth), fifth['approved_at'])})
+                        same(document(fifth_root / 'epoch-record.json'), fifth)
+                        same(document(fifth_root / 'predecessor-record.json'), fourth)
+                        previous_five = 'prototype-result-publications/epoch-000005/previous-result.json'
+                        same(document(job / previous_five), latest)
+                        need(observed[previous_five] == observed['prototype-result.json'])
+                        # Reconstruct exactly the next ordinary ownership-sized source
+                        # partition. Any other/bisected/unknown stop remains blocking.
+                        remaining = ordered[cursor:]
+                        need(remaining and assessment['focus_count'] > 8)
+                        first_nine = remaining[0]
+                        group_nine = (first_nine['block_id'], first_nine['module_id'])
+                        owned_nine = []
+                        for obj in remaining:
+                            if (obj['block_id'], obj['module_id']) != group_nine or len(owned_nine) == 32: break
+                            owned_nine.append(obj)
+                        need(owned_nine and all(obj['kind'] in ('Item', 'Trigger') for obj in owned_nine))
+                        ids_nine = {obj['id'] for obj in owned_nine}
+                        focus_nine = 'focus-' + hashed([selected['source_binding'], [obj['id'] for obj in owned_nine]])[:24]
+                        dir_nine = fifth_root / focus_nine
+                        need(dir_nine.is_dir()); protected(dir_nine)
+                        request_nine = document(dir_nine / 'mapper-request.json', 500000)
+                        entries = [entry for entry in packet['sources'] if ids_nine <= {obj['id'] for obj in entry['facts']['objects']}]
+                        need(len(entries) == 1)
+                        facts_nine = entries[0]['facts']
+                        units_nine = [unit for obj in owned_nine for unit in facts_nine['code_units'] if unit['owner_id'] == obj['id']]
+                        associated = ids_nine | {unit['id'] for unit in units_nine}
+                        links_nine = [value for value in facts_nine['links'] if value['source_id'] in associated]
+                        findings_nine = [value for value in facts_nine['findings'] if not value['object_ids'] or associated.intersection(value['object_ids'])]
+                        contexts = set()
+                        def ancestry(ref):
+                            seen = set()
+                            while ref is not None:
+                                need(ref in all_objects and ref not in seen); seen.add(ref); contexts.add(ref)
+                                ref = all_objects[ref]['parent_id']
+                        for obj in owned_nine: ancestry(obj['parent_id'])
+                        for link in links_nine:
+                            if link['status'] == 'resolved': ancestry(link['target_id'])
+                        for finding in findings_nine:
+                            for ref in finding['object_ids']: ancestry(ref)
+                        chunk_units = {value['code_unit_id']: value for value in chunks.values()}
+                        supplied_nine = {value['code_unit_id']: value for value in request_nine['chunks']}
+                        need(len(supplied_nine) == len(request_nine['chunks']))
+                        chunks_nine = []
+                        for unit in units_nine:
+                            chunk = chunk_units[unit['id']]
+                            if chunk['id'] in selected['approved_chunk_hashes']:
+                                body = supplied_nine[unit['id']]['text']
+                                need(type(body) is str and len(body.encode()) == unit['bytes']
+                                     and hashlib.sha256(body.encode()).hexdigest() == unit['sha256'])
+                                chunks_nine.append({**chunk, 'text': body})
+                        object_order = {ref: index for index, ref in enumerate(all_objects)}
+                        expected_request = {'schema_version': 1, 'scope': 'fox-forms-focus-request-v1',
+                            'source_binding': selected['source_binding'], 'focus_id': focus_nine, 'source_index': source_index,
+                            'owned_objects': owned_nine, 'context_objects': [all_objects[ref] for ref in sorted(contexts - ids_nine, key=object_order.__getitem__)],
+                            'code_units': units_nine, 'links': links_nine,
+                            'dependencies': [value for value in facts_nine['dependencies'] if value['source_id'] in associated],
+                            'findings': findings_nine, 'chunks': chunks_nine,
+                            'unselected_code_unit_ids': [unit['id'] for unit in units_nine if chunk_units[unit['id']]['id'] not in selected['approved_chunk_hashes']],
+                            'safety': requests[0][0]['safety']}
+                        expected_request['focus_binding'] = hashed(expected_request)
+                        same(request_nine, expected_request)
+                        raw_nine, mapper_nine_room = role_output(dir_nine, 'mapper', request_nine)
+                        need(mapper_nine_room not in rooms | {room, analysis_room, clause_review_room, review_room, root_room, current_room, compact_room})
+                        shape(raw_nine, request_nine, ids_nine)
+                        blueprint_nine = raw_nine['blueprint']
+                        need(len(blueprint_nine['screens']) == 1)
+                        duplicate = blueprint_nine['screens'][0]
+                        prior_screens = [(screen, value) for value in candidates_four for screen in value['blueprint']['screens']
+                                         if screen['id'] == duplicate['id']]
+                        need(len(prior_screens) == 1); same(duplicate, prior_screens[0][0])
+                        block_owners = [mapping for value in candidates_four for mapping in value['blueprint']['objects']
+                            if all_objects[mapping['source_object_id']]['kind'] == 'Block' and mapping['disposition'] == 'proposed'
+                            and mapping.get('screen_id') == duplicate['id']]
+                        need(len(block_owners) == 1)
+                        block_nine = block_owners[0]['source_object_id']
+                        need(block_nine in {obj['id'] for obj in request_nine['context_objects']}
+                             and duplicate['id'] == 'screen-' + block_nine and all(obj['block_id'] == block_nine for obj in owned_nine))
+                        prior_mappings = {mapping['source_object_id']: mapping for value in candidates_four for mapping in value['blueprint']['objects']}
+                        for mapping in blueprint_nine['objects']:
+                            need(mapping['disposition'] == 'proposed' and mapping.get('screen_id') == duplicate['id'] and 'native_component' not in mapping)
+                            source = all_objects[mapping['source_object_id']]; ancestry(source['parent_id'])
+                            parent, seen = source['parent_id'], set()
+                            while parent is not None:
+                                need(parent not in seen); seen.add(parent)
+                                ancestor = all_objects[parent]
+                                if ancestor['kind'] in ('Block', 'FormModule'): need(prior_mappings[parent]['disposition'] != 'omitted')
+                                parent = ancestor['parent_id']
+                            need(block_nine in seen)
+                        evidence_owners = {ref: ref for ref in all_objects}
+                        evidence_owners.update({ref: value['owner_id'] for ref, value in unit_metadata.items()})
+                        for entry in packet['sources']:
+                            local_ids = {obj['id'] for obj in entry['facts']['objects']}
+                            for category, collection, prefix_id in (('link', 'links', 'fflink1-'),
+                                                                    ('dependency', 'dependencies', 'ffdep1-')):
+                                for value in entry['facts'][collection]:
+                                    # Same occurrence identity as evidence_reference_id;
+                                    # these extractor rows deliberately have no id field.
+                                    ref = prefix_id + hashed([entry['source']['sha256'], category, value])[:24]
+                                    need(ref not in evidence_owners and value['source_id'] in local_ids)
+                                    evidence_owners[ref] = value['source_id']
+                        claims_nine = {claim['id']: claim for claim in blueprint_nine['claims']}
+                        need(len(claims_nine) == len(blueprint_nine['claims']))
+                        prior_ids = set(all_objects) | set(unit_metadata) | {value['id'] for candidate in candidates_four
+                            for category in ('screens', 'claims', 'actions', 'relationships', 'questions', 'assumptions')
+                            for value in candidate['blueprint'][category]}
+                        seen_nine = set()
+                        for category in ('claims', 'actions', 'relationships', 'questions', 'assumptions'):
+                            for value in blueprint_nine[category]:
+                                need(value['id'] not in prior_ids and value['id'] not in seen_nine)
+                                seen_nine.add(value['id'])
+                        for claim in claims_nine.values():
+                            refs = claim['evidence_refs']
+                            need(claim['status'] in ('proposal', 'unresolved') and refs and len(set(refs)) == len(refs)
+                                 and all(ref in evidence_owners for ref in refs)
+                                 and any(evidence_owners[ref] == claim['source_object_id'] for ref in refs))
+                        for category in ('actions', 'relationships'):
+                            for action in blueprint_nine[category]:
+                                need(action['claim_ids'] and len(set(action['claim_ids'])) == len(action['claim_ids'])
+                                     and set(action['claim_ids']) <= claims_nine.keys())
+                        for obj in owned_nine:
+                            if obj['kind'] != 'Trigger': continue
+                            units = [unit for unit in units_nine if unit['owner_id'] == obj['id']]
+                            need(units)
+                            for unit in units:
+                                covered = [claim['id'] for claim in claims_nine.values() if claim['source_object_id'] == obj['id']
+                                    and claim['kind'] == 'behavior.intent' and type(claim['value']) is str and claim['value'].strip()
+                                    and unit['id'] in claim['evidence_refs']]
+                                need(unit['id'] in supplied_nine and covered and any(set(covered).intersection(action['claim_ids'])
+                                     for action in blueprint_nine['actions']))
+                        # No reviewer, derived candidate, source-fact receipt, later
+                        # focus or fifth publication is silently added to closure.
+                        need(len(observed) == 153)
+                        epoch_directories |= fifth_dirs | {fifth_prefix + '/' + focus_nine}
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
@@ -1993,6 +2273,11 @@ def terminal_prototype_container_review(database, db, run):
 def terminal_prototype_partition_review(database, db, run):
     """Only epoch four's sealed CHANGES_REQUIRED stop; no retry/adoption grant."""
     return terminal_empty_prototype_mapping(database, db, run, partition_review_failure=True)
+
+
+def terminal_prototype_context_screen(database, db, run):
+    """Only head five's complete mapper-nine duplicate stop, never a projection."""
+    return terminal_empty_prototype_mapping(database, db, run, context_screen_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -3136,6 +3421,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_prototype_partition_review(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_partition_review_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_context_screen(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_context_screen_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

@@ -4,6 +4,38 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.17.0] - 2026-11-08
+
+### Review saved mapping without repeated generation
+
+- Remove an exact duplicate screen declaration only when a previously reviewed
+  source Block owns it and the current Item/Trigger references belong to that
+  same Block. Conflicts, uncertain ownership and behavioral changes still stop.
+- Preserve the raw mapping and every non-screen field. Record the derived
+  candidate and source-bound projection evidence; neither is an AI approval.
+- Add a bounded sixth continuation for the recognized pre-review stop. Reuse
+  the saved mapping, run its independent review first, and start the next mapping
+  only after approval. Earlier completed calls are not repeated.
+- Apply the same checked projection to eligible later mappings in this
+  continuation, with independent review still required for every candidate.
+- Show **Review saved mapping and continue**, separating reviewed sections,
+  a saved mapping awaiting review and sections not started. Original selections,
+  three fresh confirmations and uncertain-submission locks remain in place.
+- Preserve the missing fifth result publication as an absence, not a fabricated
+  result. Historical bytes, approval events, current authority and exact export
+  checks stay bound to the corresponding continuation.
+- Recognize only the complete, sealed pre-review stop for upgrade admission.
+  Evidence references for source links and dependencies use their canonical
+  occurrence IDs; admission grants neither approval nor retry permission.
+
+The projection and continuation have local source/API/browser tests using
+authored external responses. Separate read-only checks on retained real evidence
+confirmed the screen-only change and unchanged original files. These are not a
+completed real-file conversion, deployed release or human business acceptance.
+SQLcl validation, a unique import, runtime verification and the exact download
+still require their own evidence. See
+[saved mapping review](docs/saved-mapping-review.md).
+
 ## [0.16.1] - 2026-11-08
 
 ### Faster checked continuation requests

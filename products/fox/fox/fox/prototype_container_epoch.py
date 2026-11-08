@@ -251,9 +251,9 @@ def validate_record(job, snapshot, original, db=None):
     return _validate_record(job, snapshot, original, db, historical=False)
 
 
-def _validated_historical_four(job, snapshot, original, db):
+def _validated_historical_four(job, snapshot, original, db, *, historical_head=5):
     """Private predecessor reader for the sole known pre-DB rejected head4."""
-    return _validate_record(job, snapshot, original, db, historical=True)
+    return _validate_record(job, snapshot, original, db, historical=True, historical_head=historical_head)
 
 
 def _historical_active_focus(root, packet, plan, request, target, previous, record):
@@ -267,14 +267,14 @@ def _historical_active_focus(root, packet, plan, request, target, previous, reco
         lambda: active_focus(root, packet, plan, request, target, previous, record))
 
 
-def _validate_record(job, snapshot, original, db, *, historical):
+def _validate_record(job, snapshot, original, db, *, historical, historical_head=5):
     close = db is None
     if close:
         database = epochs._safe_path(job.parent.parent, 'fox.sqlite3')
         db = sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True)
     try:
         predecessor = clause.validate_record(job, snapshot, original, db, historical=True,
-                                             historical_head=5 if historical else 4)
+                                             historical_head=historical_head if historical else 4)
         record = technical_record(job / 'prototype-pipeline')
         epochs.same(epochs.read(job / RECORD), record)
         descriptor = _fresh_descriptor(job, snapshot, original, canonical_hash(predecessor))

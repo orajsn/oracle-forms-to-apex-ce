@@ -45,7 +45,7 @@ _PRIVATE_KEY = re.compile(r'(?:password|passwd|pwd|api[_-]?key|client[_-]?secret
 _ABSOLUTE = re.compile(r'(?i)(?:\b[A-Z]:[\\/]|/(?:Users|home|root|opt|var|tmp)/)')
 
 
-def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partition_epoch=False):
+def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partition_epoch=False, screen_epoch=False):
     """Exact inert epoch two/three paths, mirrored by the private receiver."""
     from .prototype_clause_proof import JSON_FILES
     if type(name) is not str or '\\' in name or ':' in name:
@@ -56,13 +56,15 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
     basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json'}
     if len(pieces) == 2 and _FOCUS.fullmatch(pieces[0]) and pieces[1] in basic:
         return True
-    if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003', 'epoch-000004', 'epoch-000005'):
+    if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003', 'epoch-000004', 'epoch-000005', 'epoch-000006'):
         return False
     if pieces[1] == 'epoch-000003' and not clause_epoch:
         return False
     if pieces[1] == 'epoch-000004' and not (container_epoch and clause_epoch):
         return False
     if pieces[1] == 'epoch-000005' and not (partition_epoch and container_epoch and clause_epoch):
+        return False
+    if pieces[1] == 'epoch-000006' and not (screen_epoch and partition_epoch and container_epoch and clause_epoch):
         return False
     tail = '/'.join(pieces[2:])
     if tail in {'epoch-record.json', 'predecessor-record.json'}:
@@ -80,6 +82,10 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
             return True
         if len(pieces) == 4 and _FOCUS.fullmatch(pieces[2]) and pieces[3] == 'full-audit-context.json':
             return True
+    if pieces[1] == 'epoch-000006':
+        if tail == 'screen-projection-receipt.json': return True
+        if len(pieces) == 4 and _FOCUS.fullmatch(pieces[2]) and pieces[3] in {
+            'full-audit-context.json', 'screen-input-candidate.json', 'screen-projection-receipt.json'}: return True
     if re.fullmatch(r'source-facts/focus-[a-f0-9]{24}\.json', tail):
         return True
     return len(pieces) == 4 and bool(_FOCUS.fullmatch(pieces[2])) and pieces[3] in basic | {
@@ -155,7 +161,8 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
                         and 'epochs/epoch-000002/epoch-record.json' in names)
         container_epoch = clause_epoch and 'epochs/epoch-000004/epoch-record.json' in names
         partition_epoch = container_epoch and 'epochs/epoch-000005/epoch-record.json' in names
-        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch, container_epoch=container_epoch, partition_epoch=partition_epoch) for name in names):
+        screen_epoch = partition_epoch and 'epochs/epoch-000006/epoch-record.json' in names
+        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch, container_epoch=container_epoch, partition_epoch=partition_epoch, screen_epoch=screen_epoch) for name in names):
             raise OpafError('Prototype authority provenance path is not an inert allowed member.')
     else:
         names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)

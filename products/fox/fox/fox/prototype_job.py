@@ -191,7 +191,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     validate_job_continuation(job, snapshot, raw)
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
-    current_record = partition.RECORD if (job / partition.RECORD).exists() else container.RECORD
+    from . import prototype_context_screen_epoch as screen
+    current_record = screen.RECORD if (job / screen.RECORD).exists() else partition.RECORD if (job / partition.RECORD).exists() else container.RECORD
     if (job / current_record).exists():
         from .prototype_result_publication import validate_publication
         from .prototype_mapping_epochs import read
@@ -240,7 +241,7 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record
     record = technical_record(job / 'prototype-pipeline')
-    if record is not None and record['epoch_number'] in (container.NUMBER, partition.NUMBER):
+    if record is not None and record['epoch_number'] in (container.NUMBER, partition.NUMBER, screen.NUMBER):
         from .prototype_result_publication import controlled_save_result
         controlled_save_result(job, result, record)
     else:
