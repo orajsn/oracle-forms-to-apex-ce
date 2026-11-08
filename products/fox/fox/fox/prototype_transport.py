@@ -53,7 +53,8 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
     if name in {*_ROOT_FILES, 'assessment.json'} or re.fullmatch(r'sources/source-00[0-3]\.xml', name):
         return True
     pieces = name.split('/')
-    basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json'}
+    basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json',
+             'mapper-metadata-task.json','reviewer-metadata-task.json'}
     if len(pieces) == 2 and _FOCUS.fullmatch(pieces[0]) and pieces[1] in basic:
         return True
     if len(pieces) < 3 or pieces[0] != 'epochs' or pieces[1] not in ('epoch-000002', 'epoch-000003', 'epoch-000004', 'epoch-000005', 'epoch-000006'):
@@ -83,6 +84,8 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
         if len(pieces) == 4 and _FOCUS.fullmatch(pieces[2]) and pieces[3] == 'full-audit-context.json':
             return True
     if pieces[1] == 'epoch-000006':
+        from .prototype_dsc_identity_repair import authority_member
+        if authority_member(name): return True
         from .prototype_review_correction import PREFIX as CORRECTION_PREFIX, FILES as CORRECTION_FILES
         if name in {CORRECTION_PREFIX + '/' + item for item in CORRECTION_FILES}: return True
         if tail == 'screen-projection-receipt.json': return True
@@ -169,6 +172,9 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
     else:
         names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)
         for row in review_index['focuses']:
+            for role in ('mapper','reviewer'):
+                if role+'-metadata-task_sha256' in row:
+                    names.append(row['focus_id']+'/'+role+'-metadata-task.json')
             if 'mapper-resolution_sha256' in row:
                 names.extend(f'{row["focus_id"]}/{name}' for name in ('mapper-resolved.json', 'mapper-resolution.json'))
     if len(names) > MAX_AUTHORITY_FILES:

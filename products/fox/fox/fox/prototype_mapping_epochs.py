@@ -113,6 +113,8 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     from . import prototype_partition_review_epoch as partition
     from . import prototype_context_screen_epoch as screen
     from . import prototype_review_correction as correction
+    from . import prototype_dsc_identity_repair as dsc
+    dsc_repair = dsc.present(job/'prototype-pipeline')
     screen_epoch = record is not None and record.get('epoch_number') == screen.NUMBER
     partition_epoch = record is not None and record.get('epoch_number') in (partition.NUMBER, screen.NUMBER)
     container_epoch = record is not None and record.get('epoch_number') in (container.NUMBER, partition.NUMBER, screen.NUMBER)
@@ -131,6 +133,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     if screen_epoch:
         root_files.add(screen.RECORD)
         root_files.update(screen.RESULT_FILES)
+        if dsc_repair: root_files.update(dsc.RESULT_FILES)
     pipeline_files = {'binding.json', 'sources-manifest.json', 'packet.json', 'assessment.json',
         'merged-blueprint.json', 'native-plan.json', 'review-index.json', 'rendered.json', 'candidate-apexlang.zip',
         *{stage + suffix for stage in ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
@@ -138,6 +141,13 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     focus_files = {'request.json', 'mapper-request.json', 'mapper.json', 'mapper-intent.json', 'mapper-target.json',
         'reviewer-request.json', 'reviewer.json', 'reviewer-intent.json', 'reviewer-target.json', 'review-receipt.json',
         'mapper-resolved.json', 'mapper-resolution.json', 'projection-candidate.json', 'projection-receipt.json'}
+    task_binding=job/'prototype-pipeline/binding.json'
+    declared=read(task_binding) if task_binding.exists() else {}
+    policy=declared.get('metadata_task_policy')
+    if 'metadata_task_policy' in declared and policy!=dsc.TASK_POLICY:
+        raise OpafError('Unknown epoch metadata task policy.')
+    if policy==dsc.TASK_POLICY or dsc_repair:
+        focus_files.update({'mapper-metadata-task.json','reviewer-metadata-task.json'})
     pending = [job]
     while pending:
         for path in pending.pop().iterdir():
@@ -157,6 +167,8 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or screen_epoch and rel in screen.DIRECTORIES
                     or screen_epoch and rel in {'prototype-pipeline/' + correction.PREFIX,
                         'prototype-pipeline/' + correction.ATTEMPT}
+                    or dsc_repair and (rel in {dsc.RESULT_BASE,'prototype-pipeline/'+dsc.PREFIX}
+                        or re.fullmatch('prototype-pipeline/'+dsc.PREFIX+r'/focus-[a-f0-9]{24}',rel))
                     or re.fullmatch(r'prototype-pipeline/(?:' + prefixes + r'/)?focus-[a-f0-9]{24}', rel))
                 if not valid or initial and rel.startswith(('mapping-epochs', 'prototype-pipeline/epochs')):
                     raise OpafError('Unknown epoch directory or competing head requires reconciliation.')
@@ -198,6 +210,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or partition_epoch and tail in {partition.PREFIX + '/' + name for name in partition.TECHNICAL_FILES}
                     or screen_epoch and tail in {screen.PREFIX + '/' + name for name in screen.TECHNICAL_FILES}
                     or screen_epoch and tail in {correction.PREFIX + '/' + name for name in correction.FILES}
+                    or dsc_repair and dsc.authority_member(tail)
                     or partition_epoch and re.fullmatch((screen.PREFIX if screen_epoch else partition.PREFIX) + r'/focus-[a-f0-9]{24}/full-audit-context\.json', tail)
                     or screen_epoch and re.fullmatch(screen.PREFIX + r'/focus-[a-f0-9]{24}/(?:' + '|'.join(re.escape(n) for n in screen.SCREEN_FILES) + ')', tail)
                     or re.fullmatch(prefixes + r'/source-facts/focus-[a-f0-9]{24}\.json', tail))
@@ -485,6 +498,7 @@ def reconstruct(job, snapshot, original, target):
         'focus_plan_sha256': selected['focus_plan_sha256'], 'profile_sha256': canonical_hash(target['opaf']['roles']),
         'approved_policy_id': selected['approved_policy_id']}
     if selected['schema_version'] == 2: binding['max_owned_objects'] = 32
+    if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
     same(read(root / 'binding.json'), binding)
     same(read(root / 'packet.json'), packet)
     same(read(root / 'sources-manifest.json'), {'source_binding': selected['source_binding'],

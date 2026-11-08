@@ -19,12 +19,23 @@ secrets. See [activation boundary](paired-project-activation.md).
 
 ## Converter QA dependency closure
 
-The converter image must also contain the fixed six-file pure QA namespace:
+The converter image contains an eleven-file QA namespace:
 `__init__.py`, `intake.py`, `native_source.py`, `project_conversion.py`,
-`native_qa_plan.py` and `project_qa_plan.py`. These are byte-for-byte projections
+`native_qa_plan.py`, `project_qa_plan.py`, `native_verification.py`,
+`native_verification_policy.py`, `native_pipeline.py`, `opaf.py` and
+`project_verification.py`. These are byte-for-byte projections
 of the same reviewed FOX sources, not the frontend application or a per-job
-installation. The corrected build context copies that namespace and imports
-the project QA derivation functions during the image build.
+installation. The build context copies that namespace and imports the project
+QA derivation functions during the image build. This is a limited projection,
+not a general FOX runtime: importing these files does not prove that every
+function-local dependency or verification path is available.
+
+The prototype converter calls FOX through `PrototypeAuthorityClient` over HTTPS.
+The column-identity repair, mapping history and publication checks execute in
+FOX. Their modules belong in the FOX image, not this limited converter namespace.
+Verify the gateway/client in the converter image and repair/authority modules in
+the FOX image against the same measured release; checkout imports are not image
+verification.
 
 Archive validation checks the complete projection against its independently
 pinned source bundle. Historical archives without this projection still

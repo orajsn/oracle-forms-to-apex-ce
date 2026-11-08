@@ -4,6 +4,33 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.19.0] - 2026-11-08
+
+### Recognize saved Forms column names and continue
+
+- Read direct `DSCName` metadata from the exact saved source when older facts
+  omitted a DataSourceColumn name. Preserve historical source and object IDs;
+  reject ambiguous, conflicting or unsupported identity metadata.
+- Offer **Review recognized names and continue** for the bounded eligible
+  retained stop. Project only missing-name explanations, not dispositions,
+  business behavior or SQL. Each changed candidate requires a fresh independent
+  review; completed mapping calls and original negative results remain intact.
+- Show unchanged reviewed sections, mappings needing fresh review and sections
+  not started. Require the displayed processing confirmations and reconcile
+  recorded or uncertain submissions rather than automatically repeating them.
+- Bind supplemental model input to the source and immutable task policy.
+  Preserve legacy requests and reconstruct modern historical input separately;
+  unexpected metadata sidecars do not establish processing provenance.
+- Keep deterministic APEX validation, current authority, unique import, runtime
+  verification and exact export checks on the connected path. Name recognition
+  is not business-logic conversion or human acceptance.
+- Clarify the user recovery path and the separate FOX/converter image roles.
+
+Local connected HTTP tests exercise fresh review through output download using
+authored model, SQLcl and browser replies. The combined local UI suite passed
+21 tests with no skips. These are not live Oracle or real-file conversion proof.
+Publication, deployment and the retained real run require separate verification.
+
 ## [0.18.1] - 2026-11-08
 
 ### Show the saved run's actual next step

@@ -1,12 +1,12 @@
 {
-  "version": "0.18.1",
+  "version": "0.19.0",
   "released_on": "2026-11-08",
-  "title": "Show the saved run's actual next step",
+  "title": "Recognize saved Forms column names and continue",
   "changes": [
-    "Show waiting, processing or attention states without implying that an APEX output already exists.",
-    "Route recorded runs to their existing progress or output controls without starting processing.",
-    "Keep a ready current source's generation action ahead of older source-version history.",
-    "Preserve separate generation, technical verification and human business-acceptance states."
+    "Recognize direct DSCName metadata from the exact saved Forms source without changing historical facts or source identifiers.",
+    "Offer a bounded same-run repair with fresh independent review of changed mapping explanations; preserve original results and completed mapping calls.",
+    "Show unchanged reviewed sections, mappings needing review and unstarted sections beside explicit processing confirmations.",
+    "Carry source-bound name metadata into newly authorized model tasks while preserving technical validation and separate business acceptance."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

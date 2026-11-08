@@ -72,6 +72,17 @@ confirmation. See [review-scope correction](review-scope-correction.md). Genuine
 semantic rejection and unknown operations do not become approvals. Other failures
 still need their applicable recovery path; QA tools stay outside the business UI.
 
+If **Review recognized names and continue** appears, FOX found column names
+already stored in the original Form but missed by the older analysis. You do
+not need to upload another file for that naming issue. The panel separates
+unchanged saved sections, mappings needing a fresh review, and sections not yet
+started. Confirm the displayed processing scope to continue the same run.
+FOX preserves the original mappings and reviews; it does not repeat completed
+mapping calls or turn an old negative review into an approval. Further processing
+requires fresh independent approval and the usual APEX validation. If submission
+is uncertain, check the existing run rather than submitting again. This bounded
+repair does not resolve missing business logic, libraries or database definitions.
+
 Check the installed version and the evidence for the selected run. Local tests,
 source publication and a healthy deployment do not establish end-to-end conversion
 readiness. Earlier failed observations remain in run history.

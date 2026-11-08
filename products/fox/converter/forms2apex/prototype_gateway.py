@@ -41,11 +41,12 @@ _AUTHORITY_ROOT_FILES = {"binding.json", "sources-manifest.json", "packet.json",
                          "merged-blueprint.json", "native-plan.json", "rendered.json", "candidate-apexlang.zip"}
 _FOCUS_FILES = ("request", "mapper", "mapper-target", "reviewer", "reviewer-target", "review-receipt")
 _RESOLUTION_FILES = ("mapper-resolved", "mapper-resolution")
-_EPOCH_FILES = ('mapper-request', 'reviewer-request', 'projection-candidate', 'projection-receipt')
+_METADATA_FILES = ('mapper-metadata-task','reviewer-metadata-task')
+_EPOCH_FILES = ('mapper-request', 'reviewer-request', 'projection-candidate', 'projection-receipt', *_METADATA_FILES)
 _LEGACY_AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-                                  + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES) + r")\.json)\Z")
+                                  + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES) + r")\.json)\Z")
 _AUTHORITY_PATH = re.compile(r"(?:sources/source-00[0-3]\.xml|focus-[a-f0-9]{24}/(?:"
-    + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + ('mapper-intent', 'reviewer-intent')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
+    + "|".join(_FOCUS_FILES + _RESOLUTION_FILES + _METADATA_FILES + ('mapper-intent', 'reviewer-intent')) + r")\.json|assessment\.json|epochs/epoch-000002/(?:"
     r'(?:epoch-record|predecessor-record)\.json|source-facts/focus-[a-f0-9]{24}\.json|focus-[a-f0-9]{24}/(?:'
     + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES + ('mapper-intent', 'reviewer-intent')) + r')\.json))\Z')
 # Explicit epoch three adds ONLY its reviewed fixed JSON contract. It never
@@ -82,8 +83,10 @@ _SCREEN_FIXED_PATHS = {'epochs/epoch-000006/' + name for name in (
 _SCREEN_FIXED_PATHS |= {'epochs/epoch-000006/review-correction/' + name for name in (
     'authorization.json', 'attempt-000001/reviewer-request.json', 'attempt-000001/reviewer-target.json',
     'attempt-000001/reviewer-intent.json', 'attempt-000001/reviewer.json', 'attempt-000001/review-receipt.json')}
+_SCREEN_FIXED_PATHS |= {'epochs/epoch-000006/dsc-identity-repair/'+name for name in ('authorization.json','supplement.json','historical-publication.json')}
+_DSC_FOCUS_PATH = re.compile(r'epochs/epoch-000006/dsc-identity-repair/focus-[a-f0-9]{24}/(?:projection-candidate|projection-receipt|reviewer-request|reviewer-target|reviewer-intent|reviewer|review-receipt)\.json\Z')
 _SCREEN_FOCUS_PATH = re.compile(r'epochs/epoch-000006/(?:source-facts/focus-[a-f0-9]{24}\.json|'
-    r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES
+    r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES + _METADATA_FILES
     + ('mapper-intent', 'reviewer-intent', 'full-audit-context', 'screen-input-candidate', 'screen-projection-receipt')) + r')\.json)\Z')
 
 
@@ -137,7 +140,7 @@ def _authority_descriptor(bundle, *, encoded):
               or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))
               or container_format and (name in _CONTAINER_FIXED_PATHS or _CONTAINER_FOCUS_PATH.fullmatch(name))
               or partition_format and (name in _PARTITION_FIXED_PATHS or _PARTITION_FOCUS_PATH.fullmatch(name))
-              or screen_format and (name in _SCREEN_FIXED_PATHS or _SCREEN_FOCUS_PATH.fullmatch(name))),
+              or screen_format and (name in _SCREEN_FIXED_PATHS or _SCREEN_FOCUS_PATH.fullmatch(name) or _DSC_FOCUS_PATH.fullmatch(name))),
               "PROTOTYPE_AUTHORITY_PATH_NOT_ALLOWED")
         _need(type(row["bytes"]) is int and 0 < row["bytes"] <= 20_000_000
               and type(row["sha256"]) is str and _SHA.fullmatch(row["sha256"]),
@@ -195,7 +198,9 @@ def _check_authority_members(descriptor, members):
         resolution = {kind + '_sha256' for kind in _RESOLUTION_FILES} & row.keys()
         _need(not resolution or resolution == {kind + '_sha256' for kind in _RESOLUTION_FILES},
               'PROTOTYPE_AUTHORITY_RESOLUTION_INCOMPLETE')
-        for kind in _FOCUS_FILES + (_RESOLUTION_FILES if resolution else ()):
+        metadata = {kind+'_sha256' for kind in _METADATA_FILES}&row.keys()
+        _need(not metadata or metadata=={kind+'_sha256' for kind in _METADATA_FILES},'PROTOTYPE_METADATA_TASK_INCOMPLETE')
+        for kind in _FOCUS_FILES + (_RESOLUTION_FILES if resolution else ()) + (_METADATA_FILES if metadata else ()):
             name = row["focus_id"] + "/" + kind + ".json"
             _need(name in members and digest(_authority_json(members[name])) == row.get(kind + "_sha256"),
                   "PROTOTYPE_AUTHORITY_FOCUS_BYTES_CHANGED")

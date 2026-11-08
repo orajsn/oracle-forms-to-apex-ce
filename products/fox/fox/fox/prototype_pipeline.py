@@ -113,6 +113,8 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
     if client is not None:
         from .prototype_read_scope import forbid_execution
         forbid_execution()
+    from .prototype_dsc_identity_repair import model_task
+    request = model_task(directory,name,request,write=client is not None)
     complete, pending = directory / (name + '.json'), directory / (name + '-intent.json')
     if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode('utf-8')) > 650_000:
         raise OpafError('Prototype model request exceeds the transport bound; select a smaller explicit focus.')
@@ -187,10 +189,17 @@ def _review_index(checkpoints, plan):
                   **{name + '_sha256': canonical_hash(_json(child / (name + '.json')))
                      for name in ('request', 'mapper', 'mapper-target', 'reviewer', 'reviewer-target', 'review-receipt')}}
         raw = _json(child / 'mapper.json')['output']
-        _, receipt = resolved_mapper(child, request, raw)
+        candidate, receipt = resolved_mapper(child, request, raw)
         if receipt is not None:
             result.update({name[:-5] + '_sha256': canonical_hash(_json(child / name))
                            for name in RESOLUTION_ARTIFACTS})
+        for role in ('mapper','reviewer'):
+            from .prototype_dsc_identity_repair import model_task
+            payload=request if role=='mapper' else {
+                'request':request,'candidate':candidate,'candidate_sha256':canonical_hash(candidate)}
+            actual=model_task(child,role,payload,write=False)
+            if actual is not payload:
+                result[role+'-metadata-task_sha256']=canonical_hash(actual)
         return result
     return {'source_binding': plan['source_binding'], 'focus_plan_sha256': canonical_hash(plan),
             'focuses': [row(request) for request in plan['requests']]}
@@ -336,7 +345,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            project_id, project_name, expected_source_binding,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
-                           converter_adapter=None, renderer=None, focus_schema_version=1):
+                           converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -358,6 +367,11 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
             or profile['mapper'].get('workflow_id', '').upper() == profile['reviewer'].get('workflow_id', '').upper()):
         raise OpafError('Prototype requires separately configured mapper and reviewer workflows.')
     packet = local_packet(documents)
+    if (job/'source-snapshot.json').is_file():
+        persisted_policy=_json(job/'source-snapshot.json').get('prototype',{}).get('metadata_task_policy')
+        if metadata_task_policy is None: metadata_task_policy=persisted_policy
+        elif metadata_task_policy!=persisted_policy:
+            raise OpafError('Metadata task policy differs from the immutable source snapshot.')
     strategy = {'schema_version': focus_schema_version}
     if type(focus_schema_version) is int and focus_schema_version == 2:
         strategy['max_owned_objects'] = FOCUS_MAX_OWNED_OBJECTS
@@ -372,6 +386,10 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'focus_plan_sha256': canonical_hash(plan),
                'profile_sha256': canonical_hash({name: profile[name] for name in ('mapper', 'reviewer')}),
                'approved_policy_id': approved_policy_id}
+    if metadata_task_policy is not None:
+        from .prototype_dsc_identity_repair import TASK_POLICY
+        if metadata_task_policy != TASK_POLICY: raise OpafError('Unknown immutable prototype metadata task policy.')
+        binding['metadata_task_policy'] = metadata_task_policy
     _save_once(checkpoints / 'binding.json', binding)
     sources = checkpoints / 'sources'
     _directory(sources)
@@ -406,6 +424,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     current_epoch = technical_record(checkpoints)
     if current_epoch is not None and current_epoch['epoch_number'] in (CONTAINER_EPOCH, PARTITION_EPOCH, SCREEN_EPOCH):
         result['mapping_epoch_sha256'] = canonical_hash(current_epoch)
+    from . import prototype_dsc_identity_repair as dsc
+    if dsc.present(checkpoints): result['dsc_identity_repair_sha256']=canonical_hash(_json(checkpoints/dsc.RECORD))
     candidates, reviews = [], []
     identity = {'job_id': job.name, 'source_hash': packet['source_binding']}
     approval_context = {**binding, 'selected_chunk_hashes': dict(approved_chunk_hashes)}

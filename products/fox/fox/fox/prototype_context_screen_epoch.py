@@ -289,6 +289,11 @@ def validate_record(job, snapshot, original, db=None):
         if correction.present(job / 'prototype-pipeline'):
             child = correction.validate_authorization(job / 'prototype-pipeline', record, packet, plan, target, previous, full_job=True)[0]
         correction.validate_event(job / 'prototype-pipeline', child, db)
+        from . import prototype_dsc_identity_repair as dsc
+        repair = None
+        if dsc.present(job/'prototype-pipeline'):
+            repair=dsc.validate_authorization(job/'prototype-pipeline',record,packet,plan,target,full_job=True)[0]
+        dsc.validate_event(job/'prototype-pipeline',repair,db)
         epochs._before_unchanged(job, {n: d for n, d in record['before_files'].items() if n != 'prototype-result.json'})
         from .prototype_result_publication import validate_publication
         validate_publication(job, record)
@@ -320,6 +325,13 @@ def _projection(root, packet, plan, request, target, previous, candidate, raw, b
 
 
 def active_focus(root, packet, plan, request, target, previous, record, *, runtime=None, preview=False):
+    from . import prototype_dsc_identity_repair as dsc
+    if dsc.present(root):
+        return dsc.active_focus(root,packet,plan,request,target,previous,record,runtime=runtime,preview=preview)
+    return _legacy_active_focus(root,packet,plan,request,target,previous,record,runtime=runtime,preview=preview)
+
+
+def _legacy_active_focus(root, packet, plan, request, target, previous, record, *, runtime=None, preview=False):
     index = next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id'])
     if len(previous) != index: _fail()
     if previous: container._prefix(packet, plan, previous, target)
@@ -379,6 +391,9 @@ def active_focus(root, packet, plan, request, target, previous, record, *, runti
 
 
 def model_fence(job, snapshot, record):
+    from . import prototype_dsc_identity_repair as dsc
+    if dsc.present(job/'prototype-pipeline'):
+        return dsc.model_fence(job,snapshot,record)
     root = job / 'prototype-pipeline'
     target = epochs.read(root / record['plan']['repair_focus_id'] / 'mapper-target.json')
     packet, plan = epochs.reconstruct(job, snapshot, (job / 'source-snapshot.json').read_bytes(), target)

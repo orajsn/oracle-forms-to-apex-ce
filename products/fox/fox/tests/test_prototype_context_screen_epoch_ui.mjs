@@ -17,25 +17,27 @@ test('saved context-screen mapping waits for independent review without repeatin
  const built=await build({stdin:{contents:code,resolveDir:root,loader:'tsx'},bundle:true,write:false,outfile:'preview.js',format:'iife',platform:'browser',logLevel:'silent'});
  const browser=await chromium.launch({channel:'msedge',headless:true});
  try{
-  const page=await browser.newPage({viewport:{width:1440,height:900}});let plan={...fixture},gets=0,posts=0,body,hold=false,release,mode='unknown';
+  const page=await browser.newPage({viewport:{width:1440,height:900}});let plan={...fixture},gets=0,posts=0,body,hold=false,release,held,heldEntered,mode='unknown';
+  const beginHold=()=>{hold=true;let timer;const entered=new Promise(resolve=>{heldEntered=resolve;});return Promise.race([entered,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Held request did not arrive")),10000);})]).finally(()=>clearTimeout(timer));};
   await page.route('**/*',async route=>{
    const url=route.request().url();
    if(url==='http://localhost/')return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
    if(url.endsWith('/review-correction'))return route.fulfill({json:{eligible:false,correction_recorded:false}});
-   if(url.endsWith('/mapping-epochs/next')){gets++;if(hold)await new Promise(r=>release=r);return route.fulfill({json:plan});}
+   if(url.endsWith('/mapping-epochs/next')){gets++;if(hold)await new Promise(r=>{release=r;heldEntered();});return route.fulfill({json:plan});}
    if(url.endsWith('/prototype-assessment'))return route.fulfill({json:assessment});
    if(url.endsWith('/mapping-epochs')){posts++;body=route.request().postDataJSON();if(mode==='unknown')return route.abort();return route.fulfill({status:202,json:{id:run,state:'QUEUED',continued:true,epoch_number:6,conversion_profile:'native-blueprint-prototype-v1'}});}
    return route.abort();
   });
+  await page.route('**/dsc-identity-repair',route=>route.fulfill({json:{schema_version:1,scope:'fox-prototype-dsc-identity-repair-v1',project_id:'p',run_id:run,source_hash:h,source_binding:'b'.repeat(64),selected_source_set_id:'ss',target_profile_sha256:'c'.repeat(64),approved_chunk_hashes:{one:h},eligible:false,identity_repair_recorded:false,reason:'Check existing repairs.',next_action:'check_existing_repairs'}}));
   const boot=async()=>{await page.goto('http://localhost/');await page.addStyleTag({content:built.outputFiles.find(f=>f.path.endsWith('.css')).text});await page.addScriptTag({content:built.outputFiles.find(f=>f.path.endsWith('.js')).text});};
   const check=async()=>{await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('heading',{name:'Review saved mapping and continue'}).waitFor();};
   const scope=async()=>{await page.getByRole('button',{name:'Review prototype scope'}).click();await page.getByText('Prototype scope',{exact:true}).waitFor();};
   const boxes=()=>page.getByRole('group',{name:'Confirm before processing'}).getByRole('checkbox');
   const action=()=>page.getByRole('button',{name:'Review saved mapping and continue'});
-  await boot();assert.equal(gets,0);assert.equal(posts,0);await scope();hold=true;
+  await boot();assert.equal(gets,0);assert.equal(posts,0);await scope();held=beginHold();
   await page.getByRole('button',{name:'Check repair plan'}).click();await page.waitForFunction(()=>document.body.textContent.includes('Checking repair plan'));
   for(const box of await boxes().all())assert.equal(await box.isDisabled(),true);
-  release();hold=false;await page.getByRole('heading',{name:'Review saved mapping and continue'}).waitFor();
+  await held;release();hold=false;await page.getByRole('heading',{name:'Review saved mapping and continue'}).waitFor();
   assert.equal(await page.getByText(/completed mapping and reviews will not run again/).count(),1);
   assert.equal(await page.getByText(/An APEX file is not ready yet/).count(),1);
   assert.equal(await page.getByText('One saved mapping passed source checks and is awaiting independent review. 17 sections have not started yet.').count(),1);
@@ -55,7 +57,7 @@ test('saved context-screen mapping waits for independent review without repeatin
   // These are authored API replies, not hosted proof-adoption evidence.
   const invalid=[{expected_screen_projection_sha256:undefined},{expected_screen_projection_sha256:'bad'},{epoch_number:2},{epoch_number:3},{epoch_number:4},{epoch_number:5},{epoch_number:7},{strategy:'unknown'},{saved_mapping_focuses:0},{saved_mapping_focuses:true},{saved_mapping_source_checked:false},{saved_mapping_source_checked:1},{pending_review_focus_id:''},{pending_review_focus_id:'x'.repeat(129)},{unstarted_focus_count:-1},{unstarted_focus_count:true},{unstarted_focus_count:16},{projected_context_screens:0},{projected_context_screens:true},{new_corrective_model_calls:0},{new_corrective_model_calls:true},{repeated_mapper_calls:1},{repeated_reviewer_calls:1},{ai_approved_focuses:9},{source_checked_focuses:9},{source_fact_violations:1},{planned_corrective_operations:[]},{planned_corrective_operations:['mapper_repair']},{expected_clause_proof_sha256:binding},{analysis_role:{}},{new_clause_analysis_calls:0},{repeated_clause_review_calls:0},{expected_container_proof_sha256:binding},{container_corrections:1},{corrective_projection_review_calls:1},{expected_partition_proof_sha256:binding},{reused_review_focuses:1}];
   for(const patch of invalid){plan={...fixture,...patch};await boot();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(await action().count(),0);assert.equal(posts,1);}
-  plan={...fixture};await boot();hold=true;await page.getByRole('button',{name:'Check repair plan'}).click();await page.waitForFunction(()=>document.body.textContent.includes('Checking repair plan'));await page.evaluate(()=>window.change());release();hold=false;await page.waitForTimeout(100);assert.equal(await action().count(),0);
+  plan={...fixture};await boot();held=beginHold();await page.getByRole('button',{name:'Check repair plan'}).click();await page.waitForFunction(()=>document.body.textContent.includes('Checking repair plan'));await held;await page.evaluate(()=>window.change());release();hold=false;await page.waitForTimeout(100);assert.equal(await action().count(),0);
   await boot();await check();assessment.target_profile_sha256=binding;await scope();await page.getByText('The source or target changed. Check the repair plan again.').waitFor();assert.equal(await action().count(),0);assessment.target_profile_sha256=target;
   await boot();plan={...fixture,eligible:false,epoch_recorded:true};await check();assert.equal(await action().count(),0);assert.equal(await page.getByRole('button',{name:'Check saved progress'}).count(),0);assert.equal(posts,1);
   plan={...fixture};await boot();mode='success';await check();await scope();for(const box of await boxes().all())await box.check();await action().click();await page.getByText('Check the saved run status before taking any further action. Do not submit again.').waitFor();assert.equal(posts,2);assert.equal(await action().isDisabled(),true);

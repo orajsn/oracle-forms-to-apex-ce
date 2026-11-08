@@ -70,7 +70,7 @@ def _result_module(record):
     _fail()
 
 
-def _reconstruct_binding(job, record, result, *, historical_four=False):
+def _reconstruct_binding(job, record, result, *, historical_four=False, historical_dsc=False):
     from .prototype_pipeline import _artifact_json, _check_converter_receipt, CONVERTER_STAGES
     root = job / 'prototype-pipeline'
     # Exact reconstruction, not acceptance of a self-hashed caller dictionary.
@@ -85,10 +85,16 @@ def _reconstruct_binding(job, record, result, *, historical_four=False):
         'source_binding': packet['source_binding'], 'status': 'RUNNING', 'stage': 'mapping', 'facts': facts,
         'assessment': epochs.read(root / 'assessment.json'), 'artifacts': {'checkpoint_directory': str(root)}}
     expected['mapping_epoch_sha256'] = canonical_hash(record)
+    from . import prototype_dsc_identity_repair as dsc
+    active_dsc=(record['epoch_number']==6 and dsc.present(root)
+        and not historical_dsc and not historical_four)
+    if active_dsc: expected['dsc_identity_repair_sha256']=canonical_hash(epochs.read(root/dsc.RECORD))
     views = []
     proof_files = {}
     for request in plan['requests']:
-        if historical_four:
+        if historical_dsc:
+            view=dsc.historical_focus(root,packet,plan,request,target,views,record)
+        elif historical_four:
             # Explicit fixed predecessor, deliberately bypassing current-head
             # active-view caches. No HTTP selector or path can request this.
             from .prototype_container_epoch import _historical_active_focus
@@ -137,7 +143,7 @@ def _reconstruct_binding(job, record, result, *, historical_four=False):
     epochs.same(result, expected)
     proof_key = ('screen_projection_sha256' if record['epoch_number'] == 6 else
         'partition_proof_sha256' if record['epoch_number'] == 5 else 'container_proof_sha256')
-    return {'schema_version': 1, 'scope': 'fox-prototype-epoch-result-publication-v1',
+    binding = {'schema_version': 1, 'scope': 'fox-prototype-epoch-result-publication-v1',
         'job_id': job.name, 'project_id': record['project_id'], 'source_hash': record['source_hash'],
         'source_binding': record['source_binding'], 'epoch_sha256': canonical_hash(record),
         proof_key: record[proof_key], 'result_sha256': canonical_hash(expected),
@@ -145,6 +151,10 @@ def _reconstruct_binding(job, record, result, *, historical_four=False):
         'status': expected['status'], 'stage': expected['stage'],
         'active_proofs_sha256': canonical_hash([view['proof'] for view in views]),
         'stage_files': proof_files, 'previous_result': record['plan']['previous_result']}
+    if active_dsc:
+        binding['dsc_identity_repair_sha256']=expected['dsc_identity_repair_sha256']
+        binding['previous_result']=epochs.read(root/dsc.RECORD)['plan']['previous_result']
+    return binding
 
 
 def validate_publication(job, record):
@@ -154,6 +164,9 @@ def validate_publication(job, record):
 
 
 def _validate_publication(job, record):
+    from . import prototype_dsc_identity_repair as dsc
+    if record['epoch_number']==6 and dsc.present(job/'prototype-pipeline'):
+        return dsc.validate_publication(job,record)
     RESULT_BASE = _result_module(record).RESULT_BASE
     pin = _validate_previous(job, record)
     latest = _raw(job / 'prototype-result.json')
@@ -231,6 +244,8 @@ def _validate_historical_four_publication(job, record):
 def controlled_save_result(job, result, record):
     """Validate -> history -> binding -> atomic latest; any crash fails closed."""
     RESULT_BASE = _result_module(record).RESULT_BASE
+    from . import prototype_dsc_identity_repair as dsc
+    if record['epoch_number']==6 and dsc.present(job/'prototype-pipeline'): RESULT_BASE=dsc.RESULT_BASE
     from .native_pipeline import _save_once, _sync
     if validate_publication(job, record) is not None:
         _fail()  # A publication is never a permit to rerun this epoch.

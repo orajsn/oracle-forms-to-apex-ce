@@ -105,6 +105,11 @@ def inspect_continuation(job, snapshot, original, target):
         'profile_sha256': canonical_hash(target['opaf']['roles']), 'approved_policy_id': selected['approved_policy_id']}
     if selected['schema_version'] == 2:
         expected['max_owned_objects'] = bound_focus_limit(selected)
+    metadata_policy = selected.get('metadata_task_policy')
+    if 'metadata_task_policy' in selected:
+        from .prototype_dsc_identity_repair import TASK_POLICY
+        if metadata_policy != TASK_POLICY: raise OpafError('Unknown continuation metadata task policy.')
+        expected['metadata_task_policy'] = metadata_policy
     manifest = {'source_binding': selected['source_binding'], 'selected_chunk_hashes': selected['approved_chunk_hashes'],
         'files': [{'name': name, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)} for name, raw in documents]}
     if (binding != expected or _json(root / 'sources-manifest.json') != manifest
@@ -139,6 +144,8 @@ def inspect_continuation(job, snapshot, original, target):
             allowed.update(relative + '/' + name for name in ('request.json', 'mapper.json', 'mapper-target.json',
                 'mapper-intent.json', 'reviewer.json', 'reviewer-target.json', 'reviewer-intent.json',
                 'review-receipt.json', 'mapper-resolved.json', 'mapper-resolution.json'))
+            if metadata_policy:
+                allowed.update(relative+'/'+name+'-metadata-task.json' for name in ('mapper','reviewer'))
             if _json(child / 'request.json') != request or _json(child / 'mapper-target.json') != target:
                 raise OpafError('Continued focus request or target changed.')
             raw, mapper = _role(child, 'mapper', None, target['opaf']['roles']['mapper'], request, identity, None, None, None)
@@ -195,6 +202,7 @@ def inspect_continuation(job, snapshot, original, target):
         relative = 'prototype-pipeline/' + request['focus_id']
         allowed.add(relative)
         allowed.update(relative + '/' + name for name in ('request.json', 'mapper-intent.json', 'mapper.json', 'mapper-target.json'))
+        if metadata_policy: allowed.add(relative+'/mapper-metadata-task.json')
         if _json(child / 'request.json') != request or _json(child / 'mapper-target.json') != target:
             raise OpafError('Continuation mapper request or target changed.')
         saved = _json(child / 'mapper.json')
@@ -207,6 +215,7 @@ def inspect_continuation(job, snapshot, original, target):
                 resolved_mapper(child, request, raw)
                 allowed.update(relative + '/' + name for name in ('mapper-resolved.json', 'mapper-resolution.json'))
             allowed.update(relative + '/' + name for name in ('reviewer-target.json', 'reviewer-intent.json', 'reviewer.json', 'review-receipt.json'))
+            if metadata_policy: allowed.add(relative+'/reviewer-metadata-task.json')
             review_request = {'request': request, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)}
             review, reviewer = _role(child, 'reviewer', None, target['opaf']['roles']['reviewer'],
                 review_request, identity, None, None, None)

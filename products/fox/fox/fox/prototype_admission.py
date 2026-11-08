@@ -59,7 +59,7 @@ def describe_prototype_sources(documents):
 def prepare_prototype_admission(documents, *, expected_source_binding,
                                 approved_chunk_hashes, target_profile_sha256,
                                 approved_redacted_source, approved_external_ai,
-                                approved_prototype_scope, schema_version=1):
+                                approved_prototype_scope, schema_version=1, metadata_task_policy=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
@@ -78,6 +78,10 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
     limit = bound_focus_limit(strategy)
     plan = build_focus_plan(documents, expected_source_binding=expected_source_binding,
                             approved_chunk_hashes=approved_chunk_hashes, max_owned_objects=limit)
+    if metadata_task_policy is not None:
+        from .prototype_dsc_identity_repair import TASK_POLICY
+        if metadata_task_policy != TASK_POLICY: raise ValueError('Unknown metadata task policy.')
+        strategy['metadata_task_policy'] = metadata_task_policy
     return {
         'prototype': {
             **strategy,

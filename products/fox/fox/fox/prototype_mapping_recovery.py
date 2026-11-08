@@ -89,6 +89,10 @@ def mapping_recovery_proof(job: Path, snapshot, original: bytes):
     allowed.update(f'prototype-pipeline/sources/source-{i:03}.xml' for i in range(len(docs)))
     allowed.update(focus_dir + '/' + name for name in
                    ('request.json', 'mapper-target.json', 'mapper-intent.json', 'mapper.json'))
+    if 'metadata_task_policy' in selected:
+        from .prototype_dsc_identity_repair import TASK_POLICY
+        if selected['metadata_task_policy'] != TASK_POLICY: raise OpafError('Unknown recovery metadata task policy.')
+        allowed.add(focus_dir+'/mapper-metadata-task.json')
     before = _tree_bytes(job, allowed)
     checkpoints = job / 'prototype-pipeline'
     child = checkpoints / first['focus_id']
@@ -103,6 +107,7 @@ def mapping_recovery_proof(job: Path, snapshot, original: bytes):
         'approved_policy_id': selected['approved_policy_id']}
     if selected['schema_version'] == 2:
         binding['max_owned_objects'] = bound_focus_limit(selected)
+    if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
     if _json(checkpoints / 'binding.json') != binding:
         raise OpafError('Mapping-recovery pipeline binding changed.')
     manifest = {'source_binding': selected['source_binding'],

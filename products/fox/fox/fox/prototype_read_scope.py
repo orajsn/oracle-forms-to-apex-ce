@@ -120,7 +120,13 @@ def _fences(root):
             if any(path.name not in ('previous-result.json', 'publication.json') for path in publications.iterdir()):
                 _fail()
         parent = publications.parent
-        if {path.name for path in parent.iterdir()} != {module.NAME for module in result_modules}:
+        from . import prototype_dsc_identity_repair as dsc
+        expected_names={module.NAME for module in result_modules}
+        if dsc.present(root):
+            expected_names.add(Path(dsc.RESULT_BASE).name)
+            revision=epochs._safe_path(job,dsc.RESULT_BASE)
+            if any(path.name not in ('previous-result.json','publication.json') for path in revision.iterdir()): _fail()
+        if {path.name for path in parent.iterdir()} != expected_names:
             _fail()
         result['result-publications'] = _inventory(parent)
         for module in (clause, container, partition) if partition_head else (clause, container):
