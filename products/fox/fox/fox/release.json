@@ -1,13 +1,14 @@
 {
-  "version": "0.17.0",
+  "version": "0.18.0",
   "released_on": "2026-11-08",
-  "title": "Review saved mapping without repeated generation",
+  "title": "Correct review scope without repeating generation",
   "changes": [
-    "Recognize exact screen declarations repeated from a previously reviewed source Block without changing owned objects or behavior claims.",
-    "Preserve the original mapping and bind any screen-only projection to its source and prior owner evidence.",
-    "Offer Review saved mapping and continue for the recognized stopped checkpoint, with fresh processing confirmations.",
-    "Review the saved mapping first; only an approved result permits generation of the next section. Completed model calls are not repeated.",
-    "Keep prior failures and absent result publications intact, with current authority and all APEX validation, import and export gates preserved."
+    "Allow one fresh independent review when an invalid response assigns context-only objects to the current section; preserve the original response and mapping.",
+    "Explain owned objects and inherited screens in the corrected task and later new reviews without changing historical requests.",
+    "Place processing confirmations beside Review saved mapping again and keep the locked code-unit list available on expansion.",
+    "Reuse immutable calculations within bounded reads while checking current source, consent and target authority afresh.",
+    "Use a 30-second authority socket timeout and output-readiness UI budget; missing authority never permits execution or automatic replay.",
+    "Preserve genuine review rejections and all deterministic APEX validation, import and export gates."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

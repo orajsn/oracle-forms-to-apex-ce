@@ -1,7 +1,7 @@
 # FOX: Form to APEX
 
-FOX is a product-oriented Oracle Forms modernization prototype: one project
-contains multiple Forms modules and produces one native APEX application/export.
+FOX is a development preview for Oracle Forms modernization. One project groups
+related Forms modules, with one native APEX application/export as the intended output.
 The web UI manages multiple projects, source versions, conversion runs, findings
 and result review. Business users do not need Codex, prompts or QA commands.
 
@@ -31,6 +31,15 @@ The [product and UI roadmap](docs/product-roadmap.md) defines the feature goals,
 user journey and acceptance criteria. These are targets, not released features.
 
 ## Development status
+
+Start with the [current user flow](docs/fox-user-guide.md),
+[server-side FMB preparation](docs/server-side-fmb-preparation.md),
+[generated prototype output](docs/generated-prototype-output.md), and
+[saved-review correction](docs/review-scope-correction.md). These describe the
+implemented routes and their boundaries, not a guarantee that every deployment
+or Forms application has passed them. See the changelog for each source version.
+
+### Historical implementation milestones
 
 Source **0.8.0 adds prepared redacted Forms intake and prototype workflow UI**.
 One approved real module passed local authenticated upload/assessment with its

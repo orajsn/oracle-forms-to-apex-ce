@@ -79,6 +79,9 @@ _PARTITION_FOCUS_PATH = re.compile(r'epochs/epoch-000005/(?:source-facts/focus-[
     + ('mapper-intent', 'reviewer-intent', 'full-audit-context')) + r')\.json)\Z')
 _SCREEN_FIXED_PATHS = {'epochs/epoch-000006/' + name for name in (
     'epoch-record.json', 'predecessor-record.json', 'screen-projection-receipt.json')}
+_SCREEN_FIXED_PATHS |= {'epochs/epoch-000006/review-correction/' + name for name in (
+    'authorization.json', 'attempt-000001/reviewer-request.json', 'attempt-000001/reviewer-target.json',
+    'attempt-000001/reviewer-intent.json', 'attempt-000001/reviewer.json', 'attempt-000001/review-receipt.json')}
 _SCREEN_FOCUS_PATH = re.compile(r'epochs/epoch-000006/(?:source-facts/focus-[a-f0-9]{24}\.json|'
     r'focus-[a-f0-9]{24}/(?:' + '|'.join(_FOCUS_FILES + _RESOLUTION_FILES + _EPOCH_FILES
     + ('mapper-intent', 'reviewer-intent', 'full-audit-context', 'screen-input-candidate', 'screen-projection-receipt')) + r')\.json)\Z')

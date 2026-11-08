@@ -6,8 +6,13 @@ separate applications. Selected supported forms become pages in one APEX app,
 not one unrelated app per uploaded file.
 
 1. **Create project.** Give the application a recognizable name.
-2. **Prepare and upload.** Convert raw Oracle binaries with approved local Forms
-   tooling. Upload redacted XML/text, library source and table/package definitions.
+2. **Prepare and upload.** In a hosted installation with its Forms worker
+   configured, choose **Forms FMB file**, **Prepare FMB**, then **Add prepared
+   form to project**. Extraction runs on the server; the browser does not need
+   Forms Builder. The current hosted route accepts one FMB per request, not a
+   complete library/menu bundle. Other modules can use the separate supported
+   preparation path and readable-source upload. See
+   [server-side FMB preparation](server-side-fmb-preparation.md).
 3. **Resolve findings.** Review each module, missing object and unsupported
    construct. Supply missing files. When human interpretation is needed, the
    complete conversion stops with a specific decision rather than inventing it.
@@ -19,11 +24,13 @@ not one unrelated app per uploaded file.
 5. **Review results.** Inspect per-form traceability, exceptions and target
    requirements. Generated, technically verified and business accepted are
    separate states. An error is not an invitation to click Process repeatedly.
-6. **Download.** After technical verification passes, **Download development
-   draft** allows further APEX development without recording business acceptance.
-   The existing accepted-package download still requires genuine human review.
-   Obtain the exact eligible package, native APEX SQL/APEXlang,
-   schema requirements and remediation evidence according to the release gates.
+6. **Download.** For a generated prototype, use **View prototype output** and
+   **Download generated prototype** when its validation, import, runtime and
+   export evidence pass. This does not claim an independent reimport or clean
+   installation of the final package. The stricter **Download development draft**
+   path requires its normal technical proof; accepted-package download additionally
+   needs genuine human review. Each package includes its applicable target and
+   schema requirements. See [generated prototype output](generated-prototype-output.md).
    Import only into a compatible, approved non-production target.
 7. **Validate behavior.** A genuine business reviewer decides whether the
    application behaves as intended. Technical verification cannot accept it.
@@ -58,11 +65,13 @@ review and download do not become available without their required evidence.
 Use **Check run status** to refresh the existing result. This is read-only: it
 does not submit another conversion, select sources, retry SQL/import, or accept
 anything. Give FOX support the run ID. Do not create a new run to bypass an
-uncertain result. A retry or continuation needs a separately established safe
-operator path; no QA tools are exposed to business users.
+uncertain result. Where **Check repair plan** offers **Review saved mapping
+again**, FOX has identified a specific invalid AI review response. It preserves
+the mapping and requests one new independent review with fresh processing
+confirmation. See [review-scope correction](review-scope-correction.md). Genuine
+semantic rejection and unknown operations do not become approvals. Other failures
+still need their applicable recovery path; QA tools stay outside the business UI.
 
-This clearer failure presentation has passed desktop/mobile isolated browser
-tests in source. It has not yet been activated in the existing lab. The lab's
-first multi-form trial is generated but not technically verified because its
-converter lacks the shared QA module; the original failed observation remains
-retained. Source publication does not establish end-to-end readiness.
+Check the installed version and the evidence for the selected run. Local tests,
+source publication and a healthy deployment do not establish end-to-end conversion
+readiness. Earlier failed observations remain in run history.

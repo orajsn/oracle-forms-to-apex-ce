@@ -13,6 +13,18 @@ STRATEGY = 'repair-source-facts-and-project-context-v1'
 
 
 def fact_diagnostics(packet, request, candidate):
+    # Only immutable packet/request/candidate diagnostics are reusable. Current
+    # ownership, consent, target/profile and DB selection are checked elsewhere.
+    from .prototype_read_scope import current_read_root, cached_read
+    root = current_read_root()
+    if root is None:
+        return _fact_diagnostics(packet, request, candidate)
+    return cached_read(root, 'active_focus', {'purpose': 'focus-fact-diagnostics-v1',
+        'packet': packet, 'request': request, 'candidate': candidate},
+        lambda: _fact_diagnostics(packet, request, candidate))
+
+
+def _fact_diagnostics(packet, request, candidate):
     objects, evidence, allowed = source_fact_index(packet)
     if candidate['blueprint']['source_binding'] != request['source_binding'] or packet['source_binding'] != request['source_binding']:
         raise ValueError('Source-fact check has a stale source binding.')

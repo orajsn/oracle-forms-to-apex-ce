@@ -83,6 +83,8 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
         if len(pieces) == 4 and _FOCUS.fullmatch(pieces[2]) and pieces[3] == 'full-audit-context.json':
             return True
     if pieces[1] == 'epoch-000006':
+        from .prototype_review_correction import PREFIX as CORRECTION_PREFIX, FILES as CORRECTION_FILES
+        if name in {CORRECTION_PREFIX + '/' + item for item in CORRECTION_FILES}: return True
         if tail == 'screen-projection-receipt.json': return True
         if len(pieces) == 4 and _FOCUS.fullmatch(pieces[2]) and pieces[3] in {
             'full-audit-context.json', 'screen-input-candidate.json', 'screen-projection-receipt.json'}: return True

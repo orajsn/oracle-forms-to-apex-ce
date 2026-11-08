@@ -46,6 +46,13 @@ class PrototypeEpochInput(PrototypeContinuationInput):
     expected_screen_projection_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
 
 
+class PrototypeReviewCorrectionInput(PrototypeContinuationInput):
+    model_config = {'extra': 'forbid'}
+    expected_epoch_record_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_failed_request_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_failed_response_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 def source_documents(sources):
     documents = []
     for source in sources:
@@ -457,7 +464,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'Continuation was not queued: checkpoint approval or durable state could not be verified. Original outcomes remain preserved; uncertain operations were not replayed.') from None
 
-    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False):
+    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False, review_correction=False):
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
         from .prototype_mapping_recovery import RUN_ID
         from .prototype_mapping_epochs import inspect_next_epoch, SCOPE, STRATEGY, NUMBER
@@ -474,6 +481,20 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         selected, sources = snapshot['prototype'], current_sources(pid, c)
         locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
         target = target_reader()
+        pre_epoch = not any(path.exists() or path.is_symlink() for path in (
+            job / 'mapping-epochs', job / 'prototype-pipeline/epochs', job / 'mapping-continuation.json'))
+        if (review_correction and pre_epoch
+                and target['target_profile_sha256'] != selected['target_profile_sha256']):
+            # Only the existing older recovery contract permits a role-graph
+            # replacement. Destination/model/scope changes still fail closed.
+            from . import prototype_review_correction as correction
+            legacy = recovery_context(c, pid, rid, owner)[0]
+            projection = {key: legacy[key] for key in ('schema_version', 'project_id', 'run_id',
+                'source_hash', 'source_binding', 'selected_source_set_id', 'target_profile_sha256', 'approved_chunk_hashes')}
+            projection.update(scope=correction.SCOPE, eligible=False, correction_recorded=False,
+                next_action='check_mapping_recovery',
+                reason='This known older run can use its existing mapping recovery workflow.')
+            return projection, snapshot, original, None, None, None, run
         if (not locked or locked['owner'] != owner or snapshot['approvals']['owner'] != owner
                 or snapshot['project_id'] != pid or snapshot['project'] != pid
                 or run['state'] not in ('ATTENTION', 'QUEUED', 'PROCESSING', 'GENERATED') or run['artifact'] is not None
@@ -496,6 +517,38 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             if table in tables and c.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (rid,)).fetchone():
                 raise ValueError('Later verification or acceptance work conflicts with this epoch.')
         from . import prototype_context_screen_epoch as screen
+        if review_correction:
+            from . import prototype_review_correction as correction
+            from . import prototype_mapping_epochs as epochs
+            from .prototype_read_scope import epoch_read_scope
+            base = {'schema_version': 1, 'scope': correction.SCOPE, 'project_id': pid, 'run_id': rid,
+                'source_hash': snapshot['source_hash'], 'source_binding': selected['source_binding'],
+                'selected_source_set_id': snapshot['selected_source_set_id'],
+                'target_profile_sha256': selected['target_profile_sha256'],
+                'approved_chunk_hashes': dict(selected['approved_chunk_hashes'])}
+            with epoch_read_scope(job / 'prototype-pipeline'):
+                if not (job / screen.RECORD).exists() and not (job / screen.RECORD).is_symlink():
+                    # A known older run may use its existing repair workflow. Unknown
+                    # or changed evidence still fails rather than hiding behind fallback.
+                    from . import prototype_partition_review_epoch as partition
+                    if (job / partition.RECORD).exists() and not (job / partition.RESULT_BASE / 'publication.json').exists():
+                        screen.sealed_head_five_prereview(job, snapshot, original, target['target_profile'], c)
+                    else:
+                        epochs.validate_epoch_chain(job, snapshot, original, c)
+                    return ({**base, 'eligible': False, 'correction_recorded': False,
+                        'reason': 'This run does not need the saved-review scope correction.'}, snapshot, original, None, None, None, run)
+                try:
+                    proposed, before, child, checkpoint, epoch = correction.inspect(job, snapshot, original, target['target_profile'], c)
+                except correction.NotApplicable:
+                    epochs.validate_epoch_chain(job, snapshot, original, c)
+                    return ({**base, 'eligible': False, 'correction_recorded': False,
+                        'reason': 'This review has a valid outcome and is not eligible for scope correction.'}, snapshot, original, None, None, None, run)
+            if read_prototype_snapshot(job)[1] != original:
+                raise ValueError('Review correction source changed during inspection.')
+            return ({**base, **proposed, 'epoch_number': screen.NUMBER, 'epoch_record_sha256': canonical_hash(epoch),
+                'checkpoint_sha256': checkpoint, 'eligible': child is None, 'correction_recorded': child is not None,
+                'reason': correction.REASON if child is None else 'This saved mapping review is already authorized. No operation was replayed.'},
+                snapshot, original, proposed, before, child, run)
         if existing_sealed_five:
             from . import prototype_partition_review_epoch as partition
             existing_sealed_five = (run['state'] == 'ATTENTION' and (job / partition.RECORD).exists()
@@ -649,6 +702,68 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raise
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'The epoch was not queued: source approval or durable epoch state could not be verified. Original operations remain preserved; uncertain calls were not replayed.') from None
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/review-correction')
+    def review_correction_plan(pid: str, rid: str, request: Request):
+        p = project(request, pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection = epoch_context(c, pid, rid, p['owner'], review_correction=True)[0]
+            return Response(json.dumps(projection), media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except (*recovery_errors, sqlite3.Error):
+            raise HTTPException(409, 'The saved review cannot be safely corrected: source approval or retained evidence changed. Your saved mapping is preserved.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/review-correction')
+    def confirm_review_correction(pid: str, rid: str, body: PrototypeReviewCorrectionInput, request: Request):
+        p = project(request, pid)
+        from . import prototype_review_correction as correction
+        from .prototype_mapping_epochs import save
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection, snapshot, original, plan, before, child, run = epoch_context(c, pid, rid, p['owner'], review_correction=True)
+                if (not (projection['eligible'] or projection['correction_recorded'])
+                        or body.checkpoint_sha256 != projection['checkpoint_sha256']
+                        or body.expected_epoch_record_sha256 != projection['epoch_record_sha256']
+                        or body.expected_failed_request_sha256 != projection['failed_request_sha256']
+                        or body.expected_failed_response_sha256 != projection['failed_response_sha256']
+                        or body.source_hash != projection['source_hash'] or body.source_binding != projection['source_binding']
+                        or body.expected_current_source_set_id != projection['selected_source_set_id']
+                        or body.target_profile_sha256 != projection['target_profile_sha256']
+                        or body.approved_chunk_hashes != projection['approved_chunk_hashes']
+                        or not all(value is True for value in (body.approved_redacted_source, body.approved_external_ai, body.approved_prototype_scope))):
+                    raise ValueError('Exact saved-review checkpoint and three fresh consents are required.')
+                result = {'id': rid, 'state': run['state'] if child else 'QUEUED', 'conversion_profile': PROFILE_ID,
+                    'continued': True, 'epoch_number': 6, 'review_correction_recorded': True}
+                if child:
+                    return Response(json.dumps(result), status_code=200, media_type='application/json', headers={'Cache-Control': 'no-store'})
+                if not admission_allowed(c):
+                    raise HTTPException(429, 'Other unresolved work blocks review correction. Your saved mapping is preserved.')
+                now = time.time()
+                child = {'schema_version': 1, 'scope': correction.SCOPE, 'epoch_number': 6,
+                    'epoch_record_sha256': projection['epoch_record_sha256'], 'job_id': rid, 'project_id': pid,
+                    'snapshot_sha256': hashlib.sha256(original).hexdigest(), 'source_hash': snapshot['source_hash'],
+                    'source_binding': projection['source_binding'], 'target_profile_sha256': projection['target_profile_sha256'],
+                    'owner': p['owner'], 'approved_at': now,
+                    'approvals': {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True},
+                    'before_files': before, 'plan': plan, 'checkpoint_sha256': projection['checkpoint_sha256']}
+                job = root / 'jobs' / rid
+                save(job / 'prototype-pipeline' / correction.RECORD, child, True)
+                if (job / 'source-snapshot.json').read_bytes() != original:
+                    raise ValueError('Immutable source changed before queueing correction.')
+                updated = c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Reviewing the preserved saved mapping with explicit section ownership.', now, rid))
+                if updated.rowcount != 1: raise ValueError('Run changed before correction queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                    (p['owner'], correction.EVENT, correction.event_id(rid, child), now))
+            return Response(json.dumps(result), status_code=202, media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except HTTPException:
+            raise
+        except (*recovery_errors, sqlite3.Error):
+            raise HTTPException(409, 'The saved review correction was not queued: its exact approval or durable evidence could not be verified. No uncertain call was replayed.') from None
 
     @app.post('/api/projects/{pid}/prototype-sources')
     async def upload_redacted_prototype(pid: str, request: Request,

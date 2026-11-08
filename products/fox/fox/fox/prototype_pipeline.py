@@ -205,9 +205,12 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
     reconstructs proofs from actual worker-owned artifacts; user booleans and
     claimed model approval are never authoritative.
     """
-    from .prototype_read_scope import epoch_read_scope
-    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
-        return _authorize_prototype_request(job, request)
+    from .prototype_read_scope import epoch_read_scope, cached_read
+    root = Path(job) / 'prototype-pipeline'
+    with epoch_read_scope(root):
+        return cached_read(root, 'active_focus', {'purpose': 'prototype-source-render-authority-v1',
+            'job': str(Path(job).absolute()), 'request': request},
+            lambda: _authorize_prototype_request(job, request))
 
 
 def _authorize_prototype_request(job: Path, request: dict) -> dict:

@@ -147,7 +147,18 @@ def readonly_proof_scope(root):
         yield
         return
     before = _fences(root)
-    token = _state.set({'root': root, 'owner': _owner(), 'cache': {}, 'bytes': 0})
+    root_files = {name for name in before['pipeline'] if not name.endswith('/')}
+    job_files = set()
+    if root.name == 'prototype-pipeline':
+        job_files.update('prototype-pipeline/' + name for name in root_files)
+        for name in ('source-snapshot.json', 'mapping-continuation.json', 'prototype-result.json'):
+            if name in before: job_files.add(name)
+        for key, prefix in (('mapping-epochs', 'mapping-epochs/'), ('prototype-results', 'prototype-results/'),
+                            ('result-publications', 'prototype-result-publications/')):
+            if key in before:
+                job_files.update(prefix + name for name in before[key] if not name.endswith('/'))
+    token = _state.set({'root': root, 'owner': _owner(), 'cache': {}, 'bytes': 0,
+        'fenced_root_files': frozenset(root_files), 'fenced_job_files': frozenset(job_files)})
     try:
         yield
     finally:
@@ -167,6 +178,34 @@ def epoch_read_scope(root):
             yield
     else:
         yield  # Preserve the legacy two/three read paths and direct callers.
+
+
+def current_read_root():
+    """Root for pure helpers only; inherited thread/task contexts cannot reuse it."""
+    current = _state.get()
+    if current is None:
+        return None
+    if current['owner'] != _owner():
+        _fail()
+    return current['root']
+
+
+def baseline_read_root(base, names):
+    """Only exact files included in this operation's entry fence may be reused."""
+    root = current_read_root()
+    if root is None:
+        return None
+    current = _state.get()
+    base = Path(base).absolute()
+    if any('prototype-transport' in name.split('/') for name in names):
+        return None
+    if base == root:
+        covered = current['fenced_root_files']
+    elif root.name == 'prototype-pipeline' and base == root.parent:
+        covered = current['fenced_job_files']
+    else:
+        return None
+    return root if set(names) <= covered else None
 
 
 def cached_read(root, kind, identity, compute):

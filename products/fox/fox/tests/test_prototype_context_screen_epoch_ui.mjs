@@ -21,6 +21,7 @@ test('saved context-screen mapping waits for independent review without repeatin
   await page.route('**/*',async route=>{
    const url=route.request().url();
    if(url==='http://localhost/')return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
+   if(url.endsWith('/review-correction'))return route.fulfill({json:{eligible:false,correction_recorded:false}});
    if(url.endsWith('/mapping-epochs/next')){gets++;if(hold)await new Promise(r=>release=r);return route.fulfill({json:plan});}
    if(url.endsWith('/prototype-assessment'))return route.fulfill({json:assessment});
    if(url.endsWith('/mapping-epochs')){posts++;body=route.request().postDataJSON();if(mode==='unknown')return route.abort();return route.fulfill({status:202,json:{id:run,state:'QUEUED',continued:true,epoch_number:6,conversion_profile:'native-blueprint-prototype-v1'}});}

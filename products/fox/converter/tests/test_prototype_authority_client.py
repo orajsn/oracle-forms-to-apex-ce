@@ -17,15 +17,20 @@ def case(monkeypatch):
     response = {'schema_version': 1, 'scope': client.RESPONSE_SCOPE, 'request_sha256': client._hash(request),
                 **request, 'target_profile_sha256': 'b' * 64,
                 'execution_target_sha256': client._hash(client.execution_target(profile))}
-    state = SimpleNamespace(status=200, body=response, calls=[], closed=0, profile=profile,
+    state = SimpleNamespace(status=200, body=response, calls=[], closed=0, profile=profile, fail_at=None,
                             settings=SimpleNamespace(bearer_token='synthetic-converter-test-token'))
     class Connection:
         def __init__(self, host, port, **kwargs):
             state.calls.append(('connect', host, port, kwargs))
-        def request(self, *args, **kwargs): state.calls.append(('request', args, kwargs))
+        def request(self, *args, **kwargs):
+            state.calls.append(('request', args, kwargs))
+            if state.fail_at == 'request': raise TimeoutError('Authored request timeout')
         def getresponse(self):
-            return SimpleNamespace(status=state.status,
-                read=lambda bound: (state.body if isinstance(state.body, bytes) else json.dumps(state.body).encode())[:bound])
+            if state.fail_at == 'headers': raise TimeoutError('Authored response timeout')
+            def read(bound):
+                if state.fail_at == 'body': raise TimeoutError('Authored body timeout')
+                return (state.body if isinstance(state.body, bytes) else json.dumps(state.body).encode())[:bound]
+            return SimpleNamespace(status=state.status, read=read)
         def close(self): state.closed += 1
     monkeypatch.setattr(client.http.client, 'HTTPSConnection', Connection)
     callback = client.PrototypeAuthorityClient(state.settings,
@@ -41,7 +46,8 @@ def test_exact_unchanged_request_and_secure_transport_configuration(case, monkey
     connect, sent = state.calls
     assert connect[1:3] == ('fox.example.test', 443)
     context = connect[3]['context']
-    assert context.check_hostname and context.verify_mode == 2 and connect[3]['timeout'] <= 30
+    assert context.check_hostname and context.verify_mode == 2
+    assert connect[3]['timeout'] == callback.timeout == client.DEFAULT_AUTHORITY_TIMEOUT_SECONDS == 30
     assert sent[1] == ('POST', client.AUTHORITY_PATH)
     assert sent[2]['headers']['Authorization'] == 'Bearer synthetic-converter-test-token'
     assert sent[2]['headers']['Origin'] == 'https://fox.example.test'
@@ -78,6 +84,40 @@ def test_network_failure_has_no_retry(case, monkeypatch):
     with pytest.raises(RuntimeError, match='^PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY$'):
         callback(request)
     assert state.calls == [('failed',)]
+
+
+@pytest.mark.parametrize('timeout', [15, 30, 30.0, 0.1])
+def test_explicit_bounded_timeout_remains_supported(case, timeout):
+    state, _, _ = case
+    callback = client.PrototypeAuthorityClient(state.settings,
+        authority_url='https://fox.example.test' + client.AUTHORITY_PATH,
+        authority_origin='https://fox.example.test', timeout=timeout)
+    assert callback.timeout == timeout
+
+
+@pytest.mark.parametrize('timeout', [0, -1, 30.1, True, '30', None, float('inf'), float('nan')])
+def test_timeout_cap_and_type_checks_are_unchanged(case, timeout):
+    state, _, _ = case
+    with pytest.raises(ValueError):
+        client.PrototypeAuthorityClient(state.settings,
+            authority_url='https://fox.example.test' + client.AUTHORITY_PATH,
+            authority_origin='https://fox.example.test', timeout=timeout)
+
+
+@pytest.mark.parametrize('failure', ['request', 'headers', 'body', 'missing'])
+def test_missing_or_timed_out_authority_stops_real_gateway_before_stage_without_retry(case, tmp_path_factory, failure):
+    from test_prototype_gateway import case as gateway_fixture
+    state, callback, _ = case
+    item = gateway_fixture.__wrapped__(tmp_path_factory)
+    item.adapter.authorize = callback
+    if failure == 'missing': state.status = 503
+    else: state.fail_at = failure
+    with pytest.raises(RuntimeError, match='^PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY$'):
+        item.adapter.run_stage('validate', item.request)
+    assert len([entry for entry in state.calls if entry[0] == 'request']) == 1
+    assert state.closed == 1
+    assert item.calls == []  # No validator, preflight, SQL runner or import.
+    assert list(item.settings.jobs_root.iterdir()) == []  # No stage claim/receipt.
 
 
 def test_registered_target_change_during_callback_revokes_authority(case, monkeypatch):

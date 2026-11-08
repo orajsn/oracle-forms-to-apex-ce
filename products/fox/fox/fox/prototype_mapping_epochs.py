@@ -112,6 +112,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     from . import prototype_container_epoch as container
     from . import prototype_partition_review_epoch as partition
     from . import prototype_context_screen_epoch as screen
+    from . import prototype_review_correction as correction
     screen_epoch = record is not None and record.get('epoch_number') == screen.NUMBER
     partition_epoch = record is not None and record.get('epoch_number') in (partition.NUMBER, screen.NUMBER)
     container_epoch = record is not None and record.get('epoch_number') in (container.NUMBER, partition.NUMBER, screen.NUMBER)
@@ -154,6 +155,8 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or container_epoch and rel in container.DIRECTORIES
                     or partition_epoch and rel in partition.DIRECTORIES
                     or screen_epoch and rel in screen.DIRECTORIES
+                    or screen_epoch and rel in {'prototype-pipeline/' + correction.PREFIX,
+                        'prototype-pipeline/' + correction.ATTEMPT}
                     or re.fullmatch(r'prototype-pipeline/(?:' + prefixes + r'/)?focus-[a-f0-9]{24}', rel))
                 if not valid or initial and rel.startswith(('mapping-epochs', 'prototype-pipeline/epochs')):
                     raise OpafError('Unknown epoch directory or competing head requires reconciliation.')
@@ -194,6 +197,7 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
                     or container_epoch and tail in {container.PREFIX + '/' + name for name in container.TECHNICAL_FILES}
                     or partition_epoch and tail in {partition.PREFIX + '/' + name for name in partition.TECHNICAL_FILES}
                     or screen_epoch and tail in {screen.PREFIX + '/' + name for name in screen.TECHNICAL_FILES}
+                    or screen_epoch and tail in {correction.PREFIX + '/' + name for name in correction.FILES}
                     or partition_epoch and re.fullmatch((screen.PREFIX if screen_epoch else partition.PREFIX) + r'/focus-[a-f0-9]{24}/full-audit-context\.json', tail)
                     or screen_epoch and re.fullmatch(screen.PREFIX + r'/focus-[a-f0-9]{24}/(?:' + '|'.join(re.escape(n) for n in screen.SCREEN_FILES) + ')', tail)
                     or re.fullmatch(prefixes + r'/source-facts/focus-[a-f0-9]{24}\.json', tail))
@@ -305,7 +309,19 @@ def _model_fence(job, snapshot, record):
 
 
 def _before_unchanged(job, files):
-    for name, digest in _descriptors(files):
+    # Validate EVERY descriptor before a lookup or any selected-file read.
+    descriptors = _descriptors(files)
+    from .prototype_read_scope import baseline_read_root, cached_read
+    root = baseline_read_root(job, [name for name, _ in descriptors])
+    if root is not None:
+        return cached_read(root, 'active_focus', {'purpose': 'epoch-baseline-bytes-v1',
+            'base': str(Path(job).absolute()), 'files': dict(descriptors)},
+            lambda: _check_before_unchanged(job, descriptors))
+    return _check_before_unchanged(job, descriptors)
+
+
+def _check_before_unchanged(job, descriptors):
+    for name, digest in descriptors:
         path = _safe_path(job, name)
         if (any(parent.is_symlink() for parent in (path, *path.parents) if parent == job or job in parent.parents)
                 or not path.is_file() or path.stat().st_size > 20_000_000

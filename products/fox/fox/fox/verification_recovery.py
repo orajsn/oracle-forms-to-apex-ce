@@ -714,7 +714,7 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
                                      analysis_epoch_failure=False, clause_repair_failure=False,
                                      container_review_failure=False, partition_review_failure=False,
-                                     context_screen_failure=False):
+                                     context_screen_failure=False, review_scope_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge loads this
@@ -735,6 +735,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     and complete result publication. Outside-job reviews grant no authority here.
     The epoch-five opt-in preserves the known pre-review duplicate-screen stop,
     including the absence of a new result publication. It never projects a design.
+    The epoch-six opt-in recognizes only the sealed non-owned context-Block
+    attribution defect. It does not accept the review or authorize correction.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -794,10 +796,11 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     try:
         need(all(type(value) is bool for value in
                  (claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                  container_review_failure, partition_review_failure, context_screen_failure))
+                  container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure))
              and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
-                      container_review_failure, partition_review_failure, context_screen_failure)) <= 1)
-        partition_family = partition_review_failure or context_screen_failure
+                      container_review_failure, partition_review_failure, context_screen_failure, review_scope_failure)) <= 1)
+        screen_family = context_screen_failure or review_scope_failure
+        partition_family = partition_review_failure or screen_family
         container_family = container_review_failure or partition_family
         clause_family = clause_repair_failure or container_family
         analysis_family = analysis_epoch_failure or clause_family
@@ -1301,7 +1304,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     run['id'], run['id'] + ':%')).fetchall()
                 epoch_two_event = (owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])
                 if container_family:
-                    need(len(events) == (4 if context_screen_failure else 3 if partition_review_failure else 2)
+                    need(len(events) == (5 if review_scope_failure else 4 if context_screen_failure else 3 if partition_review_failure else 2)
                          and sum(tuple(row) == epoch_two_event for row in events) == 1)
                 else:
                     need([tuple(row) for row in events] == [epoch_two_event])
@@ -1309,7 +1312,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     (run['id'], run['id'] + ':%')).fetchall()
                 need(sorted(row[0] for row in event_actions) == sorted((origin,
                     'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
-                    *(['approved_prototype_mapping_epoch'] * (3 if context_screen_failure else 2 if partition_review_failure else 1)
+                    *(['approved_prototype_mapping_epoch'] * (4 if review_scope_failure else 3 if context_screen_failure else 2 if partition_review_failure else 1)
                       if container_family else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
@@ -1710,14 +1713,22 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     old_proofs.append(derived_proof)
                     candidates_four = [root_candidate, *prefix[1:6], derived, projected]
 
-                    def context_data(proofs, proposal_root=False):
+                    def context_data(proofs, proposal_root=False, *, context_requests=None,
+                                     candidates=None, current_request=None, current_candidate=None,
+                                     all_reviewed=False):
                         # Reconstruct the immutable context FORMAT only, not semantic
                         # approval or a new source-authenticity/consent attestation.
-                        ids = [req['focus_id'] for req, _ in requests]
-                        owner_of = {obj['id']: req['focus_id'] for req, _ in requests for obj in req['owned_objects']}
-                        mappings = {row['source_object_id']: row for value in candidates_four for row in value['blueprint']['objects']}
+                        context_requests = [req for req, _ in requests] if context_requests is None else context_requests
+                        candidates = candidates_four if candidates is None else candidates
+                        current_request = projection_request if current_request is None else current_request
+                        current_candidate = projected if current_candidate is None else current_candidate
+                        ids = [req['focus_id'] for req in context_requests]
+                        owner_of = {obj['id']: req['focus_id'] for req in context_requests for obj in req['owned_objects']}
+                        mappings = {row['source_object_id']: row for value in candidates for row in value['blueprint']['objects']}
                         bindings = {}
-                        for (req, _), value, proof in zip(requests[:7], candidates_four[:7], proofs):
+                        reference_count = len(candidates) if all_reviewed else len(candidates) - 1
+                        need(len(proofs) >= reference_count)
+                        for req, value, proof in zip(context_requests[:reference_count], candidates[:reference_count], proofs):
                             bindings[req['focus_id']] = {'kind': 'CALLER_PINNED_RETAINED_REFERENCE',
                                 'scope': 'fox-active-design-proof-reference-v1', 'focus_id': req['focus_id'],
                                 'source_binding': selected['source_binding'], 'focus_request_sha256': hashed(req),
@@ -1727,22 +1738,25 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                             bindings[root_request['focus_id']] = {'kind': 'UNREVIEWED_CONTAINER_RETENTION_PROPOSAL',
                                 'focus_id': root_request['focus_id'], 'candidate_sha256': hashed(root_candidate),
                                 'proposal_receipt_sha256': hashed(proposal)}
-                        current_id = projection_request['focus_id']
-                        bindings[current_id] = {'kind': 'CURRENT_UNREVIEWED_CANDIDATE', 'focus_id': current_id,
-                                                'candidate_sha256': hashed(projected)}
+                        current_id = None if all_reviewed else current_request['focus_id']
+                        if not all_reviewed:
+                            bindings[current_id] = {'kind': 'CURRENT_UNREVIEWED_CANDIDATE', 'focus_id': current_id,
+                                                    'candidate_sha256': hashed(current_candidate)}
                         summary = {'schema_version': 1, 'scope': 'fox-design-prefix-context-v1',
                             'source_binding': selected['source_binding'], 'focus_plan_sha256': selected['focus_plan_sha256'],
                             'target_profile_sha256': selected['target_profile_sha256'], 'focus_ids': ids,
-                            'candidate_sha256': [hashed(value) for value in candidates_four], 'reference_bindings': bindings,
+                            'candidate_sha256': [hashed(value) for value in candidates], 'reference_bindings': bindings,
                             'structural_prefix_valid': True,
                             'unreviewed_container_proposal_focus_ids': [root_request['focus_id']] if proposal_root else [],
                             'current_unreviewed_focus_id': current_id, 'source_objects_checked': len(mappings),
                             'caller_must_verify_source_authenticity_and_review_provenance': True, **context_false}
                         rows = []
-                        screens = {screen['id']: (screen, req['focus_id']) for (req, _), value in zip(requests, candidates_four)
+                        if all_reviewed:
+                            return summary, rows
+                        screens = {screen['id']: (screen, req['focus_id']) for req, value in zip(context_requests, candidates)
                                    for screen in value['blueprint']['screens']}
-                        selected_current = {chunk['code_unit_id']: chunk for chunk in projection_request['chunks']}
-                        for mapping in projected['blueprint']['objects']:
+                        selected_current = {chunk['code_unit_id']: chunk for chunk in current_request['chunks']}
+                        for mapping in current_candidate['blueprint']['objects']:
                             source = all_objects[mapping['source_object_id']]
                             ancestors, seen, parent = [], set(), source['parent_id']
                             while parent is not None:
@@ -1766,11 +1780,11 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                                 units = [unit for unit in unit_metadata.values() if unit['owner_id'] == source['id']]
                                 need(units)
                                 for unit in units:
-                                    claims = [claim for claim in projected['blueprint']['claims']
+                                    claims = [claim for claim in current_candidate['blueprint']['claims']
                                         if claim['source_object_id'] == source['id'] and claim['kind'] == 'behavior.intent'
                                         and claim['status'] in ('proposal', 'unresolved') and type(claim['value']) is str
                                         and claim['value'].strip() and unit['id'] in claim['evidence_refs']]
-                                    actions = [action for action in projected['blueprint']['actions']
+                                    actions = [action for action in current_candidate['blueprint']['actions']
                                                if any(claim['id'] in action['claim_ids'] for claim in claims)]
                                     need(claims and actions and unit['id'] in selected_current)
                                     coverage.append({'unit': unit, 'selected_chunk_sha256': selected_current[unit['id']]['sha256'],
@@ -1831,7 +1845,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     same(fourth, expected_fourth)
                     expected_four_events = expected_events | {
                         (owner[0], run['id'] + ':epoch:000004:' + hashed(fourth), fourth['approved_at'])}
-                    need(expected_four_events <= {tuple(row) for row in events} if context_screen_failure
+                    need(expected_four_events <= {tuple(row) for row in events} if screen_family
                          else {tuple(row) for row in events} == expected_four_events)
                     same(document(fourth_root / 'epoch-record.json'), fourth)
                     same(document(fourth_root / 'predecessor-record.json'), third)
@@ -1882,7 +1896,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         'result_sha256': hashed(latest), 'history_path': history_path, 'status': 'CHANGES_REQUIRED',
                         'stage': 'reviewing', 'active_proofs_sha256': hashed(active_proofs), 'stage_files': {}, 'previous_result': pin})
                     epoch_directories |= fourth_dirs
-                    if context_screen_failure:
+                    if screen_family:
                         # Fixed head-five pre-review stop only. These checks do not
                         # invoke the formatter/projector or issue reuse authority.
                         baseline_five = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
@@ -2021,8 +2035,10 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         need(type(fifth['epoch_number']) is int and type(fifth['approved_at']) in (int, float)
                              and math.isfinite(fifth['approved_at']) and fifth['approved_at'] > fourth['approved_at'])
                         same(fifth, expected_fifth)
-                        need({tuple(row) for row in events} == expected_four_events | {
-                            (owner[0], run['id'] + ':epoch:000005:' + hashed(fifth), fifth['approved_at'])})
+                        expected_five_events = expected_four_events | {
+                            (owner[0], run['id'] + ':epoch:000005:' + hashed(fifth), fifth['approved_at'])}
+                        need(expected_five_events <= {tuple(row) for row in events} if review_scope_failure
+                             else {tuple(row) for row in events} == expected_five_events)
                         same(document(fifth_root / 'epoch-record.json'), fifth)
                         same(document(fifth_root / 'predecessor-record.json'), fourth)
                         previous_five = 'prototype-result-publications/epoch-000005/previous-result.json'
@@ -2156,6 +2172,168 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                         # focus or fifth publication is silently added to closure.
                         need(len(observed) == 153)
                         epoch_directories |= fifth_dirs | {fifth_prefix + '/' + focus_nine}
+                        if review_scope_failure:
+                            # Exactly the unchanged epoch-six terminal review-scope
+                            # defect. No current/future runtime helper is available
+                            # in the measured deployment bridge's old namespace.
+                            need(len(owned_nine) == 32 and len(units_nine) == 3
+                                 and sum(obj['kind'] == 'Trigger' for obj in owned_nine) == 3)
+                            baseline_six = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()}
+                            sixth_prefix = 'prototype-pipeline/epochs/epoch-000006'
+                            sixth_root = job / sixth_prefix
+                            sixth_dir = sixth_root / focus_nine
+                            sixth_dirs = {sixth_prefix, sixth_prefix + '/' + focus_nine,
+                                'prototype-result-publications/epoch-000006'}
+                            for name in sorted(sixth_dirs, key=lambda value: (value.count('/'), value)):
+                                need((job / name).is_dir()); protected(job / name)
+
+                            # Rebuild reference8 from the retained compact proof,
+                            # not the historical rejected fourth review proof.
+                            proof_eight = {'focus_id': projection_request['focus_id'],
+                                'kind': 'RETAINED_COMPACT_PARTITION_REVIEW', 'candidate_sha256': hashed(projected),
+                                'source_fact_check': gate(projected, projection_request, 2),
+                                'active_directory': 'epochs/epoch-000005/partition-proof',
+                                'partition_proof_sha256': hashed(fifth_descriptor),
+                                'reviewer_invocation': compact_values['review/reviewer.json']['invocation'],
+                                'review_request_sha256': hashed(task),
+                                'review_receipt_sha256': hashed(compact_values['review-receipt.json']),
+                                'review_sha256': hashed(compact_review), 'prior_review_request_sha256': hashed(payload_four),
+                                'prior_review_checkpoint_sha256': hashed(fourth_checkpoint),
+                                'full_audit_context_sha256': hashed(design_context), 'formatter_sha256': formatter_pin,
+                                'file_manifest_sha256': hashed(compact_manifest)}
+                            proofs_eight = [*active_proofs[:7], proof_eight]
+                            summary_eight, _ = context_data(proofs_eight, all_reviewed=True)
+                            refs_eight = {key: {field: value for field, value in ref.items() if field != 'kind'}
+                                          for key, ref in summary_eight['reference_bindings'].items()}
+                            candidate_nine = json.loads(canonical(raw_nine))
+                            candidate_nine['blueprint']['screens'] = []
+                            same(document(sixth_dir / 'screen-input-candidate.json'), raw_nine)
+                            same(document(sixth_dir / 'projection-candidate.json'), candidate_nine)
+                            summary_nine, rows_nine = context_data(proofs_eight,
+                                context_requests=[req for req, _ in requests] + [request_nine],
+                                candidates=[*candidates_four, candidate_nine], current_request=request_nine,
+                                current_candidate=candidate_nine)
+                            audit_nine = {'schema_version': 1, 'scope': 'fox-design-review-context-v1',
+                                'focus_id': focus_nine, 'source_binding': selected['source_binding'],
+                                'target_profile_sha256': selected['target_profile_sha256'],
+                                'focus_request_sha256': hashed(request_nine), 'candidate_sha256': hashed(candidate_nine),
+                                'prefix_check': summary_nine, 'owned_rows': rows_nine, 'review_required': True, **context_false}
+                            same(document(sixth_dir / 'full-audit-context.json'), audit_nine)
+                            need(len(canonical(audit_nine)) <= 500000)
+                            block_focus = next(req['focus_id'] for req, _ in requests
+                                               if block_nine in {obj['id'] for obj in req['owned_objects']})
+                            screen_receipt = {'schema_version': 1, 'scope': 'fox-context-screen-projection-v1',
+                                'source_binding': selected['source_binding'], 'focus_plan_sha256': selected['focus_plan_sha256'],
+                                'focus_id': focus_nine, 'focus_request_sha256': hashed(request_nine),
+                                'target_profile_sha256': selected['target_profile_sha256'],
+                                'raw_candidate_sha256': hashed(raw_nine), 'candidate_sha256': hashed(candidate_nine),
+                                'status': 'PROJECTED_UNREVIEWED', 'removed_screens': [{
+                                    'screen_index': 0, 'declaration': duplicate, 'source_block': all_objects[block_nine],
+                                    'owner_mapping': block_owners[0], 'prior_focus_id': block_focus,
+                                    'prior_reference': refs_eight[block_focus],
+                                    'current_reference_source_ids': [row['source_object_id'] for row in blueprint_nine['objects']]}],
+                                'prior_prefix_sha256': hashed(candidates_four), 'prior_references_sha256': hashed(refs_eight),
+                                'prior_prefix_check_sha256': hashed(summary_eight),
+                                'derived_review_context_sha256': hashed(audit_nine), 'only_screen_declarations_changed': True,
+                                'raw_model_output': False, 'independent_review_required': True,
+                                'semantic_equivalence_asserted': False, 'caller_must_reconstruct_prior_reviewed_views': True,
+                                'caller_must_preserve_originals': True, 'ai_approval_granted': False, **context_false}
+                            same(document(sixth_root / 'screen-projection-receipt.json'), screen_receipt)
+                            same(document(sixth_dir / 'screen-projection-receipt.json'), screen_receipt)
+                            screen_evidence = {'schema_version': 1, 'scope': 'fox-focus-context-screen-normalization-v1',
+                                'base_technical_evidence': None, 'context_screen_projection': screen_receipt,
+                                'raw_mapper_candidate_sha256': hashed(raw_nine)}
+                            same(document(sixth_dir / 'projection-receipt.json'), screen_evidence)
+
+                            # Build the canonical compact codec from independently
+                            # reconstructed full context; no self-rehashed header,
+                            # alias, unused/foreign table or changed guidance wins.
+                            compact_tables = {key: {} for key in ('sources', 'mappings', 'screens', 'owner_bindings')}
+                            def intern(table, key, value):
+                                if key in compact_tables[table]: same(compact_tables[table][key], value)
+                                else: compact_tables[table][key] = value
+                                return key
+                            def compact_triple(source, mapping, binding):
+                                need(source['id'] == mapping['source_object_id'])
+                                return {'source_ref': intern('sources', source['id'], source),
+                                    'mapping_ref': intern('mappings', source['id'], mapping),
+                                    'owner_ref': intern('owner_bindings', binding['focus_id'], binding)}
+                            compact_header = json.loads(canonical({key: value for key, value in audit_nine.items() if key != 'owned_rows'}))
+                            compact_header['prefix_check']['reference_bindings'] = {
+                                key: intern('owner_bindings', value['focus_id'], value)
+                                for key, value in compact_header['prefix_check']['reference_bindings'].items()}
+                            compact_rows = []
+                            for row in rows_nine:
+                                screen = row['screen_context']
+                                need(screen is not None and screen['borrowed_from_prior_focus'] is True
+                                     and screen['source_block']['id'] == block_nine)
+                                compact_rows.append({'focus_id': focus_nine,
+                                    **compact_triple(row['source'], row['mapping'], row['owner_binding']),
+                                    'ancestors': [compact_triple(a['source'], a['mapping'], a['owner_binding']) for a in row['ancestors']],
+                                    'screen_context': {**compact_triple(screen['source_block'], screen['owner_mapping'], screen['owner_binding']),
+                                        'screen_ref': intern('screens', screen['declaration']['id'], screen['declaration']),
+                                        'borrowed_from_prior_focus': True}, 'unit_coverage': row['unit_coverage']})
+                            task_nine = {'schema_version': 1, 'scope': 'fox-partition-review-task-v1',
+                                'request': request_nine, 'candidate': candidate_nine, 'candidate_sha256': hashed(candidate_nine),
+                                'target_profile_sha256': selected['target_profile_sha256'], 'design_context_sha256': hashed(audit_nine),
+                                'design_context': {'schema_version': 1, 'scope': 'fox-compact-design-review-context-v1',
+                                    'header': compact_header, 'tables': compact_tables, 'owned_rows': compact_rows},
+                                'task_guidance': guidance, 'independent_semantic_review_required': True,
+                                'historical_allegations': None, **context_false,
+                                'review_context': {'raw_candidate': raw_nine, 'raw_candidate_sha256': hashed(raw_nine),
+                                                   'evidence': screen_evidence}}
+                            task_nine['task_binding'] = hashed(task_nine)
+                            need(len(canonical(task_nine['design_context'])) <= 500000
+                                 and len(json.dumps(task_nine, ensure_ascii=False, allow_nan=False).encode()) <= 650000)
+                            same(document(sixth_dir / 'reviewer-request.json'), task_nine)
+                            review_nine, reviewer_nine_room = role_output(sixth_dir, 'reviewer', task_nine)
+                            need(reviewer_nine_room not in rooms | {room, analysis_room, clause_review_room, review_room,
+                                 root_room, current_room, compact_room, mapper_nine_room})
+                            need(set(review_nine) == {'source_binding', 'focus_binding', 'candidate_sha256', 'verdict', 'findings'}
+                                 and review_nine['source_binding'] == selected['source_binding']
+                                 and review_nine['focus_binding'] == request_nine['focus_binding']
+                                 and review_nine['candidate_sha256'] == hashed(candidate_nine)
+                                 and review_nine['verdict'] == 'CHANGES_REQUIRED'
+                                 and type(review_nine['findings']) is list and len(review_nine['findings']) == 1
+                                 and len(canonical(review_nine)) <= 100000)
+                            for finding in review_nine['findings']:
+                                need(type(finding) is dict and set(finding) == {'source_object_id', 'code', 'detail'}
+                                     and finding['source_object_id'] == block_nine and block_nine not in ids_nine
+                                     and all_objects[block_nine]['kind'] == 'Block'
+                                     and finding['code'] == 'MISSING_SCREEN_DECLARATION')
+                                text(finding['detail'])
+                            # The output is intentionally invalid for the ordinary
+                            # owner gate. It remains negative raw DATA, not a receipt.
+                            sixth_pin = {'raw_sha256': hashlib.sha256(observed['prototype-result.json']).hexdigest(),
+                                'canonical_sha256': hashed(latest), 'history_path': history_path,
+                                'history_raw_sha256': hashlib.sha256(observed[history_path]).hexdigest()}
+                            sixth_policy = {**fifth_policy, 'context_screen_projection': 'context-screen-projection-v1',
+                                'projector_sha256': '67577835743872632bc14daaf0f168b58bd0d0ba3f515a7915f2d96357cca022',
+                                'new_corrective_model_calls': 1, 'repeated_mapper_calls': 0, 'repeated_reviewer_calls': 0}
+                            sixth_plan = {**fifth_plan, 'saved_mapping_focuses': 1, 'saved_mapping_source_checked': True,
+                                'pending_review_focus_id': focus_nine, 'unstarted_focus_count': assessment['focus_count'] - 9,
+                                'remaining_focus_count': assessment['focus_count'] - 8, 'projected_context_screens': 1,
+                                'new_corrective_model_calls': 1, 'repeated_mapper_calls': 0, 'repeated_reviewer_calls': 0,
+                                'planned_corrective_operations': ['review_saved_projection'],
+                                'screen_projection_sha256': hashed(screen_receipt), 'previous_result': sixth_pin}
+                            sixth = document(job / 'mapping-epochs/epoch-000006.json')
+                            expected_sixth = {key: value for key, value in fifth.items() if key != 'partition_proof_sha256'}
+                            expected_sixth.update(epoch_number=6, strategy='context-screen-projection-v1',
+                                predecessor_sha256=hashed(fifth), approved_at=sixth['approved_at'], before_files=baseline_six,
+                                plan=sixth_plan, normalization_policy=sixth_policy, screen_projection_sha256=hashed(screen_receipt),
+                                checkpoint_sha256=hashed({'epoch_number': 6, 'predecessor_sha256': hashed(fifth),
+                                    'before_files': baseline_six, 'plan': sixth_plan, 'normalization_policy': sixth_policy}))
+                            need(type(sixth['epoch_number']) is int and type(sixth['approved_at']) in (int, float)
+                                 and math.isfinite(sixth['approved_at']) and sixth['approved_at'] > fifth['approved_at'])
+                            same(sixth, expected_sixth)
+                            need({tuple(row) for row in events} == expected_five_events | {
+                                (owner[0], run['id'] + ':epoch:000006:' + hashed(sixth), sixth['approved_at'])})
+                            same(document(sixth_root / 'epoch-record.json'), sixth)
+                            same(document(sixth_root / 'predecessor-record.json'), fifth)
+                            previous_six = 'prototype-result-publications/epoch-000006/previous-result.json'
+                            same(document(job / previous_six), latest)
+                            need(observed[previous_six] == observed['prototype-result.json'] and len(observed) == 167)
+                            epoch_directories |= sixth_dirs
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
@@ -2278,6 +2456,11 @@ def terminal_prototype_partition_review(database, db, run):
 def terminal_prototype_context_screen(database, db, run):
     """Only head five's complete mapper-nine duplicate stop, never a projection."""
     return terminal_empty_prototype_mapping(database, db, run, context_screen_failure=True)
+
+
+def terminal_prototype_review_scope(database, db, run):
+    """Only head six's sealed non-owned reviewer finding; no correction grant."""
+    return terminal_empty_prototype_mapping(database, db, run, review_scope_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -3424,6 +3607,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_prototype_context_screen(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_context_screen_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_review_scope(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_review_scope_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

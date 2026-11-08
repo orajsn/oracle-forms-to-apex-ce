@@ -1,6 +1,67 @@
 # FOX product and UI roadmap
 
-Updated 5 November 2026. Implementation of the broader product/UI goals has been explicitly started. The goal definitions below refine the existing one-project/multiple-Forms/one-native-APEX contract. Implementation evidence and deployment status are tracked separately; a started goal is not a completed feature, deployed release or availability claim.
+Updated 8 November 2026. The execution reset below supersedes the delivery order
+of older increments, not their evidence or the full product requirements.
+Implementation evidence and deployment status are separate; a started goal is
+not a completed feature, deployed release or availability claim.
+
+## Execution reset: deliver the converter, then broaden the product
+
+### Goal text
+
+Deliver FOX as a business-user Forms-to-APEX product: multiple projects, each
+grouping multiple Forms and dependencies into one native APEX application/export.
+All extraction and conversion run on the approved existing OCI environment;
+the user needs only the FOX UI, not Codex, prompts, Forms Builder or SQLcl locally.
+First finish the retained real-FMB journey through OPAF analysis and independent
+review, deterministic APEXlang generation/validation, unique import, authenticated
+runtime checks and a downloadable conventional APEX SQL package. Prove that the
+exact downloaded package imports into a new application on the declared compatible
+test target. Then implement and test source-supported business behaviour, guided
+missing-input correction, explicit partial conversion, safe UI continuation,
+multi-form/multi-project use and repeatable installation/operations. Keep generated,
+technically verified and business accepted distinct. Never substitute a separate
+sample app, silently omit behaviour, or count source tests/releases as live success.
+Use small user-visible increments, targeted tests, versioned changelogs and
+sanitized publication. Preserve original sources, credentials, current checkpoints,
+existing applications and one verified rollback. Treat obsolete development
+artifacts as eligible for bounded, reference-checked housekeeping, not as permanent
+product requirements. Stay within existing authorized resources; no new
+infrastructure, customer-tenancy connection or unapproved external source transfer.
+
+### Ordered acceptance checkpoints
+
+| Priority | Outcome | Evidence required |
+| --- | --- | --- |
+| P0 | Unblock the existing lab upgrade | Identify exact disposable history and references, preserve active checkpoints and a verified rollback, then resolve the measured backup guard without broad deletion or repeated operations. This is maintenance, not product completion. |
+| P1 | One real FMB becomes a downloadable native APEX prototype | Same hosted project/source/run reaches reviewed mapping, APEXlang validation, new import, authenticated page checks and exact SQL export download. Preserve saved completed calls. Explicit omissions and synthetic storage remain visible. |
+| P2 | The delivered package can be imported by another operator | Import the exact downloaded bytes under a fresh application ID using the documented compatible lab target and supporting-object steps; exercise the result. Never promote a prior in-place import into proof of this package. No customer connection is implied. |
+| P3 | At least one meaningful original business action works | Select the action from the real supplied code and expected flow, retain its source links, implement the native APEX mapping, and test success/failure/transaction behaviour with synthetic records. A generic CRUD button or unrelated sample is not a substitute. Missing semantic evidence becomes a specific decision request. |
+| P4 | Business users can resolve and continue | In hosted FOX show a real missing-input finding, add the supporting source, reassess, distinguish source presence from converted behaviour, and continue or explicitly omit it. Refresh/reopen/retry must preserve progress. Test both complete and partial paths. |
+| P5 | Multiple Forms and projects work as a product | One project with several related modules produces one coherent app; a second project stays isolated. Extend hosted raw intake beyond its current single-FMB request using supported extraction for required PLL/MMB/OLB inputs. |
+| P6 | Another administrator can install and operate FOX | Rehearse the documented supported installation, configuration checks, start/stop/resume, bounded retention and rollback. Provide architecture and operator/user guides matching the actually shipped system. |
+
+P1 is a first delivery checkpoint, not a reduced definition of the product.
+P2 checks the export; P3 checks implemented behaviour; neither is human acceptance.
+Complete conversion is not advertised while selected required behaviour is omitted.
+The native renderer's current unsupported actions, triggers and dependency calls
+are implementation work, not something a more capable model alone can solve.
+
+### Work discipline
+
+- Diagnose the first failing real-flow step; fix the responsible component and
+  retest that step before expanding abstractions, UI polish or recovery machinery.
+- Reuse existing converter, SQLcl and package-verification machinery. Prefer a
+  narrow integration over another general-purpose operator framework.
+- Record five facts per checkpoint: user-visible result, actual evidence,
+  remaining gap, publication/deployment state and the next action.
+- Keep developer QA outside the business UI. Expose errors as missing input,
+  human decision, unsupported mapping or service failure, each with a useful next action.
+- Existing project model roles remain unchanged. Extra reasoning is an escalation
+  for a concrete unresolved mapping/review decision, not a replacement for live proof.
+- No global model/configuration change or embedded OPAF model change is part of
+  this reset. Product releases still follow the release policy; do not publish
+  private source, secrets, local operational history or unrelated working-tree edits.
 
 ## Product outcome
 

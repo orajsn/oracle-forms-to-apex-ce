@@ -4,6 +4,42 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.18.0] - 2026-11-08
+
+### Review an invalid response without regenerating the mapping
+
+- Add one source-bound review-correction attempt beneath the saved continuation
+  when a structurally invalid AI response attributes context-only objects to the
+  current section. Preserve the original response and mapping; a fresh independent
+  approval is still required. Genuine semantic rejection remains blocking.
+- Supply explicit owned-object, context-object and inherited-screen information
+  to the corrected review and new later reviews. Historical requests are unchanged.
+- Offer **Review saved mapping again**, with fresh processing confirmations next
+  to the action and the original locked code-unit list available on expansion.
+  Recorded or uncertain submissions cannot be automatically repeated.
+- Preserve the existing supported role-graph-update recovery route. Clear stale
+  plans after failed refreshes instead of leaving an old action enabled.
+- Reuse immutable technical calculations only within bounded read-only operations.
+  Current ownership, source selection, consent, events and target checks remain
+  fresh; model, package-transfer and execution boundaries remain enforced.
+- Use a 30-second socket-operation timeout for current-authority calls and a
+  30-second total UI budget for output readiness. The socket setting is not a
+  promise of a 30-second total callback duration. This accommodates measured
+  validation tail latency without skipping checks; an unavailable authority
+  response grants no permission and no operation is automatically replayed.
+  Other request budgets are unchanged.
+- Recognize the exact sealed invalid-review stop for upgrade preservation without
+  granting retry, import, download or business-acceptance authority.
+- Clarify hosted FMB preparation, generated-output requirements and the product
+  delivery order in the user guide and roadmap.
+
+Local connected tests cover review correction through output download, current
+authority checks and measured request budgets. UI tests cover the action and
+uncertain-result handling. These tests use authored provider/Oracle/browser
+outcomes, not live Oracle acceptance; protected
+read-only planning checks do not constitute a new model review or APEX conversion.
+See [review-scope correction](docs/review-scope-correction.md).
+
 ## [0.17.0] - 2026-11-08
 
 ### Review saved mapping without repeated generation

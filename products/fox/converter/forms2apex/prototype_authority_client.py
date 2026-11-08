@@ -13,6 +13,7 @@ AUTHORITY_PATH = '/api/internal/prototype/authorize'
 RESPONSE_SCOPE = 'fox-prototype-current-authority-v1'
 MAX_RESPONSE_BYTES = 8192
 MAX_REQUEST_BYTES = 2_000_000
+DEFAULT_AUTHORITY_TIMEOUT_SECONDS = 30
 
 
 def _bytes(value):
@@ -61,7 +62,7 @@ def _unique(pairs):
 
 
 class PrototypeAuthorityClient:
-    def __init__(self, settings, *, authority_url, authority_origin, timeout=15):
+    def __init__(self, settings, *, authority_url, authority_origin, timeout=DEFAULT_AUTHORITY_TIMEOUT_SECONDS):
         # These arguments come only from trusted startup, never an MCP/request.
         url = urlsplit(authority_url)
         origin = urlsplit(authority_origin)

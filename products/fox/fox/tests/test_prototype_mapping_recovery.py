@@ -209,11 +209,17 @@ def test_only_explicit_role_graph_replacement_keeps_execution_destination(recove
             envelope['target_profile']['opaf']['roles'][name].update(workflow_id=marker * 32, graph_sha256=marker.lower() * 64)
     envelope['target_profile_sha256'] = canonical_hash(envelope['target_profile'])
     inspected = c.get(url(recoverable))
+    correction = c.get(url(recoverable, 'review-correction'))
     if change != 'roles':
         assert inspected.status_code == 409
+        assert correction.status_code == 409
         assert c.post(url(recoverable, 'retry-mapping'), json=body).status_code == 409
         return
     assert inspected.status_code == 200, inspected.text
+    assert correction.status_code == 200, correction.text
+    assert correction.json()['eligible'] is False and correction.json()['correction_recorded'] is False
+    assert correction.json()['next_action'] == 'check_mapping_recovery'
+    assert correction.json()['target_profile_sha256'] == envelope['target_profile_sha256']
     assert inspected.json()['target_profile_changed'] is True
     assert inspected.json()['parent_target_profile_sha256'] == body['target_profile_sha256']
     assert c.post(url(recoverable, 'retry-mapping'), json=body).status_code == 409

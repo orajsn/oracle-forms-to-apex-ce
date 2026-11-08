@@ -258,6 +258,9 @@ def technical_record(root):
     candidate, receipt = _project(packet, plan, plan['requests'][8], raw, previous, target)
     epochs.same(epochs.read(base / 'screen-projection-receipt.json'), receipt)
     _shape(record, old, receipt, plan)
+    from . import prototype_review_correction as correction
+    if correction.present(root):
+        correction.validate_authorization(root, record, packet, plan, target, previous)
     for name, digest in epochs._descriptors(record['before_files']):
         if name.startswith('prototype-pipeline/'):
             path = epochs._safe_path(root, name[len('prototype-pipeline/'):])
@@ -272,7 +275,7 @@ def validate_record(job, snapshot, original, db=None):
         db = sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True)
     try:
         old, packet, plan, target, previous, raw, candidate, receipt = _read_unpublished_five_record(job, snapshot, original, db, historical_six=True)
-        record = technical_record(job / 'prototype-pipeline')
+        record = epochs.technical_record(job / 'prototype-pipeline')
         epochs.same(epochs.read(job / RECORD), record)
         _shape(record, old, receipt, plan)
         rows = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND object_id LIKE ?',
@@ -281,6 +284,11 @@ def validate_record(job, snapshot, original, db=None):
             epochs.read(job / container.RECORD), old, record]
         expected = {(row['owner'], epochs.event_id(job.name, row), row['approved_at']) for row in chain}
         if len(rows) != 5 or {tuple(row) for row in rows} != expected: _fail()
+        from . import prototype_review_correction as correction
+        child = None
+        if correction.present(job / 'prototype-pipeline'):
+            child = correction.validate_authorization(job / 'prototype-pipeline', record, packet, plan, target, previous, full_job=True)[0]
+        correction.validate_event(job / 'prototype-pipeline', child, db)
         epochs._before_unchanged(job, {n: d for n, d in record['before_files'].items() if n != 'prototype-result.json'})
         from .prototype_result_publication import validate_publication
         validate_publication(job, record)
@@ -294,6 +302,10 @@ def _review_task(root, packet, plan, request, target, previous, candidate, evide
         container._refs(plan, previous, target), expected_target_sha256=canonical_hash(target),
         expected_candidate_sha256=canonical_hash(candidate), review_context=evidence)
     epochs.save(root / PREFIX / request['focus_id'] / 'full-audit-context.json', audit, write)
+    from . import prototype_review_correction as correction
+    if (correction.present(root)
+            and next(i for i, row in enumerate(plan['requests']) if row['focus_id'] == request['focus_id']) > 8):
+        payload = correction.future_review_task(payload)
     return payload
 
 
@@ -326,22 +338,38 @@ def active_focus(root, packet, plan, request, target, previous, record, *, runti
         payload = _review_task(root, packet, plan, request, target, previous, candidate,
             {'raw_candidate': raw, 'raw_candidate_sha256': canonical_hash(raw), 'evidence': evidence}, write)
         epochs.save(directory / 'reviewer-request.json', payload, write)
-        if preview: return {'review_request': payload}
-        output, reviewer = epochs._role(directory, 'reviewer', payload, target,
-            {'job_id': root.parent.name, 'source_hash': packet['source_binding']}, runtime)
-        if mapper['room_id'] == reviewer['room_id']: _fail()
-        checked = epochs._review(request, candidate, output, directory)
-        epochs.save(directory / 'review-receipt.json', checked, write)
+        from . import prototype_review_correction as correction
+        child_sha256 = None
+        if correction.present(root):
+            attempt = correction.review_attempt(root, record, packet, plan, target, previous,
+                request, candidate, mapper, runtime, preview)
+            if preview: return attempt
+            checked, reviewer, payload, directory, child_sha256 = attempt
+            output = epochs.read(directory / 'reviewer.json')['output']
+        else:
+            if preview: return {'review_request': payload}
+            output, reviewer = epochs._role(directory, 'reviewer', payload, target,
+                {'job_id': root.parent.name, 'source_hash': packet['source_binding']}, runtime)
+            if mapper['room_id'] == reviewer['room_id']: _fail()
+            try:
+                checked = epochs._review(request, candidate, output, directory)
+            except ValueError:
+                correction.scope_defect(request, candidate, output)
+                raise OpafError(correction.REASON) from None
+            epochs.save(directory / 'review-receipt.json', checked, write)
         gate = source_fact_gate(packet, request, candidate)
         epochs.save(root / PREFIX / 'source-facts' / (request['focus_id'] + '.json'), gate, write)
-        return {'candidate': candidate, 'checked': checked, 'proof': {
+        proof = {
             'focus_id': request['focus_id'], 'kind': 'REVIEWED_CONTEXT_SCREEN_PROJECTION',
             'candidate_sha256': canonical_hash(candidate), 'source_fact_check': gate,
             'active_directory': directory.relative_to(root).as_posix(), 'mapper_invocation': mapper,
             'retained_mapper_directory': partition.PREFIX + '/' + request['focus_id'],
             'reviewer_invocation': reviewer, 'review_request_sha256': canonical_hash(payload),
             'review_sha256': canonical_hash(output), 'review_receipt_sha256': canonical_hash(checked),
-            'technical_evidence_sha256': canonical_hash(evidence)}}
+            'technical_evidence_sha256': canonical_hash(evidence)}
+        if child_sha256 is not None:
+            proof.update(kind='REVIEWED_SCOPE_CORRECTION', review_correction_sha256=child_sha256)
+        return {'candidate': candidate, 'checked': checked, 'proof': proof}
     def projection(candidate, raw, evidence):
         return _projection(root, packet, plan, request, target, previous, candidate, raw, evidence, write)
     def context(candidate, payload):
@@ -360,6 +388,9 @@ def model_fence(job, snapshot, record):
             previous.append(active_focus(root, packet, plan, request, target, previous, record)); continue
         if not incomplete: container._prefix(packet, plan, previous, target)
         directory = root / PREFIX / request['focus_id']
+        if index == 8:
+            from . import prototype_review_correction as correction
+            if correction.present(root): directory = root / correction.ATTEMPT
         for name in ('reviewer',) if index == 8 else ('mapper', 'reviewer'):
             paths = [directory / (name + suffix) for suffix in ('-request.json', '-target.json', '-intent.json', '.json')]
             exists = [path.exists() or path.is_symlink() for path in paths]
