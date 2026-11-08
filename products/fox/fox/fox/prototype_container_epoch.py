@@ -248,12 +248,33 @@ def technical_record(root):
 
 
 def validate_record(job, snapshot, original, db=None):
+    return _validate_record(job, snapshot, original, db, historical=False)
+
+
+def _validated_historical_four(job, snapshot, original, db):
+    """Private predecessor reader for the sole known pre-DB rejected head4."""
+    return _validate_record(job, snapshot, original, db, historical=True)
+
+
+def _historical_active_focus(root, packet, plan, request, target, previous, record):
+    """Readonly fixed4 views cannot share a current-head cache identity."""
+    if record['epoch_number'] != NUMBER:
+        _fail()
+    from .prototype_read_scope import cached_read
+    return cached_read(root, 'active_focus', {'purpose': 'sealed-epoch-four-predecessor-v1',
+        'record_sha256': canonical_hash(record), 'packet': packet, 'plan': plan,
+        'request': request, 'target': target, 'previous': previous},
+        lambda: active_focus(root, packet, plan, request, target, previous, record))
+
+
+def _validate_record(job, snapshot, original, db, *, historical):
     close = db is None
     if close:
         database = epochs._safe_path(job.parent.parent, 'fox.sqlite3')
         db = sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True)
     try:
-        predecessor = clause.validate_record(job, snapshot, original, db, historical=True)
+        predecessor = clause.validate_record(job, snapshot, original, db, historical=True,
+                                             historical_head=5 if historical else 4)
         record = technical_record(job / 'prototype-pipeline')
         epochs.same(epochs.read(job / RECORD), record)
         descriptor = _fresh_descriptor(job, snapshot, original, canonical_hash(predecessor))
@@ -261,12 +282,17 @@ def validate_record(job, snapshot, original, db=None):
         _shape(record, predecessor, descriptor)
         rows = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND object_id LIKE ?',
             (epochs.EVENT, job.name + ':epoch:%')).fetchall()
+        if historical:
+            rows = [row for row in rows if row[1].startswith(tuple(job.name + ':epoch:' + f'{number:06d}' + ':' for number in (2, 3, 4)))]
         chain = [epochs.read(job / epochs.RECORD), predecessor, record]
         expected = {(row['owner'], epochs.event_id(job.name, row), row['approved_at']) for row in chain}
         if len(rows) != 3 or {tuple(row) for row in rows} != expected:
             _fail()
-        from .prototype_result_publication import validate_publication
-        validate_publication(job, record)
+        from .prototype_result_publication import validate_publication, _validate_historical_four_publication
+        if historical:
+            _validate_historical_four_publication(job, record)
+        else:
+            validate_publication(job, record)
         epochs._before_unchanged(job, {name: digest for name, digest in record['before_files'].items() if name != 'prototype-result.json'})
         root = job / 'prototype-pipeline'
         target = epochs.read(root / record['plan']['repair_focus_id'] / 'mapper-target.json')

@@ -255,7 +255,7 @@ def technical_record(root):
     return record
 
 
-def validate_record(job, snapshot, original, db=None, *, historical=False):
+def validate_record(job, snapshot, original, db=None, *, historical=False, historical_head=4):
     close = db is None
     if close:
         database = job.parent.parent / 'fox.sqlite3'
@@ -263,7 +263,7 @@ def validate_record(job, snapshot, original, db=None, *, historical=False):
         db = sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True)
     try:
         predecessor = epochs._validated_epoch_record(job, snapshot, original, db, historical=True,
-                                                     historical_head=4 if historical else 3)
+                                                     historical_head=historical_head if historical else 3)
         record = technical_record(job / 'prototype-pipeline')
         epochs.same(epochs.read(job / RECORD), record)
         descriptor = _fresh_descriptor(job, snapshot, original)
@@ -272,7 +272,7 @@ def validate_record(job, snapshot, original, db=None, *, historical=False):
         rows = db.execute('SELECT owner,object_id,created FROM events WHERE action=? AND object_id LIKE ?',
                           (epochs.EVENT, job.name + ':epoch:%')).fetchall()
         if historical:
-            rows = [row for row in rows if not row[1].startswith(job.name + ':epoch:000004:')]
+            rows = [row for row in rows if row[1].startswith((job.name + ':epoch:000002:', job.name + ':epoch:000003:'))]
         expected = {(predecessor['owner'], epochs.event_id(job.name, predecessor), predecessor['approved_at']),
                     (record['owner'], epochs.event_id(job.name, record), record['approved_at'])}
         if len(rows) != 2 or {tuple(row) for row in rows} != expected:

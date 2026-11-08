@@ -1,15 +1,15 @@
 {
-  "version": "0.15.0",
+  "version": "0.16.0",
   "released_on": "2026-11-08",
-  "title": "Continue with reviewed structure and checked screen context",
+  "title": "Continue remaining sections with retained review",
   "changes": [
-    "Detect omitted-parent conflicts and check related screen references before further generation and review.",
-    "Reuse an independently reviewed, source-bound nonvisual container correction without repeating completed mapping or reviews.",
-    "Offer Continue with corrected structure with locked source selection and fresh processing confirmations.",
-    "Preserve previous results and all history while publishing a precisely bound new result for the same run.",
-    "Recheck current approval history before showing export availability and after reading the download package.",
-    "Avoid duplicate proof traversal within bounded read-only operations without caching processing permission.",
-    "Recognize a fully recorded pre-database rejection for upgrade admission without granting retry or conversion success."
+    "Provide compact, lossless shared-screen context for independent review while retaining the full audit context.",
+    "Separate historical findings from a fresh review request without changing source code or the saved candidate.",
+    "Reuse one exact independently approved saved review and continue unfinished sections without repeating completed model calls.",
+    "Offer Continue remaining sections with locked sources, fresh confirmations and explicit remaining work.",
+    "Preserve earlier failures and immutable results when appending the bounded fifth continuation record.",
+    "Keep current authority, SQLcl, import, runtime and download checks mandatory.",
+    "Recognize the sealed pre-database review stop for upgrade admission without granting retry or conversion success."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

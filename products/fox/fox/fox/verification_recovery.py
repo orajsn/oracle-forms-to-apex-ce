@@ -713,7 +713,7 @@ def admission_status(run, legacy_record, closed_failure=None, retry=None):
 
 def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=False,
                                      analysis_epoch_failure=False, clause_repair_failure=False,
-                                     container_review_failure=False):
+                                     container_review_failure=False, partition_review_failure=False):
     """Recognize one sealed first EMPTY mapper, not success or retry authority.
 
     Deliberately self-contained stdlib: the transition bridge loads this
@@ -730,6 +730,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
     The epoch-three branch checks sealed structural provenance, not clause
     semantics or approval for reuse/adoption. Those remain later semantic gates.
     No mutable epoch-head selector, runtime client or archived Python is used.
+    The separate epoch-four opt-in recognizes only its sealed unchanged rejection
+    and complete result publication. Outside-job reviews grant no authority here.
     Unknown/missing/extra evidence and all later work remain blocking.
     """
     import math
@@ -788,9 +790,12 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
 
     try:
         need(all(type(value) is bool for value in
-                 (claim_owner_failure, analysis_epoch_failure, clause_repair_failure, container_review_failure))
-             and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure, container_review_failure)) <= 1)
-        clause_family = clause_repair_failure or container_review_failure
+                 (claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
+                  container_review_failure, partition_review_failure))
+             and sum((claim_owner_failure, analysis_epoch_failure, clause_repair_failure,
+                      container_review_failure, partition_review_failure)) <= 1)
+        container_family = container_review_failure or partition_review_failure
+        clause_family = clause_repair_failure or container_family
         analysis_family = analysis_epoch_failure or clause_family
         need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
              and type(run.get('id')) is str and re.fullmatch(r'fox-[a-f0-9]{20}', run['id'])
@@ -1291,15 +1296,17 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                     '(object_id=? OR object_id LIKE ?)', ('approved_prototype_mapping_epoch',
                     run['id'], run['id'] + ':%')).fetchall()
                 epoch_two_event = (owner[0], run['id'] + ':epoch:000002:' + hashed(epoch), epoch['approved_at'])
-                if container_review_failure:
-                    need(len(events) == 2 and sum(tuple(row) == epoch_two_event for row in events) == 1)
+                if container_family:
+                    need(len(events) == (3 if partition_review_failure else 2)
+                         and sum(tuple(row) == epoch_two_event for row in events) == 1)
                 else:
                     need([tuple(row) for row in events] == [epoch_two_event])
                 event_actions = db.execute('SELECT action FROM events WHERE object_id=? OR object_id LIKE ?',
                     (run['id'], run['id'] + ':%')).fetchall()
                 need(sorted(row[0] for row in event_actions) == sorted((origin,
                     'approved_prototype_mapping_continuation', 'approved_prototype_mapping_epoch',
-                    *(['approved_prototype_mapping_epoch'] if container_review_failure else []))))
+                    *(['approved_prototype_mapping_epoch'] * (2 if partition_review_failure else 1)
+                      if container_family else []))))
                 epoch_root = job / epoch_prefix
                 same(document(epoch_root / 'epoch-record.json'), epoch)
                 same(document(epoch_root / 'predecessor-record.json'), continuation)
@@ -1329,7 +1336,7 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 same(repaired, expected_candidate)
                 need(len(omitted) == 2 and not any(ref in omitted for category in ('actions', 'relationships')
                     for row in repaired['blueprint'][category] for ref in row['claim_ids']))
-            if container_review_failure:
+            if container_family:
                 # Admission-only structural provenance. Full semantic clause
                 # reconstruction remains mandatory for any later adoption.
                 # No additional runtime module/import/manifest closure is used.
@@ -1512,7 +1519,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                      and math.isfinite(third['approved_at']) and third['approved_at'] > epoch['approved_at'])
                 expected_events = {epoch_two_event,
                     (owner[0], run['id'] + ':epoch:000003:' + hashed(third), third['approved_at'])}
-                need({tuple(row) for row in events} == expected_events)
+                need(expected_events <= {tuple(row) for row in events} if partition_review_failure
+                     else {tuple(row) for row in events} == expected_events)
                 same(document(third_root / 'epoch-record.json'), third)
                 same(document(third_root / 'predecessor-record.json'), epoch)
                 derived_proof = {'focus_id': repair_request['focus_id'], 'kind': 'DERIVED_CLAUSE_DIAGNOSTIC',
@@ -1589,7 +1597,8 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 same(document(directory / 'review-receipt.json'), receipt)
                 same(document(third_root / 'source-facts' / (projection_request['focus_id'] + '.json')),
                      gate(projected, projection_request, 2))
-                result = document(job / 'prototype-result.json')
+                archived_result = 'prototype-result-publications/epoch-000004/previous-result.json'
+                result = document(job / archived_result if partition_review_failure else job / 'prototype-result.json')
                 checkpoint = result['artifacts']['checkpoint_directory']
                 need(type(checkpoint) is str and 0 < len(checkpoint) <= 1024)
                 portable = checkpoint.replace('\\', '/')
@@ -1607,6 +1616,266 @@ def terminal_empty_prototype_mapping(database, db, run, *, claim_owner_failure=F
                 need(type(result['schema_version']) is int)
                 same(document(job / 'prototype-results' / (hashed(result) + '.json')), result)
                 epoch_directories |= third_dirs
+                if partition_review_failure:
+                    # Admission-only structural chain. No semantic module import,
+                    # current-head dispatch, outside-job proof or execution grant.
+                    context_sha = 'b48195fc859f52a7786e999350af3c7ec96c737d516caef906ea093347d2498c'
+                    context_false = {key: False for key in ('authority_granted', 'processing_consent_verified',
+                        'historical_review_provenance_verified', 'full_application_validated', 'generation_ready',
+                        'native_apex_generated', 'import_verified', 'business_behavior_accepted')}
+                    old_result = result
+                    old_result_raw = observed[archived_result]
+                    baseline_four = {name: hashlib.sha256(raw).hexdigest() for name, raw in observed.items()
+                                     if name != archived_result}
+                    baseline_four['prototype-result.json'] = hashlib.sha256(old_result_raw).hexdigest()
+                    fourth_prefix = 'prototype-pipeline/epochs/epoch-000004'
+                    fourth_root = job / fourth_prefix
+                    fourth_dirs = {fourth_prefix, fourth_prefix + '/source-facts', fourth_prefix + '/container-proof',
+                        fourth_prefix + '/container-proof/review', fourth_prefix + '/' + projection_request['focus_id'],
+                        'prototype-result-publications', 'prototype-result-publications/epoch-000004'}
+                    for name in sorted(fourth_dirs, key=lambda value: (value.count('/'), value)):
+                        need((job / name).is_dir()); protected(job / name)
+                    root_names = {'container-proposal.json', 'derived-root-candidate.json', 'diagnostic-intent.json',
+                        'original-files.json', 'prefix-check.json', 'result.json', 'review-receipt.json', 'review-request.json',
+                        'review/reviewer-intent.json', 'review/reviewer-target.json', 'review/reviewer.json'}
+                    root_descriptor = document(fourth_root / 'container-proof-descriptor.json')
+                    root_manifest = root_descriptor['original_manifest']
+                    need(type(root_manifest) is dict and set(root_manifest) == root_names | {'prototype_design_context.py'}
+                         and hashed(root_manifest) == root_descriptor['original_manifest_sha256'])
+                    for pin in root_manifest.values():
+                        need(type(pin) is dict and set(pin) == {'sha256', 'bytes'} and sha(pin['sha256'])
+                             and type(pin['bytes']) is int and 0 < pin['bytes'] <= 2_000_000)
+                    need(sum(pin['bytes'] for pin in root_manifest.values()) <= 8_000_000
+                         and root_manifest['prototype_design_context.py']['sha256'] == context_sha)
+                    root_proof = fourth_root / 'container-proof'
+                    root_values = {name: document(root_proof / name) for name in sorted(root_names)}
+                    for name in root_names:
+                        raw = observed[(root_proof / name).relative_to(job).as_posix()]
+                        need(len(raw) == root_manifest[name]['bytes']
+                             and hashlib.sha256(raw).hexdigest() == root_manifest[name]['sha256'])
+                    root_request, root_original = requests[0][0], prefix[0]
+                    modules = [obj for obj in root_request['owned_objects'] if obj['kind'] == 'FormModule'
+                               and obj['parent_id'] is None and obj['module_id'] == obj['id']]
+                    need(len(modules) == 1)
+                    module = modules[0]
+                    need(not any(unit['owner_id'] == module['id'] for unit in unit_metadata.values()))
+                    root_candidate = json.loads(canonical(root_original))
+                    module_index = next(i for i, row in enumerate(root_candidate['blueprint']['objects'])
+                                        if row['source_object_id'] == module['id'])
+                    before = root_candidate['blueprint']['objects'][module_index]
+                    need(set(before) == {'source_object_id', 'disposition', 'reason'} and before['disposition'] == 'omitted'
+                         and before['reason'] == 'ordinary legacy visual container; web-recomposition')
+                    after = {**before, 'disposition': 'unresolved', 'reason':
+                        'Retain the source FormModule as nonvisual container metadata; descendant mappings '
+                        'require separate context validation and independent review. No executable behavior '
+                        'or whole-form omission is asserted.'}
+                    root_candidate['blueprint']['objects'][module_index] = after
+                    shape(root_candidate, root_request, {obj['id'] for obj in root_request['owned_objects']})
+                    proposal = {'schema_version': 1, 'scope': 'fox-form-container-retention-proposal-v1',
+                        'source_binding': selected['source_binding'], 'focus_id': root_request['focus_id'],
+                        'focus_request_sha256': hashed(root_request), 'module_id': module['id'],
+                        'object_index': module_index, 'source_object': module, 'original_candidate_sha256': hashed(root_original),
+                        'candidate_sha256': hashed(root_candidate), 'before': before, 'after': after,
+                        'raw_model_output': False, 'proposal_status': 'UNREVIEWED', 'independent_review_required': True,
+                        'semantic_equivalence_asserted': False, **context_false}
+                    same(root_values['container-proposal.json'], proposal)
+                    same(root_values['derived-root-candidate.json'], root_candidate)
+                    same(root_values['original-files.json'], baseline_four)
+                    same(root_descriptor, {'schema_version': 1, 'scope': 'fox-prototype-container-proof-staging-v1',
+                        'job_id': run['id'], 'project_id': run['project'], 'owner': owner[0],
+                        'snapshot_sha256': hashlib.sha256(observed['source-snapshot.json']).hexdigest(),
+                        'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                        'original_target_sha256': selected['target_profile_sha256'], 'predecessor_sha256': hashed(third),
+                        'module_id': module['id'], 'context_module_sha256': context_sha, 'original_manifest': root_manifest,
+                        'original_manifest_sha256': hashed(root_manifest), 'original_files': baseline_four,
+                        'original_files_sha256': hashed(baseline_four), 'original_candidate_sha256': hashed(root_original),
+                        'candidate_sha256': hashed(root_candidate)})
+                    # Original normal-prefix proofs are rebuilt from already checked
+                    # immutable role records; none is minted as new model output.
+                    old_proofs = []
+                    for (req, original_dir), value in zip(requests[:6], prefix[:6]):
+                        mapped = document(original_dir / 'mapper.json')
+                        reviewed = document(original_dir / 'reviewer.json')
+                        old_proofs.append({'focus_id': req['focus_id'], 'candidate_sha256': hashed(value),
+                            'source_fact_check': gate(value, req, 0),
+                            'review_request_sha256': hashed({'request': req, 'candidate': value, 'candidate_sha256': hashed(value)}),
+                            'review_sha256': hashed(reviewed['output']),
+                            'review_receipt_sha256': hashed(review_receipt(value, req, 'APPROVED')),
+                            'active_directory': original_dir.name, 'mapper_invocation': mapped['invocation'],
+                            'reviewer_invocation': reviewed['invocation'], 'technical_evidence_sha256': None})
+                    old_proofs.append(derived_proof)
+                    candidates_four = [root_candidate, *prefix[1:6], derived, projected]
+
+                    def context_data(proofs, proposal_root=False):
+                        # Reconstruct the immutable context FORMAT only, not semantic
+                        # approval or a new source-authenticity/consent attestation.
+                        ids = [req['focus_id'] for req, _ in requests]
+                        owner_of = {obj['id']: req['focus_id'] for req, _ in requests for obj in req['owned_objects']}
+                        mappings = {row['source_object_id']: row for value in candidates_four for row in value['blueprint']['objects']}
+                        bindings = {}
+                        for (req, _), value, proof in zip(requests[:7], candidates_four[:7], proofs):
+                            bindings[req['focus_id']] = {'kind': 'CALLER_PINNED_RETAINED_REFERENCE',
+                                'scope': 'fox-active-design-proof-reference-v1', 'focus_id': req['focus_id'],
+                                'source_binding': selected['source_binding'], 'focus_request_sha256': hashed(req),
+                                'candidate_sha256': hashed(value), 'target_profile_sha256': selected['target_profile_sha256'],
+                                'proof_sha256': hashed(proof)}
+                        if proposal_root:
+                            bindings[root_request['focus_id']] = {'kind': 'UNREVIEWED_CONTAINER_RETENTION_PROPOSAL',
+                                'focus_id': root_request['focus_id'], 'candidate_sha256': hashed(root_candidate),
+                                'proposal_receipt_sha256': hashed(proposal)}
+                        current_id = projection_request['focus_id']
+                        bindings[current_id] = {'kind': 'CURRENT_UNREVIEWED_CANDIDATE', 'focus_id': current_id,
+                                                'candidate_sha256': hashed(projected)}
+                        summary = {'schema_version': 1, 'scope': 'fox-design-prefix-context-v1',
+                            'source_binding': selected['source_binding'], 'focus_plan_sha256': selected['focus_plan_sha256'],
+                            'target_profile_sha256': selected['target_profile_sha256'], 'focus_ids': ids,
+                            'candidate_sha256': [hashed(value) for value in candidates_four], 'reference_bindings': bindings,
+                            'structural_prefix_valid': True,
+                            'unreviewed_container_proposal_focus_ids': [root_request['focus_id']] if proposal_root else [],
+                            'current_unreviewed_focus_id': current_id, 'source_objects_checked': len(mappings),
+                            'caller_must_verify_source_authenticity_and_review_provenance': True, **context_false}
+                        rows = []
+                        screens = {screen['id']: (screen, req['focus_id']) for (req, _), value in zip(requests, candidates_four)
+                                   for screen in value['blueprint']['screens']}
+                        selected_current = {chunk['code_unit_id']: chunk for chunk in projection_request['chunks']}
+                        for mapping in projected['blueprint']['objects']:
+                            source = all_objects[mapping['source_object_id']]
+                            ancestors, seen, parent = [], set(), source['parent_id']
+                            while parent is not None:
+                                need(parent not in seen and parent in mappings); seen.add(parent)
+                                ancestor = all_objects[parent]; ancestor_mapping = mappings[parent]
+                                need(ancestor_mapping['disposition'] != 'omitted' if ancestor['kind'] in ('Block', 'FormModule') else True)
+                                ancestors.append({'source': ancestor, 'mapping': ancestor_mapping,
+                                                  'owner_binding': bindings[owner_of[parent]]})
+                                parent = ancestor['parent_id']
+                            declaration, screen_focus = screens[mapping['screen_id']]
+                            owners = [obj for obj in mappings if all_objects[obj]['kind'] == 'Block'
+                                      and mappings[obj].get('screen_id') == mapping['screen_id']
+                                      and mappings[obj]['disposition'] == 'proposed']
+                            need(len(owners) == 1 and source['block_id'] == owners[0])
+                            block_id = owners[0]
+                            screen_context = {'declaration': declaration, 'source_block': all_objects[block_id],
+                                'owner_mapping': mappings[block_id], 'owner_binding': bindings[screen_focus],
+                                'borrowed_from_prior_focus': screen_focus != current_id}
+                            coverage = []
+                            if source['kind'] == 'Trigger':
+                                units = [unit for unit in unit_metadata.values() if unit['owner_id'] == source['id']]
+                                need(units)
+                                for unit in units:
+                                    claims = [claim for claim in projected['blueprint']['claims']
+                                        if claim['source_object_id'] == source['id'] and claim['kind'] == 'behavior.intent'
+                                        and claim['status'] in ('proposal', 'unresolved') and type(claim['value']) is str
+                                        and claim['value'].strip() and unit['id'] in claim['evidence_refs']]
+                                    actions = [action for action in projected['blueprint']['actions']
+                                               if any(claim['id'] in action['claim_ids'] for claim in claims)]
+                                    need(claims and actions and unit['id'] in selected_current)
+                                    coverage.append({'unit': unit, 'selected_chunk_sha256': selected_current[unit['id']]['sha256'],
+                                        'claim_ids': [claim['id'] for claim in claims], 'action_ids': [action['id'] for action in actions]})
+                            rows.append({'focus_id': current_id, 'source': source, 'mapping': mapping,
+                                'owner_binding': bindings[current_id], 'ancestors': ancestors,
+                                'screen_context': screen_context, 'unit_coverage': coverage})
+                        return summary, rows
+
+                    root_prefix, _ = context_data(old_proofs, proposal_root=True)
+                    same(root_values['prefix-check.json'], root_prefix)
+                    root_payload = {'request': root_request, 'candidate': root_candidate, 'candidate_sha256': hashed(root_candidate),
+                        'review_context': {'schema_version': 1, 'scope': 'fox-unadopted-container-retention-review-v1',
+                            'proposal': proposal, 'original_candidate': root_original, 'original_active_proof': old_proofs[0],
+                            'proposed_prefix_structural_check': root_prefix, 'root_owned_code_units': [],
+                            'production_active_root_remains_original': True, 'proposal_adopted': False,
+                            'scope_notice': 'This is a derived technical proposal for nonvisual FormModule metadata, not a mapper response '
+                            'or a change to business behavior. All other rows, code, claims and ordering are unchanged. '
+                            'The proposed prefix is not adopted and is not full-application validation.'}}
+                    same(root_values['review-request.json'], root_payload)
+                    root_review, root_room = role_output(root_proof / 'review', 'reviewer', root_payload)
+                    need(root_room not in rooms | {room, analysis_room, clause_review_room, review_room})
+                    same(root_review, {'source_binding': selected['source_binding'], 'focus_binding': root_request['focus_binding'],
+                        'candidate_sha256': hashed(root_candidate), 'verdict': 'APPROVED', 'findings': []})
+                    root_receipt = review_receipt(root_candidate, root_request, 'APPROVED')
+                    same(root_values['review-receipt.json'], root_receipt)
+                    root_intent = {'schema_version': 1, 'scope': 'one-unadopted-root-proposal-review', 'job_id': run['id'],
+                        'source_binding': selected['source_binding'], 'target_profile_sha256': selected['target_profile_sha256'],
+                        'module_sha256': context_sha, 'original_candidate_sha256': hashed(root_original),
+                        'candidate_sha256': hashed(root_candidate), 'proposal_sha256': hashed(proposal),
+                        'review_request_sha256': hashed(root_payload), 'original_files_sha256': hashed(baseline_four),
+                        'maximum_new_model_calls': 1, 'generation_calls': 0, 'focus8_calls': 0, 'automatic_retry': False,
+                        'production_run_resumed': False, 'proposal_adopted': False}
+                    same(root_values['diagnostic-intent.json'], root_intent)
+                    same(root_values['result.json'], {**root_intent, 'status': 'ROOT_PROPOSAL_REVIEW_COMPLETED_UNADOPTED',
+                        'review_verdict': 'APPROVED', 'approved_structured_design': True, 'review_room_id': root_room,
+                        'review_output_sha256': hashed(root_review), 'finding_codes': [],
+                        'original_job_files_unchanged': len(baseline_four), 'apex_imported': False, 'business_behavior_accepted': False})
+                    pin = {'raw_sha256': hashlib.sha256(old_result_raw).hexdigest(), 'canonical_sha256': hashed(old_result),
+                        'history_path': 'prototype-results/' + hashed(old_result) + '.json',
+                        'history_raw_sha256': baseline_four['prototype-results/' + hashed(old_result) + '.json']}
+                    fourth_policy = {**third_policy, 'container_proof': 'retained-container-review-context-v1',
+                        'prefix_context': 'exact-active-prefix-v1', 'new_container_review_calls': 0,
+                        'repeated_root_mapper_calls': 0, 'repeated_projection_mapper_calls': 0, 'corrective_projection_review_calls': 1}
+                    fourth_plan = {**third_plan, 'planned_corrective_operations': ['projection_review'],
+                        'container_proof_sha256': hashed(root_descriptor), 'container_corrections': 1,
+                        'new_container_review_calls': 0, 'repeated_root_mapper_calls': 0,
+                        'repeated_projection_mapper_calls': 0, 'corrective_projection_review_calls': 1, 'previous_result': pin}
+                    fourth = document(job / 'mapping-epochs/epoch-000004.json')
+                    expected_fourth = {key: value for key, value in third.items() if key != 'clause_proof_sha256'}
+                    expected_fourth.update(epoch_number=4, strategy='retained-container-review-context-v1',
+                        predecessor_sha256=hashed(third), approved_at=fourth['approved_at'], before_files=baseline_four,
+                        plan=fourth_plan, normalization_policy=fourth_policy, container_proof_sha256=hashed(root_descriptor),
+                        checkpoint_sha256=hashed({'epoch_number': 4, 'predecessor_sha256': hashed(third),
+                            'before_files': baseline_four, 'plan': fourth_plan, 'normalization_policy': fourth_policy}))
+                    need(type(fourth['epoch_number']) is int and type(fourth['approved_at']) in (int, float)
+                         and math.isfinite(fourth['approved_at']) and fourth['approved_at'] > third['approved_at'])
+                    same(fourth, expected_fourth)
+                    need({tuple(row) for row in events} == expected_events | {
+                        (owner[0], run['id'] + ':epoch:000004:' + hashed(fourth), fourth['approved_at'])})
+                    same(document(fourth_root / 'epoch-record.json'), fourth)
+                    same(document(fourth_root / 'predecessor-record.json'), third)
+                    root_active_proof = {'focus_id': root_request['focus_id'], 'kind': 'DERIVED_APPROVED_CONTAINER_PROPOSAL',
+                        'candidate_sha256': hashed(root_candidate), 'source_fact_check': gate(root_candidate, root_request, 0),
+                        'active_directory': 'epochs/epoch-000004/container-proof', 'container_proof_sha256': hashed(root_descriptor),
+                        'reviewer_invocation': root_values['review/reviewer.json']['invocation'],
+                        'review_request_sha256': hashed(root_payload), 'review_receipt_sha256': hashed(root_receipt),
+                        'proposal_sha256': hashed(proposal), 'file_manifest_sha256': hashed(root_manifest)}
+                    active_proofs = [root_active_proof, *old_proofs[1:]]
+                    summary_four, owned_rows = context_data(active_proofs)
+                    design_context = {'schema_version': 1, 'scope': 'fox-design-review-context-v1',
+                        'focus_id': projection_request['focus_id'], 'source_binding': selected['source_binding'],
+                        'target_profile_sha256': selected['target_profile_sha256'],
+                        'focus_request_sha256': hashed(projection_request), 'candidate_sha256': hashed(projected),
+                        'prefix_check': summary_four, 'owned_rows': owned_rows, 'review_required': True, **context_false}
+                    need(len(canonical(design_context)) <= 500000)
+                    old_review_checkpoint = document(directory / 'reviewer.json')
+                    payload_four = {**payload, 'design_context': design_context, 'retained_rejection': {
+                        'review': rejection, 'invocation': old_review_checkpoint['invocation'],
+                        'checkpoint_sha256': hashed(old_review_checkpoint), 'candidate_unchanged': True}}
+                    current_dir = fourth_root / projection_request['focus_id']
+                    same(document(current_dir / 'projection-candidate.json'), projected)
+                    same(document(current_dir / 'projection-receipt.json'), evidence)
+                    same(document(current_dir / 'reviewer-request.json'), payload_four)
+                    current_review, current_room = role_output(current_dir, 'reviewer', payload_four)
+                    need(current_room not in rooms | {room, analysis_room, clause_review_room, review_room, root_room})
+                    same(current_review, rejection)
+                    same(document(current_dir / 'review-receipt.json'), receipt)
+                    same(document(fourth_root / 'source-facts' / (projection_request['focus_id'] + '.json')),
+                         gate(projected, projection_request, 2))
+                    active_proofs.append({'focus_id': projection_request['focus_id'], 'candidate_sha256': hashed(projected),
+                        'source_fact_check': gate(projected, projection_request, 2), 'review_request_sha256': hashed(payload_four),
+                        'review_sha256': hashed(current_review), 'review_receipt_sha256': hashed(receipt),
+                        'active_directory': 'epochs/epoch-000004/' + projection_request['focus_id'],
+                        'mapper_invocation': document(requests[7][1] / 'mapper.json')['invocation'],
+                        'reviewer_invocation': document(current_dir / 'reviewer.json')['invocation'],
+                        'technical_evidence_sha256': hashed(evidence)})
+                    latest = document(job / 'prototype-result.json')
+                    same(latest, {**old_result, 'mapping_epoch_sha256': hashed(fourth)})
+                    history_path = 'prototype-results/' + hashed(latest) + '.json'
+                    same(document(job / history_path), latest)
+                    need(observed[history_path] == observed['prototype-result.json'])
+                    same(document(job / 'prototype-result-publications/epoch-000004/publication.json'), {
+                        'schema_version': 1, 'scope': 'fox-prototype-epoch-result-publication-v1', 'job_id': run['id'],
+                        'project_id': run['project'], 'source_hash': run['source_hash'], 'source_binding': selected['source_binding'],
+                        'epoch_sha256': hashed(fourth), 'container_proof_sha256': hashed(root_descriptor),
+                        'result_sha256': hashed(latest), 'history_path': history_path, 'status': 'CHANGES_REQUIRED',
+                        'stage': 'reviewing', 'active_proofs_sha256': hashed(active_proofs), 'stage_files': {}, 'previous_result': pin})
+                    epoch_directories |= fourth_dirs
             allowed = set(observed) | {'prototype-pipeline', 'prototype-pipeline/sources'} | {
                 'prototype-pipeline/' + directory.name for _, directory in requests} | epoch_directories
             pending, actual = [job], set()
@@ -1719,6 +1988,11 @@ def terminal_prototype_clause_repair(database, db, run):
 def terminal_prototype_container_review(database, db, run):
     """Only epoch three's sealed projection rejection, never epoch-four authority."""
     return terminal_empty_prototype_mapping(database, db, run, container_review_failure=True)
+
+
+def terminal_prototype_partition_review(database, db, run):
+    """Only epoch four's sealed CHANGES_REQUIRED stop; no retry/adoption grant."""
+    return terminal_empty_prototype_mapping(database, db, run, partition_review_failure=True)
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -2859,6 +3133,9 @@ class VerificationRecovery:
         if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
                 and terminal_prototype_container_review(self.database, db, dict(run))):
             return {'blocks_admission': False, 'recovery_state': 'prototype_container_review_terminal', 'retry_eligible': False}
+        if (run['state'] == 'ATTENTION' and run['artifact'] is None and legacy is None and closed is None and retry is None
+                and terminal_prototype_partition_review(self.database, db, dict(run))):
+            return {'blocks_admission': False, 'recovery_state': 'prototype_partition_review_terminal', 'retry_eligible': False}
         if retry is not None:
             retry_binding = VerificationBinding.from_payload(retry['binding'])
             _need(closed is not None and retry['disposition_sha256'] == closed.disposition_sha256

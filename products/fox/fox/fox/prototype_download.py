@@ -78,8 +78,9 @@ def _retained_export_request(job, snapshot, target):
     result = _json(job / 'prototype-result.json')
     from .prototype_mapping_epochs import technical_record
     from .prototype_container_epoch import NUMBER
+    from .prototype_partition_review_epoch import NUMBER as PARTITION_EPOCH
     epoch = technical_record(root)
-    if epoch is not None and epoch['epoch_number'] == NUMBER:
+    if epoch is not None and epoch['epoch_number'] in (NUMBER, PARTITION_EPOCH):
         from .prototype_result_publication import validate_publication
         if validate_publication(job, epoch) is None:
             raise OpafError('Prototype result publication is incomplete.')

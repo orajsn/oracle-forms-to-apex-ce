@@ -4,6 +4,38 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.16.0] - 2026-11-08
+
+### Continue remaining sections
+
+- Give the independent reviewer losslessly deduplicated source, mapping and
+  shared-screen context. Retain the full audit context separately; do not
+  truncate selected code or change the candidate to obtain approval.
+- Present previous findings as historical allegations to reassess, rather than
+  embedding a response-shaped verdict. Explain shared-screen references for
+  items and subordinate triggers while keeping substantive checks mandatory.
+- Reuse an exact approved saved review through a bounded fifth continuation.
+  Preserve all previous results and failures. Completed sections are not
+  regenerated or reviewed again; unfinished sections use the compact context.
+- Show **Continue remaining sections**, the retained reviewed count and remaining
+  work. Lock the original source selection and require fresh confirmations.
+  Uncertain submissions cannot trigger a second processing request.
+- Keep historical-result validation separate from the current continuation.
+  Check current authority before processing and after reading an export package.
+- Recognize only the fully sealed pre-database review stop for upgrade admission;
+  that classification grants neither processing permission nor success.
+
+Verification covers lossless context reconstruction, tampered-proof rejection,
+local API/worker/HTTP/download behavior with authored external responses, desktop
+and mobile UI states, and the isolated upgrade-reader contract. A bounded actual
+OPAF review approved the unchanged saved candidate, and read-only checks against
+its retained hosted proof preserved the original job. This is not yet evidence
+of a complete real-file conversion or a deployed release.
+
+Remaining analysis, SQLcl validation, unique import, authenticated runtime and
+downloadable export still require live acceptance. Business acceptance remains
+human. See [retained review continuation](docs/retained-review-continuation.md).
+
 ## [0.15.0] - 2026-11-08
 
 ### Continue with reviewed structure

@@ -98,23 +98,27 @@ def _fences(root):
     if root.name == 'prototype-pipeline' and (job / 'source-snapshot.json').exists():
         from . import prototype_mapping_epochs as epochs, prototype_clause_epoch as clause
         from . import prototype_container_epoch as container
+        from . import prototype_partition_review_epoch as partition
+        partition_head = ((root / partition.PREFIX).exists() or (root / partition.PREFIX).is_symlink()
+            or (job / partition.RECORD).exists() or (job / partition.RECORD).is_symlink())
         for name in ('source-snapshot.json', 'mapping-continuation.json', 'prototype-result.json'):
             result[name] = _file_pin(epochs._safe_path(job, name))
         for folder, allowed in (('mapping-epochs', lambda name: name in {
-                'epoch-000002.json', 'epoch-000003.json', 'epoch-000004.json'}),
+                'epoch-000002.json', 'epoch-000003.json', 'epoch-000004.json'} | ({'epoch-000005.json'} if partition_head else set())),
                 ('prototype-results', lambda name: bool(re.fullmatch('[a-f0-9]{64}\\.json', name)))):
             directory = epochs._safe_path(job, folder)
             if any(not allowed(path.name) for path in directory.iterdir()):
                 _fail()
             result[folder] = _inventory(directory)
-        publications = epochs._safe_path(job, container.RESULT_BASE)
-        if any(path.name not in ('previous-result.json', 'publication.json') for path in publications.iterdir()):
-            _fail()
+        for result_module in (container, partition) if partition_head else (container,):
+            publications = epochs._safe_path(job, result_module.RESULT_BASE)
+            if any(path.name not in ('previous-result.json', 'publication.json') for path in publications.iterdir()):
+                _fail()
         parent = publications.parent
-        if {path.name for path in parent.iterdir()} != {container.NAME}:
+        if {path.name for path in parent.iterdir()} != ({container.NAME, partition.NAME} if partition_head else {container.NAME}):
             _fail()
         result['result-publications'] = _inventory(parent)
-        for module in (clause, container):
+        for module in (clause, container, partition) if partition_head else (clause, container):
             stage = module._stage(job)
             for path in (stage.parent, stage, stage / 'json', stage / 'json/review'):
                 clause._protected(path, directory=True)

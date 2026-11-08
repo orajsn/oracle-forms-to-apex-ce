@@ -190,10 +190,12 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     from .prototype_mapping_continuation import validate_job_continuation
     validate_job_continuation(job, snapshot, raw)
     from . import prototype_container_epoch as container
-    if (job / container.RECORD).exists():
+    from . import prototype_partition_review_epoch as partition
+    current_record = partition.RECORD if (job / partition.RECORD).exists() else container.RECORD
+    if (job / current_record).exists():
         from .prototype_result_publication import validate_publication
         from .prototype_mapping_epochs import read
-        if validate_publication(job, read(job / container.RECORD)) is not None:
+        if validate_publication(job, read(job / current_record)) is not None:
             raise OpafError('This epoch already published its terminal result; no operation was replayed.')
     if 'retry_of' in snapshot:
         from .prototype_mapping_recovery import retry_run_id
@@ -238,7 +240,7 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record
     record = technical_record(job / 'prototype-pipeline')
-    if record is not None and record['epoch_number'] == container.NUMBER:
+    if record is not None and record['epoch_number'] in (container.NUMBER, partition.NUMBER):
         from .prototype_result_publication import controlled_save_result
         controlled_save_result(job, result, record)
     else:

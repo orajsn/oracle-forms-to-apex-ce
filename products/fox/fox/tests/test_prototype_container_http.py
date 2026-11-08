@@ -10,6 +10,7 @@ import importlib
 import json
 from pathlib import Path
 import sys
+import time
 from types import SimpleNamespace
 
 from starlette.applications import Starlette
@@ -34,14 +35,19 @@ class MCP:
 
 
 def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(container_case, monkeypatch, tmp_path_factory):
+    _http_roundtrip(container_case, monkeypatch, tmp_path_factory)
+
+
+def _http_roundtrip(case, monkeypatch, tmp_path_factory, *, epoch_module=container, next_epoch_body=next_body):
+    """Shared real HTTP/ZIP harness; external provider/SQL/browser are authored."""
     from forms2apex.prototype_routes import attach_prototype_routes
     from forms2apex import native_blueprint
     from forms2apex.project_reviews import digest
     from forms2apex.security import alias_for_job
     from forms2apex.target_profile import select_target_profile
-    case = container_case
+    container = epoch_module
     c, root, pid, rid, job, snapshot, _, model, _, db, envelope = case
-    plan, body = next_body(case)
+    plan, body = next_epoch_body(case)
     assert c.post(api(case, 'mapping-epochs'), json=body).status_code == 202
     profile = root / 'public-profile.json'
     profile.write_text(json.dumps(envelope)); profile.chmod(0o600)
@@ -55,6 +61,7 @@ def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(contai
     token = 'AUTHORED-SYNTHETIC-LOCAL-HTTP-ONLY'
     http_calls, callbacks, private_factories, package_races = [], [], [], []
     holder = {}
+    authority_seconds = []
     stage_source = model.calls[:]
 
     def prepare(request):
@@ -64,7 +71,9 @@ def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(contai
         monkeypatch.setattr(gateway_fixture, 'spec', lambda _: deepcopy(spec))
         item = gateway_fixture.case.__wrapped__(tmp_path_factory)
         def authorize(value):
+            started = time.perf_counter()
             result = prototype_authority.authorize_current(root, db, profile, value)
+            authority_seconds.append(time.perf_counter() - started)
             callbacks.append((len(value['prior_receipts']), result['request_sha256']))
             return value
         item.adapter.authorize = authorize
@@ -135,7 +144,11 @@ def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(contai
         row, errors = process(case, monkeypatch)
         assert row['state'] == 'GENERATED', '\n'.join(errors) or row['message']
         new = model.calls[len(stage_source):]
-        assert new[0][0] == 'reviewer' and new[0][1]['request']['focus_id'] == plan['projection_focus_id']
+        if container.NUMBER == 5:
+            _, full_plan = epochs.reconstruct(job, snapshot, (job / 'source-snapshot.json').read_bytes(), envelope['target_profile'])
+            assert new[0][0] == 'mapper' and new[0][1]['focus_id'] == full_plan['requests'][8]['focus_id']
+        else:
+            assert new[0][0] == 'reviewer' and new[0][1]['request']['focus_id'] == plan['projection_focus_id']
         assert len([role for role, _ in new if role == 'mapper']) == plan['remaining_focus_count']
         assert sum(method == 'POST' and path.endswith('/authority') for method, path in http_calls) == 1
         assert [path.rsplit('/', 1)[-1] for method, path in http_calls if method == 'POST' and '/stages/' in path] == [
@@ -159,7 +172,7 @@ def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(contai
         old_history_raw = previous_history.read_bytes()
         with db() as connection:
             event = tuple(connection.execute('SELECT owner,action,object_id,created FROM events WHERE object_id LIKE ?',
-                (rid + ':epoch:000004:%',)).fetchone())
+                (rid + ':epoch:' + f'{container.NUMBER:06d}' + ':%',)).fetchone())
 
         for mutation in ('missing-event', 'old-history'):
             if mutation == 'missing-event':
@@ -194,3 +207,4 @@ def test_four_exact_http_receiver_full_zip_and_current_output_race_guards(contai
                 else: previous_history.write_bytes(old_history_raw)
         assert model.calls == completed
         assert sum(method == 'POST' and '/stages/' in path for method, path in http_calls) == 5
+        return {'maximum_authority_seconds': max(authority_seconds), 'stage_posts': 5, 'package_bytes': len(package.content)}

@@ -42,6 +42,7 @@ class PrototypeEpochInput(PrototypeContinuationInput):
     expected_predecessor_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
     expected_clause_proof_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     expected_container_proof_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+    expected_partition_proof_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
 
 
 def source_documents(sources):
@@ -496,7 +497,9 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         plan, before, record, checkpoint, predecessor = inspect_next_epoch(job, snapshot, original, target['target_profile'], c)
         from . import prototype_clause_epoch as clause
         from . import prototype_container_epoch as container
-        number = container.NUMBER if 'container_proof_sha256' in plan else clause.NUMBER if 'clause_proof_sha256' in plan else NUMBER
+        from . import prototype_partition_review_epoch as partition
+        number = (partition.NUMBER if 'partition_proof_sha256' in plan else container.NUMBER if 'container_proof_sha256' in plan
+            else clause.NUMBER if 'clause_proof_sha256' in plan else NUMBER)
         if record is None and run['state'] != 'ATTENTION':
             raise ValueError('Only a known terminal checkpoint can start this epoch.')
         if read_prototype_snapshot(job)[1] != original:
@@ -526,6 +529,13 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 projection['reason'] = ('Reuse the retained independently approved container correction and clause proof without '
                     'repeating root mapping, root review or projection mapping; review the unchanged projection once with '
                     'validated screen and ancestor context, then continue the remaining sections of this same run.')
+        if number == partition.NUMBER:
+            projection.update(strategy=partition.STRATEGY, expected_partition_proof_sha256=plan['partition_proof_sha256'],
+                **{key: plan[key] for key in ('reused_review_focuses', 'new_corrective_model_calls',
+                    'repeated_mapper_calls', 'repeated_reviewer_calls')})
+            if record is None:
+                projection['reason'] = ('Reuse the completed independent review and unchanged mapping, then continue the remaining '
+                    'sections of this same run without repeating mapping or review. Validation and import remain pending.')
         return projection, snapshot, original, plan, before, record, run
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/mapping-epochs/next')
@@ -551,8 +561,10 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 projection, snapshot, original, plan, before, record, run = epoch_context(c, pid, rid, p['owner'])
                 from . import prototype_clause_epoch as clause
                 from . import prototype_container_epoch as container
+                from . import prototype_partition_review_epoch as partition
                 clause_epoch = projection['epoch_number'] == clause.NUMBER
                 container_epoch = projection['epoch_number'] == container.NUMBER
+                partition_epoch = projection['epoch_number'] == partition.NUMBER
                 if (body.expected_epoch_number != projection['epoch_number']
                         or body.expected_predecessor_sha256 != projection['predecessor_sha256']
                         or body.checkpoint_sha256 != projection['checkpoint_sha256']
@@ -562,6 +574,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                         or body.approved_chunk_hashes != projection['approved_chunk_hashes']
                         or body.expected_clause_proof_sha256 != projection.get('expected_clause_proof_sha256')
                         or body.expected_container_proof_sha256 != projection.get('expected_container_proof_sha256')
+                        or body.expected_partition_proof_sha256 != projection.get('expected_partition_proof_sha256')
                         or not all(value is True for value in (body.approved_redacted_source, body.approved_external_ai, body.approved_prototype_scope))):
                     raise ValueError('Epoch needs the exact plan and three fresh source-processing consents.')
                 result = {'id': rid, 'state': run['state'] if record else 'QUEUED', 'conversion_profile': PROFILE_ID,
@@ -572,15 +585,18 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     raise HTTPException(429, 'Other unresolved work blocks this epoch. Existing outcomes remain preserved.')
                 now = time.time()
                 record = {'schema_version': 1, 'scope': SCOPE,
-                    'strategy': container.STRATEGY if container_epoch else clause.STRATEGY if clause_epoch else STRATEGY, 'epoch_number': projection['epoch_number'],
+                    'strategy': partition.STRATEGY if partition_epoch else container.STRATEGY if container_epoch else clause.STRATEGY if clause_epoch else STRATEGY, 'epoch_number': projection['epoch_number'],
                     'predecessor_sha256': projection['predecessor_sha256'], 'checkpoint_sha256': projection['checkpoint_sha256'],
                     'job_id': rid, 'project_id': pid, 'snapshot_sha256': hashlib.sha256(original).hexdigest(),
                     'source_hash': snapshot['source_hash'], 'source_binding': snapshot['prototype']['source_binding'],
                     'target_profile_sha256': snapshot['prototype']['target_profile_sha256'], 'owner': p['owner'], 'approved_at': now,
                     'approvals': {'redacted_source': True, 'external_ai': True, 'synthetic_prototype': True},
-                    'before_files': before, 'plan': plan, 'normalization_policy': container.POLICY if container_epoch else clause.POLICY if clause_epoch else POLICY}
+                    'before_files': before, 'plan': plan, 'normalization_policy': partition.POLICY if partition_epoch else container.POLICY if container_epoch else clause.POLICY if clause_epoch else POLICY}
                 job = root / 'jobs' / rid
-                if container_epoch:
+                if partition_epoch:
+                    record['partition_proof_sha256'] = projection['expected_partition_proof_sha256']
+                    partition.adopt(job, snapshot, original, record)
+                elif container_epoch:
                     record['container_proof_sha256'] = projection['expected_container_proof_sha256']
                     container.adopt(job, snapshot, original, record)
                 elif clause_epoch:
