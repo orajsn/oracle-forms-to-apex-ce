@@ -4,6 +4,23 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.18.1] - 2026-11-08
+
+### Show the saved run's actual next step
+
+- Replace the premature saved-output banner with waiting, processing, attention
+  or generated-prototype wording based on the recorded run.
+- Open the existing relevant progress/output surface without starting another
+  conversion. Keep current-source readiness ahead of older run history.
+- Suppress the banner for invalid history, source bindings or unknown outcomes.
+- Keep generated output, technical verification and human acceptance separate.
+- Align the readable-upload regression with existing server-side FMB guidance;
+  retain its disabled-upload and zero-upload assertions.
+
+The complete local workbench suite passed 97 tests, including both isolated
+browser scenarios, with no skips. These use synthetic local fixtures, not a
+live conversion. This source release does not prove deployment or APEX output.
+
 ## [0.18.0] - 2026-11-08
 
 ### Review an invalid response without regenerating the mapping
