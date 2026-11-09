@@ -30,6 +30,9 @@ _FACT_KEYS = {"schema_version", "scope", "assessment_status", "source", "modules
               "blocks", "items", "objects", "code_units", "links", "dependencies",
               "findings", "safety", "interpretation_boundary", "totals"}
 _OBJECT_KEYS = {"id", "kind", "name", "module_id", "block_id", "parent_id", "location"}
+_INDEX_CACHE_MAX_NODES = MAX_JSON_NODES
+_INDEX_CACHE_MAX_DEPTH = 20
+_INDEX_CACHE_MAX_TEXT = MAX_JSON_BYTES
 
 
 def _fail(message="Invalid source-bound blueprint structure."):
@@ -345,6 +348,64 @@ def source_fact_index(packet):
     Caller must reconstruct packet from original bytes. This is deterministic
     source evidence, never an AI approval, generation or behavior acceptance.
     """
+    from .prototype_read_scope import current_read_root, cached_read
+    root = current_read_root()
+    if root is None or not _index_cache_eligible(packet):
+        return _source_fact_index_uncached(packet)
+    def compute():
+        objects, evidence, allowed = _source_fact_index_uncached(packet)
+        # Never put borrowed mutable source rows in the cache.
+        return list(objects), evidence, allowed
+    ids, evidence, allowed = cached_read(root, 'active_focus', {
+        'purpose': 'fox-full-source-fact-index-v1', 'packet': packet}, compute)
+    # The full logical packet is the key and was validated on the miss. Rebind
+    # only the object reference map; original row identity/order is preserved.
+    rows = {row['id']: row for entry in packet['sources'] for row in entry['facts']['objects']}
+    return {ref: rows[ref] for ref in ids}, evidence, allowed
+
+
+def _index_cache_eligible(packet):
+    """Eligibility only: unsupported/cyclic/oversized inputs use the old body.
+
+    Exact plain JSON types prevent canonical tuple/list or key-type collisions.
+    Normal facts are acyclic DAGs; every logical occurrence consumes budget,
+    while only active-ancestor cycles (not shared row aliases) are excluded.
+    """
+    remaining, text = _INDEX_CACHE_MAX_NODES, _INDEX_CACHE_MAX_TEXT
+    active = set()
+    def visit(value, depth):
+        nonlocal remaining, text
+        remaining -= 1
+        if remaining < 0 or depth > _INDEX_CACHE_MAX_DEPTH:
+            return False
+        kind = type(value)
+        if kind is dict or kind is list:
+            ref = id(value)
+            if ref in active:
+                return False
+            active.add(ref)
+            try:
+                if kind is dict:
+                    for key, child in value.items():
+                        if type(key) is not str or len(key) > 180:
+                            return False
+                        text -= len(key)
+                        if text < 0 or not visit(child, depth + 1):
+                            return False
+                    return True
+                return all(visit(child, depth + 1) for child in value)
+            finally:
+                active.remove(ref)
+        if kind is str:
+            text -= len(value)
+            return text >= 0 and len(value) <= MAX_FILE_BYTES
+        if kind is int:
+            return value.bit_length() <= 4096
+        return value is None or kind is bool or kind is float and math.isfinite(value)
+    return visit(packet, 0)
+
+
+def _source_fact_index_uncached(packet):
     _bounded_json(packet)
     _keys(packet, {"schema_version", "scope", "source_binding", "sources"}, {
         "chunks", "selectable_code_unit_ids", "selected_code_unit_ids", "transfer_authorized",

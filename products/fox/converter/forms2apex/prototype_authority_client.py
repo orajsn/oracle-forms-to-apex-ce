@@ -11,9 +11,12 @@ from . import runtime_preflight
 
 AUTHORITY_PATH = '/api/internal/prototype/authorize'
 RESPONSE_SCOPE = 'fox-prototype-current-authority-v1'
+PRECLAIM_AUTHORITY_PATH = '/api/internal/prototype/preclaim-authorize'
+PRECLAIM_RESPONSE_SCOPE = 'fox-prototype-current-preclaim-authority-v1'
 MAX_RESPONSE_BYTES = 8192
 MAX_REQUEST_BYTES = 2_000_000
-DEFAULT_AUTHORITY_TIMEOUT_SECONDS = 30
+DEFAULT_AUTHORITY_TIMEOUT_SECONDS = 120
+MAX_AUTHORITY_TIMEOUT_SECONDS = 120
 
 
 def _bytes(value):
@@ -71,7 +74,7 @@ class PrototypeAuthorityClient:
                 or authority_origin != 'https://' + url.netloc
                 or origin.path or origin.query or origin.fragment
                 or any(c.isspace() for c in authority_url + authority_origin)
-                or type(timeout) not in (int, float) or not 0 < timeout <= 30):
+                or type(timeout) not in (int, float) or not 0 < timeout <= MAX_AUTHORITY_TIMEOUT_SECONDS):
             raise ValueError('Trusted exact HTTPS FOX authority URL/origin required')
         token = settings.bearer_token
         if (not isinstance(token, str) or not 16 <= len(token) <= 8192
@@ -80,10 +83,21 @@ class PrototypeAuthorityClient:
         self.settings, self.url, self.origin, self.timeout = settings, url, authority_origin, timeout
 
     def __call__(self, request):
+        return self._call(request)
+
+    def authorize_preclaim(self, request, record_sha256):
+        if (type(record_sha256) is not str or len(record_sha256) != 64
+                or any(c not in '0123456789abcdef' for c in record_sha256)):
+            raise RuntimeError('PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY')
+        return self._call(request, record_sha256=record_sha256)
+
+    def _call(self, request, *, record_sha256=None):
         try:
             if not isinstance(request, dict):
                 raise ValueError('Request must be an object')
-            raw = _bytes(request)
+            raw = _bytes(request if record_sha256 is None else {'schema_version':1,
+                'scope':'fox-prototype-preclaim-authorize-request-v1',
+                'request':request,'record_sha256':record_sha256})
             if len(raw) > MAX_REQUEST_BYTES:
                 raise ValueError('Authority request oversized')
             expected_target = _hash(execution_target(runtime_preflight.bound_target_profile(self.settings)))
@@ -92,7 +106,7 @@ class PrototypeAuthorityClient:
             connection = http.client.HTTPSConnection(self.url.hostname, 443,
                 context=ssl.create_default_context(), timeout=self.timeout)
             try:
-                connection.request('POST', AUTHORITY_PATH, body=raw, headers={
+                connection.request('POST', AUTHORITY_PATH if record_sha256 is None else PRECLAIM_AUTHORITY_PATH, body=raw, headers={
                     'Authorization': 'Bearer ' + self.settings.bearer_token, 'Origin': self.origin,
                     'Content-Type': 'application/json', 'Accept': 'application/json'})
                 response = connection.getresponse()
@@ -107,8 +121,10 @@ class PrototypeAuthorityClient:
                 connection.close()
             fields = {'schema_version', 'scope', 'request_sha256', 'job_id', 'project_id',
                       'source_binding', 'target_profile_sha256', 'execution_target_sha256'}
+            if record_sha256 is not None: fields.add('record_sha256')
             if (not isinstance(value, dict) or set(value) != fields or type(value['schema_version']) is not int
-                    or value['schema_version'] != 1 or value['scope'] != RESPONSE_SCOPE
+                    or value['schema_version'] != 1 or value['scope'] != (RESPONSE_SCOPE if record_sha256 is None else PRECLAIM_RESPONSE_SCOPE)
+                    or record_sha256 is not None and value.get('record_sha256') != record_sha256
                     or value['request_sha256'] != _hash(request)
                     or any(value[key] != request[key] for key in ('job_id', 'project_id', 'source_binding'))
                     or value['execution_target_sha256'] != expected_target

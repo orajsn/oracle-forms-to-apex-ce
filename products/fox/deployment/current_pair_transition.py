@@ -12,6 +12,7 @@ from copy import deepcopy
 import hashlib
 import importlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path,PurePosixPath
@@ -32,7 +33,8 @@ REFS=('old_installation','new_installation','old_unit','new_unit','helper','supp
 
 def references(p):
     return REFS + (('snapshot_adapter',) if p['schema_version'] == 2 else ()) + (
-        ('candidate_plan',) if p['schema_version'] == 2 and 'candidate_plan' in p else ())
+        ('candidate_plan',) if p['schema_version'] == 2 and 'candidate_plan' in p else ()) + (
+        ('preclaim_preservation',) if p['schema_version'] == 2 and 'preclaim_preservation' in p else ())
 
 
 class TransitionError(RuntimeError):pass
@@ -141,7 +143,11 @@ store=m.VerificationRecovery(pathlib.Path(p['data'])/'fox.sqlite3',enabled=True)
 with store._db(False) as db:
  db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
  ids=store._job_ids(db)
- protected={job:store._protected_read_status(db,job,purpose='maintenance_preservation') for job in sorted(ids)}
+ paired=p.get('paired_preclaim',{})
+ assert type(paired)is dict and set(paired)<=set(ids)
+ protected={job:store._protected_read_status(db,job,purpose='maintenance_preclaim_preservation',
+  paired_readback=paired[job]['readback'],expected_pair=paired[job]['expected']) if job in paired else
+  store._protected_read_status(db,job,purpose='maintenance_preservation') for job in sorted(ids)}
  eligibility={job:value['admission'] for job,value in protected.items()}
  preservation={}
  assert len(ids)<=10000
@@ -149,8 +155,14 @@ with store._db(False) as db:
   if value['preservation_allowed']:
    run=dict(db.execute('SELECT * FROM runs WHERE id=?',(job,)).fetchone())
    assert value['admission']['blocks_admission'] is True and value['admission']['retry_eligible'] is False
-   assert value['preservation_state']=='closed_provider_history' and m.terminal_closed_provider_preservation(store.database,db,run) is True
-   preservation[job]='closed_provider_history'
+   if job in paired:
+    assert value['preservation_state']=='preclaim_validate_history'
+    preserved=m.validate_preclaim_pair(store.database,db,run,paired[job]['readback'],paired[job]['expected'])
+    assert value['preserved']==preserved
+    preservation[job]={'state':'preclaim_validate_history','preserved':preserved}
+   else:
+    assert value['preservation_state']=='closed_provider_history' and m.terminal_closed_provider_preservation(store.database,db,run) is True
+    preservation[job]='closed_provider_history'
   else:assert value['admission']['blocks_admission'] is False
  closed={}
  if store._precheck_schema(db):
@@ -247,6 +259,52 @@ print(json.dumps(result,sort_keys=True))
 '''
 
 
+def preclaim_module_origin(name,new_sha256,physical_sha256):
+    """Never let new bytes attest a different old physical module file."""
+    package=name in ('fox','forms2apex')
+    path='/app/'+name.replace('.','/')+('/__init__.py' if package else '.py')
+    return path if new_sha256==physical_sha256 else '<measured-new:'+name+':'+new_sha256+'>'
+
+
+PRECLAIM_TECHNICAL=inspect.getsource(preclaim_module_origin)+r'''
+import base64,hashlib,importlib.abc,importlib.util,json,pathlib,sys,types
+p=json.load(sys.stdin); sources={}
+for name,row in p['sources'].items():
+ raw=base64.b64decode(row['bytes'],validate=True)
+ assert hashlib.sha256(raw).hexdigest()==row['sha256'];sources[name]=raw
+class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
+ def find_spec(self,name,path=None,target=None):
+  if name.split('.')[0] not in ('fox','forms2apex'):return None
+  assert name in sources,'UNMEASURED_PURE_READER_DEPENDENCY'
+  return importlib.util.spec_from_loader(name,self,is_package=name in ('fox','forms2apex'))
+ def create_module(self,spec):return None
+ def exec_module(self,m):
+  path=pathlib.Path('/app/'+m.__name__.replace('.','/')+('/__init__.py' if m.__name__ in ('fox','forms2apex') else '.py'))
+  physical=hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() and not path.is_symlink() else None
+  m.__file__=preclaim_module_origin(m.__name__,hashlib.sha256(sources[m.__name__]).hexdigest(),physical)
+  if m.__name__ in ('fox','forms2apex'):m.__path__=[]
+  exec(compile(sources[m.__name__],m.__file__,'exec'),m.__dict__)
+sys.meta_path.insert(0,Finder());sys.dont_write_bytecode=True
+from fox import verification_recovery as r
+value=r.preclaim_technical_read(pathlib.Path('/data/fox.sqlite3'),p['job_id'],p['target'],p['source_sha256'])
+print(json.dumps({'technical':value,'request':r.preclaim_request(pathlib.Path('/data/jobs')/p['job_id'])},sort_keys=True))
+'''
+
+PRECLAIM_BARRIER=r'''
+import json,sys
+sys.path.insert(0,'/app')
+from fox.prototype_job import _configuration
+from fox.opaf import OpafError
+p=json.load(sys.stdin);client=_configuration(p['target_profile_sha256'])['gateway']
+try:
+ client.request('GET','/fox/prototype/jobs/'+p['job_id']+'/stages/validate')
+ raise RuntimeError('RECEIVER_ALREADY_HAS_VALIDATE_RESULT')
+except OpafError as error:
+ assert error.status_code==404
+print(json.dumps({'method':'GET','stage':'validate','job_id':p['job_id'],'status':404},sort_keys=True))
+'''
+
+
 class Transition:
     def __init__(self,p,*,status=False):
         self.p=p;self.digest=sha(cb(p));self.A=A=load('current_transition_helpers',p['helper'])
@@ -321,10 +379,199 @@ class Transition:
         program="import pathlib,sys;sys.stdin=open(sys.argv[1]);"+loader
         return document(self.effect(label,[self.cfg['python']['path'],'-I','-B','-c',program,str(input_path)]))
 
-    def data(self,*,stopped=False,new=False):
+    def _preclaim_sources(self):
+        root=absolute(self.new_i['layout']['release_root'])
+        inventory=document(self.A.read(absolute(self.new_i['layout']['inventory']['path']),private=True))
+        result={}
+        for name,expected in inventory['files'].items():
+            for prefix,package in (('fox/fox/','fox'),('converter/forms2apex/','forms2apex')):
+                if name.startswith(prefix) and name.endswith('.py'):
+                    tail=name[len(prefix):-3]
+                    need('/' not in tail and tail.isidentifier(),'PRECLAIM_PYTHON_NAMESPACE_INVALID')
+                    module=package if tail=='__init__' else package+'.'+tail
+                    raw=self.A.read(root/name);need(sha(raw)==expected,'PRECLAIM_TECHNICAL_SOURCE_CHANGED')
+                    result[module]={'sha256':expected,'bytes':base64.b64encode(raw).decode()}
+        need('fox.verification_recovery' in result and 'forms2apex.native_blueprint' in result,
+             'PRECLAIM_TECHNICAL_NAMESPACE_INCOMPLETE')
+        return result
+
+    def preclaim_profile(self,fox,pin,baseline,*,stopped=False,retained=None):
+        """Read the focused envelope through the existing protected RO probe.
+
+        The native project profile is only an execution-destination comparator.
+        Never host-open the mapped-UID profile directory. A stopped pair retains
+        its actual prior live observation, not a fabricated fresh profile read.
+        """
+        A=self.A
+        raw=A.read(self.candidate_path,private=True)
+        declared=A.plan_document(raw,sha(raw))
+        validate_candidate_plan_reference(self.p,self.candidate_path,raw,declared)
+        need(declared==self.candidate_plan and 'prototype_authority' in declared,
+             'PRECLAIM_CANDIDATE_PROFILE_BINDING_CHANGED')
+        option=A.prototype_configuration(declared['prototype_authority']);ref=option['profile']
+        filename=PurePosixPath(ref['path']).name
+        mounted='/run/fox-opaf/'+filename
+        environment=A.environment(fox)
+        need(environment.get('FOX_PROTOTYPE_PROFILE_FILE')==mounted
+            and environment.get('FOX_PROTOTYPE_AUTHORITY_ENABLED')=='1'
+            and environment.get('FOX_PUBLIC_ORIGIN')==option['origin'],
+            'PRECLAIM_FOCUSED_PROFILE_ENVIRONMENT_CHANGED')
+        need(A.mount_map(fox).get('/run/fox-opaf')==(A.PROTOTYPE_PROFILE_ROOT,False),
+             'PRECLAIM_FOCUSED_PROFILE_MOUNT_CHANGED')
+        image=fox.get('Image','');image=image if image.startswith('sha256:') else 'sha256:'+image
+        need(fox.get('Id')==pin['id'] and image==pin['image'] and fox['Config']['User']=='1000:1000',
+             'PRECLAIM_FOCUSED_PROFILE_CONTAINER_CHANGED')
+        binding={'container_id':pin['id'],'image':pin['image'],'candidate_plan_sha256':sha(raw),
+            'profile':ref,'mounted_path':mounted,'mount_source':A.PROTOTYPE_PROFILE_ROOT,'mount_read_only':True}
+        state=fox['State']
+        if stopped:
+            need(state.get('Running') is False and type(state.get('Pid'))is int and state['Pid']==0
+                and state.get('Status') in ('stopped','exited'), 'PRECLAIM_FOCUSED_PROFILE_NOT_STOPPED')
+            need(type(retained)is dict and retained.get('observation')=='mounted_live'
+                and retained.get('binding')==binding,'PRECLAIM_RETAINED_FOCUSED_PROFILE_REQUIRED')
+            envelope=retained['envelope']
+        else:
+            need(state.get('Running') is True and type(state.get('Pid'))is int and state['Pid']>0,
+                 'PRECLAIM_FOCUSED_PROFILE_NOT_RUNNING')
+            observed=A.parse(A.command(['/usr/bin/podman','exec',pin['id'],'/usr/local/bin/python','-I','-B','-c',
+                A.PROTOTYPE_PROFILE_PROBE,filename,ref['sha256']],maximum=131_072))
+            need(type(observed)is dict and set(observed)=={'status','profile_sha256','envelope'}
+                and observed['status']=='PROTECTED_PROTOTYPE_PROFILE_READABLE'
+                and observed['profile_sha256']==ref['sha256'],'PRECLAIM_FOCUSED_PROFILE_READ_UNCONFIRMED')
+            envelope=observed['envelope']
+        need(type(envelope)is dict and set(envelope)=={'target_profile','target_profile_sha256'}
+            and envelope['target_profile_sha256']==sha(cb(envelope['target_profile'])[:-1])
+            and envelope['target_profile_sha256']==baseline['target_profile_sha256'],
+            'PRECLAIM_FOCUSED_PROFILE_TARGET_CHANGED')
+        need(A.prototype_execution_target(envelope['target_profile'])==A.prototype_execution_target(self.cfg['target_profile']),
+             'PRECLAIM_FOCUSED_EXECUTION_TARGET_CHANGED')
+        return document(cb({'observation':'retained_before_stop' if stopped else 'mounted_live',
+                            'binding':binding,'envelope':envelope}))
+
+    def preclaim_read(self,*,stopped,new,lease):
+        from datetime import datetime,timedelta,timezone
+        ref=self.p.get('preclaim_preservation')
+        if ref is None:return {}
+        need(lease is not None,'PRECLAIM_ACTUAL_LEASE_REQUIRED')
+        journal=self.service.product.PrivateJournal(self.old.release)
+        lease.require_active(self.old.release,journal.root)
+        baseline=document(self.A.read(absolute(ref['path']),private=True))
+        need(sha(cb(baseline))==ref['sha256'] and set(baseline)=={'schema_version','scope','job_id',
+            'request_sha256','source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256',
+            'manifest_sha256','original_handler'},'PRECLAIM_REVIEWED_BASELINE_INVALID')
+        need(type(baseline['schema_version'])is int and baseline['schema_version']==1
+            and baseline['scope']=='fox-reviewed-preclaim-terminal-baseline-v1'
+            and type(baseline['job_id'])is str and re.fullmatch('fox-[a-f0-9]{20}',baseline['job_id'])
+            and all(type(baseline[k])is str and SHA.fullmatch(baseline[k]) for k in ('request_sha256',
+                'source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256','manifest_sha256')),
+            'PRECLAIM_REVIEWED_BASELINE_INVALID')
+        terminal=baseline['original_handler']
+        need(type(terminal)is dict and set(terminal)=={'method','stage','status','container_id','completed_at_utc'}
+            and terminal['method']=='POST' and terminal['stage']=='validate' and terminal['status']==409
+            and terminal['container_id']==self.old_pins['forms2apex-mcp']['id'],
+            'PRECLAIM_ORIGINAL_HANDLER_NOT_TERMINAL')
+        reader=load('fox._paired_maintenance',self.p['recovery'])
+        reader.classification_contract().timestamp(terminal['completed_at_utc'])
+        prefix=['/usr/bin/podman','unshare',self.cfg['python']['path'],'-I','-B','-c']
+        params={'fox_data':self.snapshot['role_paths']['fox-data'],
+                'receiver_jobs':self.snapshot['role_paths']['converter-jobs'],'job_id':baseline['job_id']}
+        def collect():
+            result=subprocess.run(prefix+[reader.preclaim_collector_source()],input=cb(params),capture_output=True,timeout=120)
+            need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=2_000_000,
+                 'PRECLAIM_PAIRED_TREE_READ_FAILED')
+            return document(result.stdout)
+        pins=self.pins if new else self.old_pins
+        def current_pair():
+            self.scope();items={}
+            ids=self.A.command(['/usr/bin/podman','ps','-aq','--no-trunc']).decode().split()
+            need(len(ids)<=256 and len(ids)==len(set(ids)),'PRECLAIM_PRODUCER_INVENTORY_INVALID')
+            contract=reader.classification_contract();observed=datetime.now(timezone.utc).isoformat()
+            for identity in ids:
+                item=self.A.inspect_container(identity);state=item['State'];name=item['Name'].lstrip('/')
+                image=item['Image'];image=image if image.startswith('sha256:') else 'sha256:'+image
+                row={'id':item['Id'],'name':name,'image':image,'status':state['Status'],'running':state['Running'],
+                    'pid':state['Pid'],'exit_code':state['ExitCode'],'created_at':item['Created'],
+                    'started_at':state['StartedAt'],'finished_at':state['FinishedAt']}
+                kind=contract.classify_row(row,observed)
+                if name in ('fox','forms2apex-mcp'):
+                    need(item['Id']==pins[name]['id'] and image==pins[name]['image']
+                        and (kind=='STOPPED_NON_LIVE' if stopped else kind=='LIVE'),'PRECLAIM_CURRENT_PAIR_CHANGED')
+                    items[name]={'id':item['Id'],'image':image,'configuration':self.M.configuration_signature(self.A,item)}
+                elif name=='oracle-applied-ai-label':
+                    need(kind=='LIVE' and item['Id']==self.old_pins[name]['id'],'PRECLAIM_CORE_CHANGED')
+                else:need(kind in ('STOPPED_NON_LIVE','CREATED_NEVER_STARTED'),'PRECLAIM_LIVE_OR_UNKNOWN_PRODUCER')
+            need(set(items)=={'fox','forms2apex-mcp'},'PRECLAIM_CURRENT_PAIR_MISSING')
+            if not stopped:
+                self.health()
+                rows=self.A.command(['/usr/bin/podman','top',pins['forms2apex-mcp']['id'],'pid']).decode().splitlines()
+                need(len(rows)==2 and rows[1].strip()=='1','PRECLAIM_RECEIVER_PROCESS_UNCERTAIN')
+            return items
+        first_pins=current_pair();first=collect()
+        # NEW candidate modules run only in a separate fresh child. Never patch
+        # the serving old namespace, source files, model records or intent.
+        retained_profile=(getattr(self,'_preclaim_live_proof',{}).get('profile') if stopped else None)
+        profile=self.preclaim_profile(self.A.inspect_container(pins['fox']['id']),pins['fox'],baseline,
+            stopped=stopped,retained=retained_profile)
+        target=profile['envelope']['target_profile']
+        if stopped:
+            # Preserve and recheck the last live technical proof; its data hashes
+            # must still match the exact stopped pair. No stopped server is run.
+            need(hasattr(self,'_preclaim_live_proof'),'PRECLAIM_LIVE_PROOF_REQUIRED_BEFORE_STOP')
+            retained=self._preclaim_live_proof;proof=retained['proof']
+            barrier={**retained['barrier'],'kind':'historical_before_stop'}
+            stopped_writer=self.S._host_guard(self.snapshot)
+        else:
+            proof_packet={'sources':self._preclaim_sources(),'job_id':baseline['job_id'],'target':target,
+                          'source_sha256':self.new_i['layout']['inventory']['sha256']}
+            run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_TECHNICAL],
+                input=cb(proof_packet),capture_output=True,timeout=240)
+            need(run.returncode==0 and not run.stderr.strip() and 0<len(run.stdout)<=2_000_000,'PRECLAIM_PURE_TECHNICAL_READ_FAILED')
+            proof=document(run.stdout)
+            run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_BARRIER],
+                input=cb({'job_id':baseline['job_id'],'target_profile_sha256':baseline['target_profile_sha256']}),capture_output=True,timeout=180)
+            need(run.returncode==0 and not run.stderr.strip(),'PRECLAIM_SERIALIZATION_BARRIER_FAILED')
+            barrier_result=document(run.stdout);stopped_writer=None
+        second=collect();second_pins=current_pair();lease.require_active(self.old.release,journal.root)
+        need(self.preclaim_profile(self.A.inspect_container(pins['fox']['id']),pins['fox'],baseline,
+            stopped=stopped,retained=retained_profile)==profile,'PRECLAIM_FOCUSED_PROFILE_CHANGED_DURING_PROOF')
+        need(first==second and first_pins==second_pins,'PRECLAIM_PAIR_CHANGED_DURING_PROOF')
+        model_hash=lambda value:sha(cb(value).rstrip(b'\n'))
+        need(model_hash(second['fox_tree'])==baseline['fox_tree_sha256']
+            and model_hash(second['receiver_tree'])==baseline['receiver_tree_sha256']
+            and second['receiver_manifest']['manifest_sha256']==baseline['manifest_sha256']
+            and model_hash(proof['request'])==baseline['request_sha256'],'PRECLAIM_REVIEWED_BASELINE_DRIFT')
+        observed=datetime.now(timezone.utc)
+        if not stopped:
+            barrier={'kind':'current_serialized_read','observed_at_utc':observed.isoformat(),
+                'binding':{'pair_sha256':model_hash(second_pins),'fox_tree_sha256':model_hash(second['fox_tree']),
+                    'receiver_tree_sha256':model_hash(second['receiver_tree'])},'result':barrier_result}
+            self._preclaim_live_proof={'proof':proof,'barrier':barrier,'profile':profile}
+        else:
+            need(barrier['binding']['fox_tree_sha256']==model_hash(second['fox_tree'])
+                and barrier['binding']['receiver_tree_sha256']==model_hash(second['receiver_tree']),
+                'PRECLAIM_BEFORE_STOP_EVIDENCE_DRIFT')
+        expected={'job_id':baseline['job_id'],'request_sha256':baseline['request_sha256'],'source_binding':baseline['source_binding'],
+            'target_profile_sha256':baseline['target_profile_sha256'],'pair_sha256':model_hash(second_pins),
+            'scope_sha256':model_hash(self.scope()),'lease_sha256':model_hash({'transition':self.digest,'release':self.old.release}),
+            'original_terminal_sha256':ref['sha256'],'technical_source_sha256':self.new_i['layout']['inventory']['sha256'],'mode':'transition',
+            'runtime_state':'stopped' if stopped else 'running',
+            'stopped_writer_sha256':model_hash(stopped_writer) if stopped else None}
+        readback={'schema_version':1,'scope':reader.PRECLAIM_MAINTENANCE_SCOPE,'observed_at_utc':observed.isoformat(),
+            'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),'binding':expected,
+            **{k:second[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
+            'technical':{**proof['technical'],'receiver_manifest_raw_sha256':second['receiver_manifest_raw_sha256']},
+            'producer':{'fox_worker':'stopped' if stopped else 'terminal_idle','receiver_servers':0 if stopped else 1,
+                'receiver_operations':0,'unknown_producers':0,'original_terminal_sha256':ref['sha256']},
+            'serialization_barrier':barrier,'gateway_witness':None,'stopped_writer':stopped_writer}
+        return {baseline['job_id']:{'readback':readback,'expected':expected}}
+
+    def data(self,*,stopped=False,new=False,lease=None):
         A=self.A;root=Path(self.old.document['layout']['release_root'])
         packet={'source':base64.b64encode(A.read(absolute(self.p['recovery']['path']))).decode(),'sha256':self.p['recovery']['sha256'],
             'paths':[str(root/'fox'),str(root/'converter'),str(root)] if stopped else ['/app'],'data':'/home/opc/fox/data' if stopped else '/data'}
+        if 'preclaim_preservation' in self.p:
+            packet['paired_preclaim']=self.preclaim_read(stopped=stopped,new=new,
+                lease=lease if lease is not None else getattr(self,'_maintenance_lease',None))
         cid=self.pins['fox']['id'] if new else self.old_pins['fox']['id']
         argv=['/usr/bin/podman','unshare',self.old.provider.configuration['python']['path']] if stopped else ['/usr/bin/podman','exec','-i',cid,'/usr/local/bin/python']
         r=subprocess.run(argv+['-I','-B','-c',BACKEND],input=cb(packet),capture_output=True,timeout=120)
@@ -399,6 +646,7 @@ class Transition:
         A=self.A;old,signatures,old_verifier,measurement=self.preflight()
         journal=self.service.product.PrivateJournal(self.old.release)
         with journal.lock(create=False) as lease:
+            if 'preclaim_preservation' in self.p:self._maintenance_lease=lease
             self.old.preflight();self.scope();before=self.data()
             authority=self.S.hosted_authority(lease,self.snapshot_raw,expected_sha256=self.p['snapshot']['sha256'],release_raw=self.old.reference_raw['release'])
             with A.held_stage(self.root,create=True):
@@ -475,6 +723,7 @@ class Transition:
         _,_,_,measurement=self.preflight()
         journal=self.service.product.PrivateJournal(self.old.release)
         with journal.lock(create=False) as lease:
+            if 'preclaim_preservation' in self.p:self._maintenance_lease=lease
             state=self.data()
             authority=self.S.hosted_authority(lease,self.snapshot_raw,
                 expected_sha256=self.p['snapshot']['sha256'],release_raw=self.old.reference_raw['release'])

@@ -405,7 +405,14 @@ class ConverterClient:
         self.token=token
 
     def request(self,method,path,payload=None,binary=False):
-        conn=http.client.HTTPConnection('127.0.0.1',self._port,timeout=600)
+        # A saved-draft continuation can perform three 120-second authority
+        # callbacks around a 600-second SQLcl validation child. Allow those
+        # trusted budgets plus 120 seconds of transport/rendering margin.
+        # This bounds blocking socket I/O, not total wall time or queue delay.
+        # Keep unknown outcomes recover-only; this setting never permits replay.
+        validation = (method == 'POST' and type(path) is str and re.fullmatch(
+            r'/fox/prototype/jobs/fox-[a-f0-9]{20}/(?:stages/validate|continue-validation)', path))
+        conn=http.client.HTTPConnection('127.0.0.1',self._port,timeout=1080 if validation else 600)
         try:
             conn.request(method,path,json.dumps(payload) if payload is not None else None,
                          {'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})

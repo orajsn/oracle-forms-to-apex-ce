@@ -68,6 +68,12 @@ class PrototypeCandidateFormatInput(PrototypeContinuationInput):
     expected_normalization_receipt_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
+class PrototypeValidatePreclaimInput(PrototypeContinuationInput):
+    model_config = {'extra': 'forbid'}
+    expected_validate_request_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_receiver_witness_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 def source_documents(sources):
     documents = []
     for source in sources:
@@ -790,6 +796,151 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             raise
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'The epoch was not queued: source approval or durable epoch state could not be verified. Original operations remain preserved; uncertain calls were not replayed.') from None
+
+    def preclaim_context(c,pid,rid,owner):
+        from .prototype_job import read_prototype_snapshot,validate_prototype_snapshot
+        from .prototype_mapping_recovery import RUN_ID
+        from .prototype_download import configured_download_client
+        from .prototype_transport import PrototypeHttpConverterAdapter
+        from . import prototype_preclaim_continuation as preclaim
+        if not RUN_ID.fullmatch(rid): raise HTTPException(404,'Prototype run not found.')
+        if (root/'jobs').is_symlink(): raise ValueError('Unsafe prototype storage.')
+        job=root/'jobs'/rid
+        snapshot,original=read_prototype_snapshot(job)
+        documents=validate_prototype_snapshot(snapshot)
+        selected=snapshot['prototype']
+        def current(connection):
+            run=connection.execute('SELECT * FROM runs WHERE id=? AND project=?',(rid,pid)).fetchone()
+            locked=connection.execute('SELECT owner FROM projects WHERE id=?',(pid,)).fetchone()
+            target=target_reader()
+            if (not run or not locked or locked['owner']!=owner or snapshot['approvals']['owner']!=owner
+                    or snapshot['project_id']!=pid or snapshot['project']!=pid
+                    or run['state'] not in ('ATTENTION','QUEUED','PROCESSING','GENERATED') or run['artifact'] is not None
+                    or run['source_hash']!=snapshot['source_hash']
+                    or inventory(current_sources(pid,connection))['source_hash']!=snapshot['source_hash']
+                    or source_documents(current_sources(pid,connection))!=documents
+                    or source_history.selected_source_set_id(connection,pid)!=snapshot['selected_source_set_id']
+                    or target['target_profile_sha256']!=selected['target_profile_sha256']
+                    or canonical_hash(target['target_profile'])!=selected['target_profile_sha256']
+                    or read_prototype_snapshot(job)[1]!=original):
+                raise ValueError('Saved validation owner, source, selection, state or target changed.')
+            origin='approved_prototype_mapping_retry' if 'retry_of' in snapshot else 'approved_prototype_conversion'
+            events=connection.execute('SELECT owner,created FROM events WHERE action=? AND object_id=?',(origin,rid)).fetchall()
+            if len(events)!=1 or tuple(events[0])!=(owner,snapshot['approvals']['approved_at']):
+                raise ValueError('Saved validation lacks its exact original approval.')
+            tables={row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for table,column in (('verification_queue','job_id'),('verification_failed_dispositions','job_id'),
+                    ('verification_retry_attempts','job_id'),('verification_precheck_failures','job_id'),
+                    ('verification_qa_stage_failures','job_id'),('verification_project_prewrite_failures','job_id'),
+                    ('technical_verifications','run'),('acceptances','run')):
+                if table in tables and connection.execute('SELECT 1 FROM '+table+' WHERE '+column+'=? LIMIT 1',(rid,)).fetchone():
+                    raise ValueError('Later verification or acceptance work prevents preclaim continuation.')
+            return run,target
+        run,target=current(c)
+        request,before,child,staging=preclaim.inspect(job,snapshot,original,target['target_profile'],c)
+        if child is None:
+            if run['state']!='ATTENTION': raise ValueError('Only a stopped draft can receive a new continuation.')
+            factory=download_client_factory or configured_download_client
+            client=factory(selected['target_profile_sha256'],installation_projection=installation_projection)
+            adapter=PrototypeHttpConverterAdapter(job,client)
+            # GET recovery precedes inspection. A receipt belongs to normal
+            # reconciliation, never this no-attempt continuation.
+            if adapter.recover_stage('validate',request) is not None:
+                raise ValueError('A receiver validation outcome already exists; reconcile it without a POST.')
+            witness=adapter.validate_preclaim_witness(request)
+            preclaim.check_witness(request,witness,staging['manifest_sha256'],target['target_profile'])
+        else: witness=child['witness']
+        current(c)
+        # New read connection after HTTP/proof work avoids a stale WAL read
+        # transaction hiding a concurrent source-owner selection change.
+        with db() as fresh: current(fresh)
+        projection={'schema_version':1,'scope':preclaim.SCOPE,'project_id':pid,'run_id':rid,'id':rid,
+            'state':run['state'],'source_hash':snapshot['source_hash'],'source_binding':selected['source_binding'],
+            'selected_source_set_id':snapshot['selected_source_set_id'],'target_profile_sha256':selected['target_profile_sha256'],
+            'approved_chunk_hashes':selected['approved_chunk_hashes'],'eligible':child is None,
+            'continuation_recorded':child is not None,'checkpoint_sha256':preclaim.checkpoint(before,request,witness),
+            'validate_request_sha256':canonical_hash(request),'receiver_witness_sha256':witness['witness_sha256'],
+            'first_next_operation':'validate','repeated_model_calls':0,'business_behavior_accepted':False,
+            'next_action':'confirm_validate_preclaim_continuation' if child is None else 'open_run',
+            'reason':'Continue validation of the saved reviewed draft; no model operation will be repeated.' if child is None else
+                'This validation continuation is already recorded. Open the same run; no operation was repeated.'}
+        return projection,snapshot,original,request,before,witness,child,run
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/validate-preclaim-continuation')
+    def validate_preclaim_plan(pid:str,rid:str,request:Request):
+        p=project(request,pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                from . import prototype_preclaim_continuation as preclaim
+                from .prototype_mapping_recovery import RUN_ID
+                if not RUN_ID.fullmatch(rid): raise HTTPException(404,'Prototype run not found.')
+                if (root/'jobs').is_symlink() or (root/'jobs'/rid).is_symlink():
+                    raise ValueError('Unsafe prototype storage.')
+                job=root/'jobs'/rid;pipeline=job/'prototype-pipeline'
+                intent=pipeline/'validate-intent.json'
+                if not intent.exists() and not intent.is_symlink():
+                    if (preclaim.present(pipeline) or (job/'prototype-transport').exists()
+                            or (job/'prototype-transport').is_symlink()
+                            or any((pipeline/(stage+suffix)).exists() or (pipeline/(stage+suffix)).is_symlink()
+                                for stage in ('validate','prepare_schema','import','verify_runtime','export')
+                                for suffix in ('.json','-intent.json'))):
+                        raise ValueError('A converter checkpoint lost its original validation intent.')
+                    prior=epoch_context(c,pid,rid,p['owner'],candidate_format_continuation=True)[0]
+                    projection={key:prior[key] for key in ('schema_version','project_id','run_id','id','state',
+                        'source_hash','source_binding','selected_source_set_id','target_profile_sha256','approved_chunk_hashes')}
+                    projection.update(scope=preclaim.SCOPE,eligible=False,continuation_recorded=False,
+                        business_behavior_accepted=False,next_action='check_existing_repairs',
+                        reason='This independently verified earlier checkpoint uses its existing repair workflow.')
+                else:
+                    projection=preclaim_context(c,pid,rid,p['owner'])[0]
+            return Response(json.dumps(projection),media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'The saved validation checkpoint cannot be safely continued. Existing outcomes are preserved; no operation was repeated.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/validate-preclaim-continuation')
+    def confirm_validate_preclaim(pid:str,rid:str,body:PrototypeValidatePreclaimInput,request:Request):
+        p=project(request,pid)
+        from . import prototype_preclaim_continuation as preclaim,prototype_mapping_epochs as epochs
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection,snapshot,original,value,before,witness,child,run=preclaim_context(c,pid,rid,p['owner'])
+                if (body.checkpoint_sha256!=projection['checkpoint_sha256']
+                        or body.expected_validate_request_sha256!=projection['validate_request_sha256']
+                        or body.expected_receiver_witness_sha256!=projection['receiver_witness_sha256']
+                        or body.source_hash!=projection['source_hash'] or body.source_binding!=projection['source_binding']
+                        or body.expected_current_source_set_id!=projection['selected_source_set_id']
+                        or body.target_profile_sha256!=projection['target_profile_sha256']
+                        or body.approved_chunk_hashes!=projection['approved_chunk_hashes']
+                        or not all(v is True for v in (body.approved_redacted_source,body.approved_external_ai,body.approved_prototype_scope))):
+                    raise ValueError('Exact saved draft, receiver witness and three fresh consents required.')
+                result={'schema_version':1,'project_id':pid,'run_id':rid,'id':rid,
+                    'state':run['state'] if child else 'QUEUED','conversion_profile':PROFILE_ID,'continued':True,
+                    'continuation_recorded':True,'next_action':'open_run','business_behavior_accepted':False}
+                if child:
+                    return Response(json.dumps(result),status_code=200,media_type='application/json',headers={'Cache-Control':'no-store'})
+                if not admission_allowed(c,excluded_stopped_job_id=rid):
+                    raise HTTPException(429,'Other unresolved work blocks continuation. The saved draft remains unchanged.')
+                now=time.time();job=root/'jobs'/rid
+                record={'schema_version':1,'scope':preclaim.SCOPE,'job_id':rid,'project_id':pid,
+                    'snapshot_sha256':hashlib.sha256(original).hexdigest(),'source_hash':snapshot['source_hash'],
+                    'source_binding':projection['source_binding'],'target_profile_sha256':projection['target_profile_sha256'],
+                    'owner':p['owner'],'approved_at':now,'approvals':{'redacted_source':True,'external_ai':True,'synthetic_prototype':True},
+                    'before_files':before,'request':value,'witness':witness,'checkpoint_sha256':projection['checkpoint_sha256']}
+                epochs.save(job/'prototype-pipeline'/preclaim.RECORD,record,True)
+                if (job/'source-snapshot.json').read_bytes()!=original:
+                    raise ValueError('Original source changed before queueing.')
+                changed=c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Continuing validation of the saved reviewed draft. Existing model outcomes are reused.',now,rid))
+                if changed.rowcount!=1: raise ValueError('Run changed before queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                    (p['owner'],preclaim.EVENT,preclaim.event_id(rid,record),now))
+            return Response(json.dumps(result),status_code=202,media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'Saved draft validation was not queued: exact current approval or retained evidence changed. No uncertain operation was repeated.') from None
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/candidate-format-continuation')
     def candidate_format_plan(pid: str, rid: str, request: Request):

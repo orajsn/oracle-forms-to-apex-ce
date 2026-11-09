@@ -2937,6 +2937,367 @@ def terminal_closed_provider_preservation(database, db, run):
         post_correction_review_failure=True, maintenance_preservation=True)
 
 
+PRECLAIM_MAINTENANCE_SCOPE = 'fox-paired-preclaim-maintenance-read-v1'
+
+
+def preclaim_tree(root):
+    """Complete bounded no-follow inventory. Internal configured roots only."""
+    import os
+    import stat
+    root = Path(root).absolute()
+    _need(root.resolve() == root and root.is_dir(), 'PRECLAIM_ROOT_UNSAFE')
+    initial = root.stat(); owner = initial.st_uid
+    for path in (root, *root.parents):
+        _need(not path.is_symlink(), 'PRECLAIM_ROOT_UNSAFE')
+    files, directories, total, pending = {}, [], 0, [root]
+    while pending:
+        for path in sorted(pending.pop().iterdir()):
+            info = path.lstat(); name = path.relative_to(root).as_posix()
+            _need(not stat.S_ISLNK(info.st_mode) and len(files) + len(directories) < 20000
+                  and (os.name == 'nt' or info.st_uid == owner and not info.st_mode & 0o022),
+                  'PRECLAIM_ENTRY_UNSAFE')
+            if stat.S_ISDIR(info.st_mode):
+                directories.append(name); pending.append(path)
+            else:
+                _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                      and 0 < info.st_size <= 64 * 1024 * 1024, 'PRECLAIM_ENTRY_UNSAFE')
+                raw = path.read_bytes(); after = path.stat()
+                _need(len(raw) == info.st_size and (info.st_size, info.st_mtime_ns, info.st_ino) ==
+                      (after.st_size, after.st_mtime_ns, after.st_ino), 'PRECLAIM_TREE_CHANGED')
+                total += len(raw); _need(total <= 128 * 1024 * 1024, 'PRECLAIM_TREE_BOUNDS')
+                files[name] = {'sha256': digest(raw), 'bytes': len(raw)}
+    identity=root.stat()
+    _need((initial.st_dev,initial.st_ino,initial.st_uid)==(identity.st_dev,identity.st_ino,identity.st_uid),
+          'PRECLAIM_ROOT_NAMESPACE_CHANGED')
+    return {'files': files, 'directories': sorted(directories),
+            'namespace':{'device':identity.st_dev,'inode':identity.st_ino}}
+
+
+def preclaim_request(job):
+    """Reconstruct only the existing validate request, never a caller request."""
+    root = Path(job) / 'prototype-pipeline'
+    native, rendered, binding, manifest, index = (_load((root / name).read_bytes(), 20_000_000)
+        for name in ('native-plan.json', 'rendered.json', 'binding.json', 'sources-manifest.json', 'review-index.json'))
+    # Model protocol hashes intentionally do not have canonical_bytes' newline.
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    value = {'schema_version': 1, 'scope': 'fox-prototype-converter-request-v1',
+        'job_id': Path(job).name, 'project_id': binding['project_id'], 'source_binding': binding['source_binding'],
+        'plan_sha256': native['plan_sha256'], 'rendering_spec': native['rendering_spec'],
+        'rendered_zip_sha256': rendered['zip_sha256'], 'prior_receipts': {},
+        'source_authority': {'schema_version': 1, 'scope': 'fox-prototype-source-authority-v1',
+            'binding_sha256': hashed(binding), 'sources_manifest_sha256': hashed(manifest),
+            'review_index_sha256': hashed(index)}}
+    _need(_load((root / 'validate-intent.json').read_bytes()) == {'request_sha256': hashed(value)},
+          'PRECLAIM_ORIGINAL_INTENT_CHANGED')
+    _need(digest((root / 'candidate-apexlang.zip').read_bytes()) == value['rendered_zip_sha256'],
+          'PRECLAIM_DRAFT_CHANGED')
+    return value
+
+
+def preclaim_collector_source():
+    """Fixed stdlib configured-root collector; no app/runtime imports."""
+    import inspect
+    functions = (RecoveryError, _need, digest, _load, preclaim_tree)
+    return ('import hashlib,json,pathlib,sys\nfrom pathlib import Path\n' +
+        '\n'.join(inspect.getsource(item) for item in functions) + '''
+p=json.load(sys.stdin)
+assert set(p)=={'fox_data','receiver_jobs','job_id'}
+assert __import__('re').fullmatch('fox-[a-f0-9]{20}',p['job_id'])
+fox=Path(p['fox_data'])/'jobs'/p['job_id']; receiver=Path(p['receiver_jobs'])/p['job_id']
+before={'fox_tree':preclaim_tree(fox),'receiver_tree':preclaim_tree(receiver)}
+manifest_path=receiver/'prototype-converter/authority-manifest.json'
+manifest_raw=manifest_path.read_bytes(); manifest=_load(manifest_raw,2000000)
+after={'fox_tree':preclaim_tree(fox),'receiver_tree':preclaim_tree(receiver)}
+assert before==after
+print(json.dumps({**after,'receiver_manifest':manifest,
+ 'receiver_manifest_raw_sha256':hashlib.sha256(manifest_raw).hexdigest()},sort_keys=True))
+''')
+
+
+def preclaim_fox_lineage(database, db, run):
+    """Structural owner/source/closed-call lineage; not semantic approval."""
+    import math
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    _need(type(run) is dict and run.get('state') == 'ATTENTION' and run.get('artifact') is None
+          and type(run.get('id')) is str and re.fullmatch('fox-[a-f0-9]{20}', run['id']), 'PRECLAIM_RUN_NOT_STOPPED')
+    job = Path(database).absolute().parent / 'jobs' / run['id']; tree = preclaim_tree(job)
+    snapshot = _load((job / 'source-snapshot.json').read_bytes(), 20_000_000)
+    selected, approvals = snapshot['prototype'], snapshot['approvals']
+    owner = db.execute('SELECT owner FROM projects WHERE id=?', (run['project'],)).fetchone()
+    selection = db.execute('SELECT current_source_set_id FROM project_source_selection WHERE project=?', (run['project'],)).fetchone()
+    _need(owner is not None and owner[0] == approvals.get('owner')
+          and snapshot.get('project_id') == snapshot.get('project') == run['project']
+          and snapshot.get('source_hash') == run['source_hash']
+          and selection is not None and selection[0] == snapshot.get('selected_source_set_id')
+          and snapshot.get('conversion_profile') == 'native-blueprint-prototype-v1'
+          and all(approvals.get(key) is True for key in ('redacted_source', 'external_ai', 'synthetic_prototype')),
+          'PRECLAIM_OWNER_SOURCE_OR_CONSENT_CHANGED')
+    rows = db.execute('SELECT s.id,s.project,s.name,s.sha256,s.bytes,s.text,s.created '
+        'FROM source_set_members m JOIN sources s ON s.id=m.source_id '
+        'WHERE m.source_set_id=? AND m.name=s.name AND m.sha256=s.sha256 AND m.bytes=s.bytes ORDER BY m.name',
+        (snapshot['selected_source_set_id'],)).fetchall()
+    files = [dict(zip(('id','project','name','sha256','bytes','text','created'), row)) for row in rows]
+    _need(files == snapshot.get('files') and 1 <= len(files) <= 4, 'PRECLAIM_SOURCE_MEMBERS_CHANGED')
+    for index, source in enumerate(files):
+        raw = (job / 'prototype-pipeline/sources' / ('source-%03d.xml' % index)).read_bytes()
+        _need(len(raw) == source['bytes'] and digest(raw) == source['sha256']
+              and raw in (source['text'].encode(), b'\xef\xbb\xbf' + source['text'].encode()), 'PRECLAIM_SOURCE_BYTES_CHANGED')
+    _need(digest('\n'.join(row['name'] + ':' + row['sha256'] for row in files).encode()) == run['source_hash'],
+          'PRECLAIM_SOURCE_HASH_CHANGED')
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for table, column in (('verification_queue','job_id'), ('verification_failed_dispositions','job_id'),
+        ('verification_retry_attempts','job_id'), ('technical_verifications','run'), ('acceptances','run')):
+        if table in tables:
+            _need(db.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=?', (run['id'],)).fetchone() is None,
+                  'PRECLAIM_LATER_LEDGER_PRESENT')
+    documents = {name: _load((job / name).read_bytes(), 20_000_000)
+                 for name in tree['files'] if name.endswith('.json')}
+    cf_name = 'prototype-pipeline/candidate-format-continuation.json'
+    _need(cf_name in documents, 'PRECLAIM_CF_LINEAGE_REQUIRED')
+    cf = documents[cf_name]
+    _need(cf.get('scope') == 'fox-prototype-candidate-format-continuation-v1'
+          and cf.get('policy') == 'exact-source-envelope-and-item-fact-aliases-v1'
+          and cf.get('job_id') == run['id'] and cf.get('project_id') == run['project']
+          and cf.get('owner') == owner[0] and cf.get('source_hash') == run['source_hash']
+          and cf.get('source_binding') == selected['source_binding']
+          and cf.get('target_profile_sha256') == selected['target_profile_sha256']
+          and cf.get('snapshot_sha256') == tree['files']['source-snapshot.json']['sha256']
+          and cf.get('approvals') == {'redacted_source':True,'external_ai':True,'synthetic_prototype':True}
+          and cf.get('checkpoint_sha256') == hashed({'scope':cf['scope'],'policy':cf['policy'],
+              'epoch_sha256':cf['epoch_sha256'],'before_files':cf['before_files'],'plan':cf['plan']}),
+          'PRECLAIM_CF_LINEAGE_CHANGED')
+    for name, value in cf['before_files'].items():
+        if name == 'prototype-result.json':
+            # This is the existing DSC result-publication archive, not a new
+            # archive or a caller-selected substitute. Fresh-namespace technical
+            # reconstruction independently checks its full publication contract.
+            archive = 'prototype-result-publications/epoch-000006-dsc-identity-000001/previous-result.json'
+            _need(tree['files'].get(name, {}).get('sha256') == value
+                  or tree['files'].get(archive, {}).get('sha256') == value,
+                  'PRECLAIM_ORIGINAL_HISTORY_CHANGED')
+            continue
+        _need(name in tree['files'] and tree['files'][name]['sha256'] == value, 'PRECLAIM_ORIGINAL_HISTORY_CHANGED')
+    expected_events = []
+    origin = 'approved_prototype_mapping_retry' if 'retry_of' in snapshot else 'approved_prototype_conversion'
+    expected_events.append((owner[0], origin, run['id'], approvals['approved_at']))
+    for name, value in documents.items():
+        if name.startswith('mapping-epochs/epoch-'):
+            expected_events.append((owner[0], 'approved_prototype_mapping_epoch', run['id'] + ':epoch:' +
+                ('%06d' % value['epoch_number']) + ':' + hashed(value), value['approved_at']))
+        elif name.endswith('/review-correction/authorization.json'):
+            expected_events.append((owner[0], 'approved_prototype_review_scope_correction', run['id'] +
+                ':review-correction:' + ('%06d' % value['epoch_number']) + ':' + hashed(value), value['approved_at']))
+        elif name.endswith('/dsc-identity-repair/authorization.json'):
+            expected_events.append((owner[0], 'approved_prototype_dsc_identity_repair', run['id'] +
+                ':dsc-identity-repair:000001:' + hashed(value), value['approved_at']))
+    expected_events.append((owner[0], 'approved_prototype_candidate_format_continuation',
+        run['id'] + ':candidate-format:000001:' + hashed(cf), cf['approved_at']))
+    events = [tuple(row) for row in db.execute('SELECT owner,action,object_id,created FROM events WHERE object_id=? OR object_id LIKE ?',
+        (run['id'], run['id'] + ':%'))]
+    continuation = documents.get('mapping-continuation.json')
+    if continuation is not None:
+        expected_events.append((owner[0], 'approved_prototype_mapping_continuation',
+            run['id'] + ':' + hashed(continuation), continuation['approved_at']))
+    _need(sorted(events) == sorted(expected_events), 'PRECLAIM_EVENT_LINEAGE_CHANGED')
+    for value in (cf, *[v for n,v in documents.items() if n.startswith('mapping-epochs/epoch-')]):
+        _need(value.get('owner') == owner[0] and value.get('source_hash') == run['source_hash']
+              and type(value.get('approved_at')) in (int,float) and math.isfinite(value['approved_at']),
+              'PRECLAIM_APPROVAL_LINEAGE_CHANGED')
+    for name, intent in documents.items():
+        if not name.endswith(('/mapper-intent.json','/reviewer-intent.json')): continue
+        role = 'mapper' if name.endswith('/mapper-intent.json') else 'reviewer'
+        base = name[:-len(role + '-intent.json')]
+        _need(base + role + '.json' in documents and base + role + '-target.json' in documents,
+              'PRECLAIM_PROVIDER_CALL_UNCLOSED')
+        saved, target = documents[base + role + '.json'], documents[base + role + '-target.json']
+        invocation, environment = saved.get('invocation', {}), saved.get('model_environment', {})
+        _need(saved.get('binding') == intent and intent.get('job_id') == run['id']
+              and intent.get('source_hash') == selected['source_binding']
+              and intent.get('role') == target['opaf']['roles'][role]
+              and saved.get('output_sha256') == hashed(saved.get('output'))
+              and saved.get('model_environment_sha256') == hashed(environment)
+              and invocation.get('request_sha256') == intent.get('request_sha256')
+              and all(invocation.get(key) == intent['role'][key] for key in ('workflow_id','model','graph_sha256'))
+              and _sha(invocation.get('response_sha256')) and type(invocation.get('room_id')) is str
+              and environment.get('job_id') == run['id'] and environment.get('role') == role
+              and environment.get('source_manifest_sha256') == selected['source_binding']
+              and environment.get('target_profile_sha256') == hashed(target)
+              and environment.get('workflow') == {**intent['role'],'published':True}
+              and _time(invocation['completed_at_utc']) >= _time(invocation['started_at_utc'])
+              and -5 <= _time(invocation['started_at_utc']) - _time(environment['observed_at_utc']) <= 120,
+              'PRECLAIM_PROVIDER_ENVELOPE_CHANGED')
+    request = preclaim_request(job)
+    return {'job':job, 'tree':tree, 'snapshot':snapshot, 'request':request, 'documents':documents}
+
+
+def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
+    """Protected controller packet, never accepted as execution/UI authority.
+
+    Its caller must collect both sides itself under the actual operator lease,
+    compare fresh pins/inventory before and after, and supply an independent
+    measured expectation. Hashes authenticate neither caller nor transport.
+    """
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    keys = {'schema_version','scope','observed_at_utc','expires_at_utc','binding','fox_tree','receiver_tree',
+            'receiver_manifest','technical','producer','serialization_barrier','gateway_witness','stopped_writer'}
+    _need(type(readback) is dict and set(readback) == keys and type(readback.get('schema_version')) is int and readback.get('schema_version') == 1
+          and readback.get('scope') == PRECLAIM_MAINTENANCE_SCOPE and type(expected) is dict
+          and readback['binding'] == expected, 'PRECLAIM_PAIRED_BINDING_CHANGED')
+    _need(set(expected) == {'job_id','request_sha256','source_binding','target_profile_sha256','pair_sha256',
+          'scope_sha256','lease_sha256','original_terminal_sha256','technical_source_sha256','mode'}
+          | {'runtime_state','stopped_writer_sha256'}
+          and expected['job_id'] == run['id'] and expected['mode'] in ('transition','startup')
+          and expected['runtime_state'] in ('running','stopped')
+          and all(_sha(value) for key,value in expected.items() if key not in ('job_id','mode','runtime_state','stopped_writer_sha256')),
+          'PRECLAIM_EXPECTED_BINDING_INVALID')
+    clock = _clock(now).timestamp(); observed = _time(readback['observed_at_utc']); expires = _time(readback['expires_at_utc'])
+    _need(-5 <= clock - observed <= 30 and observed < expires <= observed + 30 and clock <= expires,
+          'PRECLAIM_READBACK_EXPIRED')
+    value = preclaim_fox_lineage(database, db, run); request = value['request']; documents = value['documents']
+    _need(value['tree'] == readback['fox_tree'] and hashed(request) == expected['request_sha256']
+          and request['source_binding'] == expected['source_binding']
+          and value['snapshot']['prototype']['target_profile_sha256'] == expected['target_profile_sha256'],
+          'PRECLAIM_FOX_READBACK_CHANGED')
+    manifest = readback['receiver_manifest']; rows = manifest.get('files')
+    _need(type(manifest) is dict and set(manifest) == {'schema_version','scope','job_id','source_binding','source_authority','files','manifest_sha256'}
+          and manifest['schema_version'] == 1 and manifest['scope'] == 'fox-prototype-authority-bundle-v1'
+          and manifest['job_id'] == run['id'] and manifest['source_binding'] == request['source_binding']
+          and manifest['source_authority'] == request['source_authority']
+          and manifest['manifest_sha256'] == hashed({k:v for k,v in manifest.items() if k != 'manifest_sha256'})
+          and type(rows) is list and 1 <= len(rows) <= 2048, 'PRECLAIM_MANIFEST_CHANGED')
+    expected_receiver = {}; directories = {'prototype-pipeline','prototype-converter'}
+    for row in rows:
+        _need(type(row) is dict and set(row) == {'path','sha256','bytes'} and type(row['path']) is str
+              and '\\' not in row['path'] and ':' not in row['path']
+              and not set(row['path'].split('/')) & {'','.', '..'} and not row['path'].startswith('/')
+              and _sha(row['sha256']) and type(row['bytes']) is int and 0 < row['bytes'] <= 20_000_000,
+              'PRECLAIM_MANIFEST_ENTRY_INVALID')
+        name = 'prototype-pipeline/' + row['path']
+        _need(name not in expected_receiver and value['tree']['files'].get(name) == {k:row[k] for k in ('sha256','bytes')},
+              'PRECLAIM_STAGED_MEMBER_CHANGED')
+        expected_receiver[name] = {k:row[k] for k in ('sha256','bytes')}
+        parts = name.split('/'); directories.update('/'.join(parts[:i]) for i in range(1,len(parts)))
+    receiver = readback['receiver_tree']; files = dict(receiver['files'])
+    _need(set(receiver) == {'files','directories','namespace'} and type(receiver['namespace']) is dict
+          and set(receiver['namespace']) == {'device','inode'}
+          and all(type(v) is int and v >= 0 for v in receiver['namespace'].values()),
+          'PRECLAIM_RECEIVER_NAMESPACE_INVALID')
+    manifest_pin = files.pop('prototype-converter/authority-manifest.json', None)
+    _need(type(manifest_pin) is dict and manifest_pin['sha256'] == readback['technical']['receiver_manifest_raw_sha256']
+          and files == expected_receiver and receiver['directories'] == sorted(directories),
+          'PRECLAIM_RECEIVER_ATTEMPT_OR_UNKNOWN_ENTRY')
+    transport = {'job_id':run['id'],'source_binding':request['source_binding'],
+        'source_authority':request['source_authority'],'manifest_sha256':manifest['manifest_sha256']}
+    _need(documents.get('prototype-transport/authority-intent.json') == transport,
+          'PRECLAIM_TRANSPORT_INTENT_CHANGED')
+    receipt = documents.get('prototype-transport/authority.json', {})
+    _need(receipt == {'schema_version':1,'scope':'fox-prototype-authority-staging-receipt-v1',
+          **transport,'staged':True,'source_review_authorized':False}, 'PRECLAIM_TRANSPORT_RECEIPT_CHANGED')
+    allowed = set(documents['prototype-pipeline/candidate-format-continuation.json']['before_files']) | set(expected_receiver) | {
+        'prototype-pipeline/validate-intent.json','prototype-transport/authority-intent.json','prototype-transport/authority.json'}
+    publication_path = 'prototype-result-publications/epoch-000006-dsc-identity-000001/publication.json'
+    if publication_path in documents:
+        publication, latest = documents[publication_path], documents['prototype-result.json']
+        history_path = 'prototype-results/' + hashed(latest) + '.json'
+        _need(publication.get('job_id') == run['id'] and publication.get('source_binding') == request['source_binding']
+              and publication.get('history_path') == history_path and publication.get('result_sha256') == hashed(latest)
+              and publication.get('stage_files') == {}
+              and value['tree']['files'].get(history_path) == value['tree']['files'].get('prototype-result.json'),
+              'PRECLAIM_CURRENT_PUBLICATION_CHANGED')
+        allowed |= {publication_path,history_path}
+    _need(set(value['tree']['files']) == allowed, 'PRECLAIM_UNKNOWN_OR_LATER_FOX_ARTIFACT')
+    _need(readback['technical'] == {'status':'PURE_TECHNICAL_READ_ONLY_MATCH',
+        'request_sha256':expected['request_sha256'],'fox_tree_sha256':hashed(value['tree']),
+        'source_sha256':expected['technical_source_sha256'],
+        'execution_target_sha256':readback['technical'].get('execution_target_sha256'),
+        'receiver_manifest_raw_sha256':manifest_pin['sha256']}, 'PRECLAIM_TECHNICAL_READ_UNCONFIRMED')
+    _need(_sha(readback['technical']['execution_target_sha256']), 'PRECLAIM_TECHNICAL_TARGET_UNCONFIRMED')
+    stopped = expected['runtime_state'] == 'stopped'
+    _need(readback['producer'] == {'fox_worker':'stopped' if stopped else 'terminal_idle',
+          'receiver_servers':0 if stopped else 1,'receiver_operations':0,
+          'unknown_producers':0,'original_terminal_sha256':expected['original_terminal_sha256']}
+          and all(type(readback['producer'][key]) is int for key in ('receiver_servers','receiver_operations','unknown_producers')),
+          'PRECLAIM_PRODUCER_NOT_TERMINAL')
+    barrier = readback['serialization_barrier']
+    _need(type(barrier) is dict and set(barrier) == {'kind','observed_at_utc','binding','result'}
+          and barrier['kind'] == ('historical_before_stop' if stopped else 'current_serialized_read')
+          and set(barrier['binding']) == {'pair_sha256','fox_tree_sha256','receiver_tree_sha256'}
+          and _sha(barrier['binding']['pair_sha256'])
+          and barrier['binding']['fox_tree_sha256'] == hashed(value['tree'])
+          and barrier['binding']['receiver_tree_sha256'] == hashed(receiver)
+          and barrier['result'] == {'method':'GET','stage':'validate','job_id':run['id'],'status':404}
+          and _time(barrier['observed_at_utc']) <= clock + 5, 'PRECLAIM_SERIALIZATION_BARRIER_UNCONFIRMED')
+    if stopped:
+        _need(expected['mode'] == 'transition' and type(readback['stopped_writer']) is dict
+              and readback['stopped_writer'].get('scope') == 'fox-stopped-writer-observation-v1'
+              and _sha(expected['stopped_writer_sha256']) and hashed(readback['stopped_writer']) == expected['stopped_writer_sha256'],
+              'PRECLAIM_STOPPED_WRITER_GUARD_REQUIRED')
+    else:
+        _need(readback['stopped_writer'] is None and expected['stopped_writer_sha256'] is None
+              and barrier['binding']['pair_sha256'] == expected['pair_sha256']
+              and -5 <= clock - _time(barrier['observed_at_utc']) <= 30, 'PRECLAIM_CURRENT_BARRIER_EXPIRED')
+    if expected['mode'] == 'startup':
+        witness = readback['gateway_witness']
+        _need(type(witness) is dict and set(witness) == {'schema_version','scope','job_id','project_id',
+              'request_sha256','source_binding','source_authority','manifest_sha256','rendered_zip_sha256',
+              'execution_target_sha256','receiver_sha256','source_review_authorized','witness_sha256'}
+              and type(witness['schema_version']) is int and witness['schema_version'] == 1
+              and witness.get('scope') == 'fox-prototype-validate-preclaim-witness-v1'
+              and witness.get('job_id') == run['id'] and witness.get('project_id') == request['project_id']
+              and witness.get('request_sha256') == expected['request_sha256']
+              and witness.get('manifest_sha256') == manifest['manifest_sha256']
+              and witness.get('source_binding') == request['source_binding']
+              and witness.get('source_authority') == request['source_authority']
+              and witness.get('rendered_zip_sha256') == request['rendered_zip_sha256']
+              and witness.get('execution_target_sha256') == readback['technical']['execution_target_sha256']
+              and _sha(witness.get('receiver_sha256'))
+              and witness.get('source_review_authorized') is False
+              and witness.get('witness_sha256') == hashed({k:v for k,v in witness.items() if k != 'witness_sha256'}),
+              'PRECLAIM_NEW_GATEWAY_WITNESS_REQUIRED')
+    else: _need(readback['gateway_witness'] is None, 'PRECLAIM_MAINTENANCE_NOT_GATEWAY_AUTHORITY')
+    _need(preclaim_tree(value['job']) == value['tree'], 'PRECLAIM_FOX_CHANGED_DURING_READ')
+    return {'request_sha256':expected['request_sha256'],'fox_tree_sha256':hashed(value['tree']),
+            'receiver_tree_sha256':hashed(receiver),'manifest_sha256':manifest['manifest_sha256']}
+
+
+def preclaim_technical_read(database, job_id, target, source_sha256):
+    """NEW measured namespace only. Pure technical read, never current authority.
+
+    Deliberately not called by the old-namespace protected predicate. The fixed
+    reviewed controller launches this in a fresh measured candidate interpreter;
+    startup launches it in its exact image-pinned fresh interpreter. No adapter,
+    model, SQLcl, Oracle or authority callback is constructed by this function.
+    """
+    from .prototype_pipeline import authorize_prototype_request
+    from .prototype_read_scope import epoch_read_scope
+    from . import prototype_candidate_continuation as candidate
+    from .prototype_mapping_epochs import technical_record
+    from .prototype_result_publication import validate_publication
+    from .prototype_authority import execution_target
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    store = VerificationRecovery(database, enabled=True)
+    with store._db(False) as db:
+        db.execute('PRAGMA query_only=ON'); db.execute('BEGIN')
+        run = dict(db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone())
+        value = preclaim_fox_lineage(database, db, run)
+        _need(hashed(target) == value['snapshot']['prototype']['target_profile_sha256'] and _sha(source_sha256),
+              'PRECLAIM_TECHNICAL_TARGET_CHANGED')
+        with epoch_read_scope(value['job'] / 'prototype-pipeline'):
+            candidate.validate_record(value['job'], value['snapshot'], (value['job'] / 'source-snapshot.json').read_bytes(), target, db)
+            _need(authorize_prototype_request(value['job'], value['request']) == value['request'],
+                  'PRECLAIM_TECHNICAL_READ_FAILED')
+            validate_publication(value['job'], technical_record(value['job'] / 'prototype-pipeline'))
+        _need(preclaim_tree(value['job']) == value['tree'] and db.total_changes == 0,
+              'PRECLAIM_TECHNICAL_READ_CHANGED_DATA')
+        return {'status':'PURE_TECHNICAL_READ_ONLY_MATCH','request_sha256':hashed(value['request']),
+                'fox_tree_sha256':hashed(value['tree']),'source_sha256':source_sha256,
+                'execution_target_sha256':hashed(execution_target(target))}
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     """Explicit recovery initialization; never migration, repair or admission.
 
@@ -4107,11 +4468,17 @@ class VerificationRecovery:
                         'retry_eligible': False}
         return result
 
-    def _protected_read_status(self, db, job_id, *, purpose):
+    def _protected_read_status(self, db, job_id, *, purpose, paired_readback=None, expected_pair=None, now=None):
         """Explicit protected-reader purpose; ordinary admission stays unchanged."""
-        _need(purpose == 'maintenance_preservation', 'RECOVERY_PROTECTED_PURPOSE_INVALID')
+        _need(purpose in ('maintenance_preservation','maintenance_preclaim_preservation'), 'RECOVERY_PROTECTED_PURPOSE_INVALID')
         admission = self._eligibility(db, job_id)
         run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+        if purpose == 'maintenance_preclaim_preservation':
+            _need(admission['blocks_admission'] is True and admission['retry_eligible'] is False and run is not None,
+                  'PRECLAIM_ORDINARY_ADMISSION_SEPARATE')
+            checked = validate_preclaim_pair(self.database, db, dict(run), paired_readback, expected_pair, now=now)
+            return {'admission':admission,'preservation_allowed':True,'preservation_state':'preclaim_validate_history',
+                    'preserved':checked}
         preserved = (admission['blocks_admission'] is True and run is not None
             and terminal_closed_provider_preservation(self.database, db, dict(run)))
         return {'admission': admission, 'preservation_allowed': preserved,

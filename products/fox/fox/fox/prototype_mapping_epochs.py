@@ -141,6 +141,9 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     from . import prototype_candidate_continuation as candidate_format
     if candidate_format.present(job/'prototype-pipeline'):
         pipeline_files.add(candidate_format.RECORD)
+    from . import prototype_preclaim_continuation as preclaim
+    if preclaim.present(job/'prototype-pipeline'):
+        pipeline_files.update({preclaim.RECORD,preclaim.ATTEMPT})
     focus_files = {'request.json', 'mapper-request.json', 'mapper.json', 'mapper-intent.json', 'mapper-target.json',
         'reviewer-request.json', 'reviewer.json', 'reviewer-intent.json', 'reviewer-target.json', 'review-receipt.json',
         'mapper-resolved.json', 'mapper-resolution.json', 'projection-candidate.json', 'projection-receipt.json'}
@@ -482,6 +485,33 @@ def converter_phase(job, snapshot, original, stage, request):
     phase = _ConverterPhase(_PHASE_SEAL, str(job.absolute()), canonical_hash(record), stage, canonical_hash(expected))
     focuses = _model_fence(job, snapshot, record)
     _closure(job, phase=phase, record=record, known_focuses=focuses)
+    return phase
+
+
+def preclaim_phase(job,snapshot,original,request,*,stage='validate'):
+    """Technical-only exact first-intent fence, including legacy no-epoch jobs."""
+    from .prototype_pipeline import CONVERTER_STAGES,_check_converter_receipt
+    if stage not in CONVERTER_STAGES: raise OpafError('Unsupported saved draft phase.')
+    phase=converter_phase(job,snapshot,original,stage,request)
+    if phase is not None: return phase
+    from .prototype_preclaim_continuation import request_for
+    from .prototype_pipeline import authorize_prototype_request
+    job=Path(job)
+    same(read(job/'source-snapshot.json'),snapshot)
+    if (job/'source-snapshot.json').read_bytes()!=original:
+        raise OpafError('Saved validation snapshot changed.')
+    expected=request_for(job,snapshot);prior={};root=job/'prototype-pipeline'
+    for previous in CONVERTER_STAGES[:CONVERTER_STAGES.index(stage)]:
+        payload={**expected,'prior_receipts':dict(prior)}
+        same(read(root/(previous+'-intent.json')),{'request_sha256':canonical_hash(payload)})
+        prior[previous]=_check_converter_receipt(previous,payload,read(root/(previous+'.json')))
+    same(request,{**expected,'prior_receipts':prior})
+    authorize_prototype_request(job,request)
+    for later in CONVERTER_STAGES[CONVERTER_STAGES.index(stage)+1:]:
+        if any((root/(later+suffix)).exists() or (root/(later+suffix)).is_symlink() for suffix in ('.json','-intent.json')):
+            raise OpafError('Competing later saved draft phase prevents continuation.')
+    phase=_ConverterPhase(_PHASE_SEAL,str(job.absolute()),canonical_hash(None),stage,canonical_hash(request))
+    _closure(job,phase=phase)
     return phase
 
 

@@ -27,13 +27,18 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     """Worker-side durable consent check before configuration or a new call."""
     database = job.parent.parent / 'fox.sqlite3'
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
+    from . import prototype_preclaim_continuation as preclaim
+    preclaimed = preclaim.present(job/'prototype-pipeline')
     if not recorded and not database.exists() and not database.is_symlink():
+        if preclaimed: raise OpafError('Validation continuation requires its durable owner database.')
         if (job / 'mapping-epochs').exists() or (job / 'prototype-pipeline' / 'epochs').exists():
             raise OpafError('Epoch proof cannot fall back to an unrecorded legacy run.')
         return  # Legacy direct callers without a persisted continuation.
     if database.is_symlink() or not database.is_file():
         raise OpafError('Continuation database is missing or unsafe.')
     with sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True) as connection:
+        from .prototype_preclaim_continuation import entry_phase
+        phase = entry_phase(job,snapshot,original,connection,phase)
         rows = connection.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '
             '(object_id=? OR object_id LIKE ?)', (EVENT, job.name, job.name + ':%')).fetchall()
         if not recorded:

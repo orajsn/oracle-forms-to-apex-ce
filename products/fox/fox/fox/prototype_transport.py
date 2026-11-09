@@ -22,6 +22,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import zipfile
@@ -312,6 +313,39 @@ class PrototypeHttpConverterAdapter:
         if value is None:
             return None
         return _check_converter_receipt(stage, request, value)
+
+    def validate_preclaim_witness(self,request):
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
+        return self.client.request('POST',self.path+'/validate-preclaim-witness',request)
+
+    def continue_validation(self,request):
+        from .prototype_read_scope import forbid_execution
+        from . import prototype_preclaim_continuation as preclaim
+        forbid_execution()
+        root=self.job/'prototype-pipeline'
+        record=_json(root/preclaim.RECORD)
+        if request!=record['request']:
+            raise OpafError('Saved validation request changed; no replay.')
+        # Durable local one-shot claim BEFORE the POST: response loss never
+        # permits another POST. Normal stage GET recovery always runs first.
+        attempt=root/preclaim.ATTEMPT
+        if attempt.exists() or attempt.is_symlink():
+            raise OpafError('Validation continuation was already attempted; reconcile with GET only.')
+        witness=self.validate_preclaim_witness(request)
+        if witness!=record['witness']:
+            raise OpafError('Receiver preclaim witness changed; no validation claim.')
+        binding={'record_sha256':canonical_hash(record),'request_sha256':canonical_hash(request),
+            'witness_sha256':witness['witness_sha256']}
+        with attempt.open('xb') as stream:
+            stream.write(json.dumps(binding,sort_keys=True,ensure_ascii=False,allow_nan=False).encode())
+            stream.flush();os.fsync(stream.fileno())
+        try:
+            value=self.client.request('POST',self.path+'/continue-validation',{'request':request,'witness':witness,
+                'record_sha256':canonical_hash(record)})
+            return _check_converter_receipt('validate',request,value)
+        except Exception:
+            raise OpafError('Validation continuation result is unconfirmed; reconcile with GET only.') from None
 
     def read_package(self, request, export_receipt):
         """Fixed-path, bounded GET only; no staging, recovery POST or retry."""

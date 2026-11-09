@@ -1,11 +1,13 @@
 {
-  "version": "0.20.1",
+  "version": "0.21.0",
   "released_on": "2026-11-09",
-  "title": "Reduce repeated checks when resuming",
+  "title": "Continue validation of a saved draft",
   "changes": [
-    "Reconstruct the exact already-reviewed prefix together when continuing a saved mapping.",
-    "Preserve proof identity and close the read-only scope before new model calls or writes.",
-    "Keep missing or changed proof blocking and fresh processing approval checks unchanged."
+    "Continue an eligible saved reviewed draft on the same run without repeating AI calls.",
+    "Require a fresh converter no-attempt check and owner confirmation before validation starts.",
+    "Preserve original attempts and reviewed outputs; never automatically repeat an uncertain operation.",
+    "Reduce repeated pure checks and align validation waits with its existing processing budgets.",
+    "Use the established larger source-snapshot limit consistently throughout generation."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
@@ -14,6 +16,7 @@
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
     "Saved-proof continuation is limited to recognized sealed failures before database stages and requires operator-prepared evidence. It is not a generic retry or automatic corrective loop.",
+    "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",

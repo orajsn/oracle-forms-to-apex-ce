@@ -431,11 +431,17 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         raise OpafError('Prototype requires separately configured mapper and reviewer workflows.')
     packet = local_packet(documents)
     if (job/'source-snapshot.json').is_file():
-        persisted_policy=_json(job/'source-snapshot.json').get('prototype',{}).get('metadata_task_policy')
+        # This is the immutable source snapshot, not a small native checkpoint.
+        # Reuse its established bounded reader so admitted larger Forms sources
+        # do not fail later against the unrelated 2 MB checkpoint limit.
+        from .prototype_job import read_prototype_snapshot
+        persisted_snapshot,_ = read_prototype_snapshot(job)
+        persisted = persisted_snapshot.get('prototype',{})
+        persisted_policy=persisted.get('metadata_task_policy')
         if metadata_task_policy is None: metadata_task_policy=persisted_policy
         elif metadata_task_policy!=persisted_policy:
             raise OpafError('Metadata task policy differs from the immutable source snapshot.')
-        persisted_format=_json(job/'source-snapshot.json').get('prototype',{}).get('candidate_format_policy')
+        persisted_format=persisted.get('candidate_format_policy')
         if candidate_format_policy is None: candidate_format_policy=persisted_format
         elif candidate_format_policy != persisted_format:
             raise OpafError('Candidate format policy differs from the immutable source snapshot.')
@@ -503,7 +509,14 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     from .prototype_mapping_epochs import active_focus
     views = []
     from . import prototype_candidate_continuation as candidate_format
-    if candidate_format.present(checkpoints):
+    from . import prototype_preclaim_continuation as preclaim
+    if preclaim.present(checkpoints):
+        target = (target_profile_loader() if target_profile_loader is not None else
+                  _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
+        views = preclaim.retained_views(checkpoints,packet,plan,target)
+        candidates = [view['candidate'] for view in views]
+        reviews = [view['checked'] for view in views]
+    elif candidate_format.present(checkpoints):
         target = (target_profile_loader() if target_profile_loader is not None else
                   _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
         views = _retained_candidate_prefix(checkpoints,packet,plan,target)
@@ -573,6 +586,16 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
             receipt = converter_adapter.recover_stage(stage, request)
             if receipt is None:
                 if pending.exists():
+                    if stage == 'validate' and preclaim.present(checkpoints):
+                        try:
+                            receipt = converter_adapter.continue_validation(request)
+                        except Exception:
+                            raise OpafError('Saved draft validation continuation is unconfirmed; reconcile without replay.') from None
+                        receipt = _check_converter_receipt(stage,request,receipt)
+                        _save_once(complete,receipt)
+                        prior[stage] = receipt
+                        facts['sqlcl_validated'] = True
+                        continue
                     result.update(status='RECONCILIATION_REQUIRED',
                                   reason='A prior converter operation is uncertain; no operation was replayed.')
                     return result

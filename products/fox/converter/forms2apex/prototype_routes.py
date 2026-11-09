@@ -72,6 +72,39 @@ def attach_prototype_routes(mcp, gateway, settings):
         except (ValueError, TypeError, RuntimeError, OSError, KeyError):
             return JSONResponse({'error': 'Prototype authority handoff could not be verified. Existing evidence is preserved.'}, status_code=409)
 
+    @mcp.custom_route('/fox/prototype/jobs/{job_id}/validate-preclaim-witness', methods=['POST'], include_in_schema=False)
+    async def preclaim_witness(request):
+        if not authorized(request):
+            return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+        try:
+            job_id = request.path_params['job_id']; validate_job_id(job_id)
+            value = await body(request, 2_000_000)
+            if type(value) is not dict or value.get('job_id') != job_id:
+                raise ValueError('Job mismatch')
+            result = await asyncio.to_thread(gateway.validate_preclaim_witness, value)
+            return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+        except OverflowError:
+            return JSONResponse({'error': 'Stage request too large'}, status_code=413)
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError):
+            return JSONResponse({'error': 'The exact unclaimed validation checkpoint could not be verified. No operation was authorized.'}, status_code=409)
+
+    @mcp.custom_route('/fox/prototype/jobs/{job_id}/continue-validation', methods=['POST'], include_in_schema=False)
+    async def continue_validation(request):
+        if not authorized(request):
+            return JSONResponse({'error': 'Unauthorized'}, status_code=401)
+        try:
+            job_id = request.path_params['job_id']; validate_job_id(job_id)
+            value = await body(request, 2_020_000)
+            if (type(value) is not dict or set(value) != {'request', 'witness', 'record_sha256'}
+                    or type(value['request']) is not dict or value['request'].get('job_id') != job_id):
+                raise ValueError('Continuation fields mismatch')
+            result = await asyncio.to_thread(gateway.continue_validation, value['request'], value['witness'], value['record_sha256'])
+            return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+        except OverflowError:
+            return JSONResponse({'error': 'Stage request too large'}, status_code=413)
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError):
+            return JSONResponse({'error': 'Validation continuation is unconfirmed. Reconcile retained evidence without replay.'}, status_code=409)
+
     @mcp.custom_route('/fox/prototype/jobs/{job_id}/stages/{stage}', methods=['POST', 'GET'], include_in_schema=False)
     async def stage(request):
         if not authorized(request):

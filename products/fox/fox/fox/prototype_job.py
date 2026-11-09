@@ -239,6 +239,11 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
             phase = converter_phase(job, snapshot, raw, stage, request)
             still_approved(phase=phase)
             return transport.run_stage(stage, request)
+        def continue_validation(self,request):
+            from .prototype_mapping_epochs import converter_phase
+            phase=converter_phase(job,snapshot,raw,'validate',request)
+            still_approved(phase=phase)
+            return transport.continue_validation(request)
     result = run_prototype_pipeline(job, documents, project_id=snapshot['project_id'],
         project_name=snapshot['project_name'], expected_source_binding=selected['source_binding'],
         approved_chunk_hashes=selected['approved_chunk_hashes'], approved_policy_id=selected['approved_policy_id'],

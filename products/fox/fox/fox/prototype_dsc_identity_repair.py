@@ -50,6 +50,32 @@ def documents(root):
             for i, row in enumerate(manifest['files'])]
 
 
+def _source_identity_supplement(root):
+    """Reuse only deterministic metadata from this operation's fenced sources.
+
+    No scope is created here. Runtime/write paths without an existing read
+    scope retain the original fresh rebuild; tasks and consent are never cached.
+    """
+    from .prototype_read_scope import current_read_root, baseline_read_root, cached_read
+    current = current_read_root()
+    if current is None:
+        return identity.build_identity_supplement(documents(root))
+    root = Path(root).absolute()
+    if current != root or baseline_read_root(root, ['sources-manifest.json']) is None:
+        _fail()
+    manifest = epochs.read(root / 'sources-manifest.json')
+    files = manifest.get('files')
+    if type(files) is not list or not 1 <= len(files) <= 4:
+        _fail()
+    names = ['sources-manifest.json', *[f'sources/source-{i:03}.xml' for i in range(len(files))]]
+    if baseline_read_root(root, names) is None:
+        _fail()
+    return cached_read(root, 'active_focus', {
+        'purpose': 'fox-prototype-source-identity-supplement-v1',
+        'policy': identity.POLICY, 'manifest_sha256': canonical_hash(manifest)},
+        lambda: identity.build_identity_supplement(documents(root)))
+
+
 def historical_focus(root, packet, plan, request, target, previous, epoch):
     from . import prototype_context_screen_epoch as screen
     from .prototype_read_scope import epoch_read_scope
@@ -105,7 +131,7 @@ def _derive(root, epoch, packet, plan, target):
     if epoch['epoch_number'] != 6 or not correction.present(root):
         _fail()
     docs = documents(root)
-    supplement = identity.build_identity_supplement(docs)
+    supplement = _source_identity_supplement(root)
     if not supplement['identity_count'] or supplement['legacy_source_binding'] != packet['source_binding']:
         _fail()
     views, projections = [], []
@@ -324,7 +350,7 @@ def model_task(directory,name,payload,*,write):
         else:
             selected=True
     if not selected: return raw_only()
-    supplement=identity.build_identity_supplement(documents(root))
+    supplement=_source_identity_supplement(root)
     request=payload.get('request',payload)
     if (supplement['legacy_source_binding']!=binding.get('source_binding')
             or supplement['legacy_source_binding']!=request.get('source_binding')):

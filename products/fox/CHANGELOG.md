@@ -4,6 +4,40 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.0] - 2026-11-09
+
+### Continue validation of a saved draft
+
+- Offer **Continue validation** when a reviewed draft is retained and the
+  converter proves that validation has not started. Reuse the same run and its
+  exact approved model outputs; require fresh owner confirmations.
+- Keep the original intent and failed handoff. Bind the new continuation to the
+  saved source, target, draft, reviews and converter state, then make one exclusive
+  first validation claim. Unknown responses never trigger an automatic repeat.
+- Show clear recorded/pending states and operator guidance when reconciliation
+  is required. Reject stale project/source responses and hide unrelated XML
+  intake controls while reviewing this saved-draft action.
+- Cache only bounded pure reconstruction work within a single read scope.
+  Current owner, source and target permissions remain freshly checked.
+- Align trusted validation waits with SQLcl and authorization budgets. These
+  are socket waits, not a guarantee of total completion time.
+- Use the existing prototype source-snapshot reader consistently, fixing a
+  later 2 MB checkpoint limit that rejected already-admitted larger sources.
+- Preserve recognized stopped pre-validation history during upgrades only after
+  independently checking both retained job trees and current runtime identities.
+  Maintenance preservation grants no retry or processing permission.
+
+Local verification covers same-run continuation, exact ZIP download, missing or
+changed proof, concurrent submissions, unknown responses, source/project switches
+and legacy compatibility. Provider, database and browser outcomes in backend
+integration fixtures are simulated. A passing local test or source release does
+not prove the hosted application has completed conversion.
+
+SQLcl validation, unique import, authenticated runtime checks and exact export
+remain required. A recorded continuation in ATTENTION still needs operator
+reconciliation. Business acceptance, clean-schema portability and customer-target
+compatibility are separate outcomes.
+
 ## [0.20.1] - 2026-11-09
 
 ### Reduce repeated checks when resuming

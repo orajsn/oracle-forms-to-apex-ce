@@ -27,6 +27,8 @@ from .prototype_pipeline import (CONVERTER_STAGES, _check_converter_receipt,
 AUTHORITY_PATH = '/api/internal/prototype/authorize'
 MAX_REQUEST_BYTES = 2_000_000
 RESPONSE_SCOPE = 'fox-prototype-current-authority-v1'
+PRECLAIM_AUTHORITY_PATH = '/api/internal/prototype/preclaim-authorize'
+PRECLAIM_RESPONSE_SCOPE = 'fox-prototype-current-preclaim-authority-v1'
 
 
 def execution_target(profile):
@@ -144,16 +146,16 @@ def _retained_request(job, request):
             raise ValueError('Retained current stage intent differs from request')
 
 
-def authorize_current(root, db, profile_path, request):
+def authorize_current(root, db, profile_path, request, *, preclaim_record_sha256=None):
     """No writes, model calls, SQLcl, HTTP or request-selected filesystem paths."""
     if not isinstance(request, dict) or not re.fullmatch(r'fox-[a-f0-9]{20}', request.get('job_id', '')):
         raise ValueError('Invalid job')
     from .prototype_read_scope import epoch_read_scope
     with epoch_read_scope(Path(root) / 'jobs' / request['job_id'] / 'prototype-pipeline'):
-        return _authorize_current(root, db, profile_path, request)
+        return _authorize_current(root, db, profile_path, request,preclaim_record_sha256=preclaim_record_sha256)
 
 
-def _authorize_current(root, db, profile_path, request):
+def _authorize_current(root, db, profile_path, request, *, preclaim_record_sha256=None):
     if not isinstance(request, dict) or not re.fullmatch(r'fox-[a-f0-9]{20}', request.get('job_id', '')):
         raise ValueError('Invalid job')
     root = Path(root)
@@ -189,6 +191,12 @@ def _authorize_current(root, db, profile_path, request):
             if (source_history._hash(sources) != snapshot['source_hash']
                     or [(row['name'], source_history.readable_source_bytes(row)) for row in sources] != documents):
                 raise ValueError('Current source bytes changed')
+            if preclaim_record_sha256 is not None:
+                from . import prototype_preclaim_continuation as preclaim
+                record=preclaim.validate_record(job,snapshot,original,c)
+                if (row['state']!='PROCESSING' or canonical_hash(record)!=preclaim_record_sha256
+                        or record['request']!=request):
+                    raise ValueError('Exact processing continuation is unavailable')
         if read_prototype_snapshot(job)[1] != original:
             raise ValueError('Original snapshot changed')
         return envelope, row['state']
@@ -231,6 +239,16 @@ def _authorize_current(root, db, profile_path, request):
             'execution_target_sha256': canonical_hash(execution_target(envelope['target_profile']))}
 
 
+def authorize_preclaim_current(root,db,profile_path,request,record_sha256):
+    """Typed current consent for this exact first claim, not a portable grant."""
+    if type(record_sha256) is not str or not re.fullmatch('[a-f0-9]{64}',record_sha256):
+        raise ValueError('Invalid continuation identity')
+    if type(request) is not dict or not re.fullmatch('fox-[a-f0-9]{20}',request.get('job_id','')):
+        raise ValueError('Invalid continuation request')
+    result=authorize_current(root,db,profile_path,request,preclaim_record_sha256=record_sha256)
+    return {**result,'scope':PRECLAIM_RESPONSE_SCOPE,'record_sha256':record_sha256}
+
+
 def attach_prototype_authority(app, *, root, db, enabled=False, profile_path=None,
                                credential_path=None, allowed_origin=None):
     """Attach only when opted in. No credential reads at import/disabled startup."""
@@ -243,6 +261,13 @@ def attach_prototype_authority(app, *, root, db, enabled=False, profile_path=Non
 
     @app.post(AUTHORITY_PATH, include_in_schema=False)
     async def authorize(request: Request):
+        return await authorize_http(request)
+
+    @app.post(PRECLAIM_AUTHORITY_PATH, include_in_schema=False)
+    async def authorize_preclaim(request: Request):
+        return await authorize_http(request,preclaim=True)
+
+    async def authorize_http(request,*,preclaim=False):
         headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
         authorization = request.headers.get('authorization', '')
         if (len(request.headers.getlist('authorization')) != 1 or not authorization.startswith('Bearer ')
@@ -265,7 +290,14 @@ def attach_prototype_authority(app, *, root, db, enabled=False, profile_path=Non
                     return JSONResponse({'detail': 'Authority request too large'}, 413, headers=headers)
                 raw.extend(chunk)
             value = _json(raw)
-            result = await asyncio.to_thread(authorize_current, root, db, profile_path, value)
+            if preclaim:
+                if (type(value) is not dict or set(value)!={'schema_version','scope','request','record_sha256'}
+                        or type(value['schema_version']) is not int or value['schema_version']!=1
+                        or value['scope']!='fox-prototype-preclaim-authorize-request-v1'):
+                    raise ValueError('Invalid preclaim authority envelope')
+                result=await asyncio.to_thread(authorize_preclaim_current,root,db,profile_path,value['request'],value['record_sha256'])
+            else:
+                result = await asyncio.to_thread(authorize_current, root, db, profile_path, value)
             return JSONResponse(result, headers=headers)
         except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError,
                 RecursionError, OverflowError):

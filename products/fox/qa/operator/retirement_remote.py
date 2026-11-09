@@ -19,6 +19,42 @@ from qa.operator import product_queue_transport as bridge
 SCOPE = 'fox-retired-history-remote-read-v1'
 MAX_PACKET = 2_000_000
 
+STARTUP_PRECLAIM = r'''
+import hashlib,json,os,pathlib,sqlite3,sys
+sys.path.insert(0,'/app');sys.dont_write_bytecode=True
+from fox import verification_recovery as r
+from fox.prototype_job import load_prototype_profile
+from fox.prototype_download import configured_download_client
+from fox.prototype_transport import PrototypeHttpConverterAdapter
+from fox.prototype_preclaim_continuation import check_witness
+p=json.load(sys.stdin)
+assert hashlib.sha256(pathlib.Path(r.__file__).read_bytes()).hexdigest()==p['reader_sha256']
+db=sqlite3.connect('file:/data/fox.sqlite3?mode=ro',uri=True);db.row_factory=sqlite3.Row
+db.execute('PRAGMA query_only=ON');db.execute('BEGIN');result={}
+for row in db.execute("SELECT * FROM runs WHERE state='ATTENTION' AND artifact IS NULL"):
+ job=pathlib.Path('/data/jobs')/row['id']
+ if not (job/'prototype-pipeline/candidate-format-continuation.json').exists() or not (job/'prototype-pipeline/validate-intent.json').exists():continue
+ value=r.preclaim_fox_lineage('/data/fox.sqlite3',db,dict(row))
+ target=load_prototype_profile(pathlib.Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE']))
+ assert target['target_profile_sha256']==value['snapshot']['prototype']['target_profile_sha256']
+ # Only after maintenance-specific stopped-owner/source/proof checks. This
+ # constructs the trusted existing client; it grants no ordinary admission.
+ client=configured_download_client(target['target_profile_sha256'])
+ adapter=PrototypeHttpConverterAdapter(job,client)
+ first_witness=adapter.validate_preclaim_witness(value['request'])
+ technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'])
+ witness=adapter.validate_preclaim_witness(value['request'])
+ assert first_witness==witness
+ intent=value['documents']['prototype-transport/authority-intent.json']
+ check_witness(value['request'],witness,intent['manifest_sha256'],target['target_profile'])
+ assert adapter._get(adapter.path+'/stages/validate') is None
+ assert r.preclaim_tree(job)==value['tree']
+ result[row['id']]={'technical':technical,'request':value['request'],'witness':witness,
+   'target_profile_sha256':target['target_profile_sha256']}
+assert db.total_changes==0
+print(json.dumps({'jobs':result,'collector':r.preclaim_collector_source()},sort_keys=True))
+'''
+
 
 class RetirementRemoteError(RuntimeError):
     """Only bounded public failure categories escape the reader."""
@@ -99,7 +135,7 @@ def validate_history(history, current_release):
     return json.loads(raw)
 
 
-def _backend_read(history, current_release, for_startup, queue_module, recovery_module, root):
+def _backend_read(history, current_release, for_startup, queue_module, recovery_module, root, paired_preclaim=None):
     """One query-only transaction over every admission-bearing job identity."""
     store = recovery_module.VerificationRecovery(root / 'fox.sqlite3', enabled=True)
     old, retry, idle = (history[key] for key in ('failure', 'retry', 'idle'))
@@ -121,14 +157,30 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
               and {old['job_id'], *(job['binding']['job_id'] for job in idle['completed_jobs'])} <= set(ids),
               'RETIREMENT_REMOTE_JOB_UNION_CHANGED')
         eligibility, preservation = {}, {}
+        paired_preclaim = {} if paired_preclaim is None else paired_preclaim
+        _need(type(paired_preclaim) is dict and set(paired_preclaim) <= set(ids), 'RETIREMENT_REMOTE_PAIRED_JOB_INVALID')
         waiting, busy = [], []
         for job_id in sorted(ids):
-            protected = store._protected_read_status(db, job_id, purpose='maintenance_preservation')
+            paired = paired_preclaim.get(job_id)
+            protected = (store._protected_read_status(db, job_id, purpose='maintenance_preclaim_preservation',
+                paired_readback=paired['readback'],expected_pair=paired['expected']) if paired is not None else
+                store._protected_read_status(db, job_id, purpose='maintenance_preservation'))
             value = protected['admission']
             _need(type(value) is dict and set(value) == {'blocks_admission', 'recovery_state', 'retry_eligible'}
                   and type(value['blocks_admission']) is bool and type(value['retry_eligible']) is bool,
                   'RETIREMENT_REMOTE_ELIGIBILITY_INVALID')
             if protected['preservation_allowed']:
+                if paired is not None:
+                    run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+                    _need(value['blocks_admission'] is True and value['retry_eligible'] is False
+                        and protected['preservation_state'] == 'preclaim_validate_history' and run is not None,
+                        'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
+                    checked = recovery_module.validate_preclaim_pair(root/'fox.sqlite3',db,dict(run),
+                        paired['readback'],paired['expected'])
+                    _need(checked == protected['preserved'],'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
+                    preservation[job_id] = {'state':'preclaim_validate_history','preserved':checked}
+                    eligibility[job_id] = value
+                    continue
                 # Independently reopen the sealed lineage; a projected ready
                 # flag/label is not authority. Admission remains blocked.
                 run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
@@ -241,12 +293,12 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
 
 
 def _backend_snapshot(history, current_release, for_startup, queue_module,
-                      verification_module, recovery_module, *, root=Path('/data')):
+                      verification_module, recovery_module, *, root=Path('/data'), paired_preclaim=None):
     """Recheck real retained proofs and compare independent before/after reads."""
     history = validate_history(history, current_release)
     _need(type(for_startup) is bool, 'RETIREMENT_REMOTE_STARTUP_MODE_REQUIRED')
     root = Path(root).absolute()
-    before = _backend_read(history, current_release, for_startup, queue_module, recovery_module, root)
+    before = _backend_read(history, current_release, for_startup, queue_module, recovery_module, root, paired_preclaim)
     proofs = [{'binding': {**history['failure']['disposition']['binding'],
                           'verifier_release_sha256': history['retry']['release_sha256']},
                'proof_sha256': history['retry']['proof_sha256']}, *history['idle']['completed_jobs']]
@@ -258,15 +310,17 @@ def _backend_snapshot(history, current_release, for_startup, queue_module,
               and checked.get('active_policy_applied') is False
               and checked.get('proof_sha256') == job['proof_sha256'],
               'RETIREMENT_REMOTE_HISTORICAL_PROOF_CHANGED')
-    after = _backend_read(history, current_release, for_startup, queue_module, recovery_module, root)
+    after = _backend_read(history, current_release, for_startup, queue_module, recovery_module, root, paired_preclaim)
     _need(_canonical(before) == _canonical(after), 'RETIREMENT_REMOTE_CHANGED_DURING_READ')
     result = {key: value for key, value in after.items() if key != 'snapshot'}
     return {**result, 'backend_snapshot_sha256': _digest(_canonical(after['snapshot']))}
 
 
 def _retirement_validate_request(value):
-    _need(type(value) is dict and set(value) == {'operation', 'apply', 'manifest', 'release_sha256',
-          'configuration_sha256', 'provider_configuration_sha256', 'history', 'for_startup'}
+    _need(type(value) is dict and set(value) in ({'operation', 'apply', 'manifest', 'release_sha256',
+          'configuration_sha256', 'provider_configuration_sha256', 'history', 'for_startup'},
+          {'operation', 'apply', 'manifest', 'release_sha256', 'configuration_sha256',
+          'provider_configuration_sha256', 'history', 'for_startup','paired_preclaim'})
           and value['operation'] == 'retired_history_read' and value['apply'] is False
           and type(value['for_startup']) is bool, 'RETIREMENT_REMOTE_READ_ONLY_REQUEST_REQUIRED')
     manifest = validate_release(value['manifest'])
@@ -281,7 +335,8 @@ def _retirement_validate_request(value):
 
 def _container_result(request, queue_module, verification_module, recovery_module):
     result = _backend_snapshot(request['history'], request['release_sha256'], request['for_startup'],
-                               queue_module, verification_module, recovery_module)
+                               queue_module, verification_module, recovery_module,
+                               paired_preclaim=request.get('paired_preclaim'))
     return {'schema_version': 1, 'scope': SCOPE, 'status': 'RETIRED_HISTORY_OBSERVED',
             'current_release_sha256': request['release_sha256'],
             'configuration_sha256': request['configuration_sha256'],
@@ -347,6 +402,103 @@ def _host_inventory():
     return rows
 
 
+def _host_preclaim_health():
+    import urllib.request
+    with urllib.request.urlopen('http://127.0.0.1:8100/api/health',timeout=5) as response:
+        raw=response.read(65537)
+    guard(0<len(raw)<=65536);value=json.loads(raw)
+    guard(value.get('status')=='ok' and value.get('product')=='FOX'
+          and value.get('worker',{}).get('healthy') is True and value['worker']['state'] in ('idle','polling'))
+
+
+def _host_preclaim_collect(code,packet):
+    response=subprocess.run(['podman','unshare','/usr/bin/python3','-I','-B','-c',code],
+        input=json.dumps(packet).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120)
+    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
+    return json.loads(response.stdout)
+
+
+def _host_preclaim(v,fox,infrastructure,startup_source):
+    """NEW startup only; internally collected evidence, never request flags."""
+    pins={}
+    for name in ('fox','forms2apex-mcp'):
+        response=subprocess.run(['podman','inspect',infrastructure[name]['id']],stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,timeout=30)
+        guard(response.returncode==0 and not response.stderr.strip() and len(response.stdout)<=2_000_000)
+        item=json.loads(response.stdout)[0];image=item['Image'];image=image if image.startswith('sha256:') else 'sha256:'+image
+        guard(item['Id']==infrastructure[name]['id'] and image==infrastructure[name]['image']
+              and item['Name'].lstrip('/')==name and item['State']['Running'] is True and item['State']['Pid']>0
+              and item['HostConfig'].get('ReadonlyRootfs') is True)
+        pins[name]=item
+    response=subprocess.run(['podman','exec','-i',fox['Id'],'/usr/local/bin/python','-I','-B','-c',startup_source],
+        input=json.dumps({'reader_sha256':v['manifest']['project']['queue_modules']['verification_recovery.py'],
+            'image_sha256':v['manifest']['images']['fox'][7:]}).encode(),
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=240)
+    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
+    value=json.loads(response.stdout);guard(set(value)=={'jobs','collector'})
+    if not value['jobs']:return {},{},{}
+    _host_preclaim_health()
+    response=subprocess.run(['podman','top',infrastructure['forms2apex-mcp']['id'],'pid'],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+    guard(response.returncode==0 and not response.stderr.strip()
+          and len(response.stdout.decode().splitlines())==2 and response.stdout.decode().splitlines()[1].strip()=='1')
+    receiver_mounts={m['Destination']:m for m in pins['forms2apex-mcp']['Mounts']}
+    mount=receiver_mounts['/opt/forms2apex/outputs/jobs']
+    guard(mount['Type']=='bind' and mount['RW'] is True)
+    receiver_root=Path(mount['Source'])
+    guard(receiver_root.is_absolute() and receiver_root.resolve()==receiver_root
+          and Path('/home/opc/fox') in receiver_root.parents)
+    pair={name:{'id':item['Id'],'image':infrastructure[name]['image'],
+        'configuration_sha256':hashlib.sha256(json.dumps({'config':item['Config'],'host':item['HostConfig'],
+            'mounts':item['Mounts']},sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+        for name,item in pins.items()}
+    h=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
+    paired,captures={},{}
+    for job,entry in value['jobs'].items():
+        guard(re.fullmatch('fox-[a-f0-9]{20}',job))
+        packet={'fox_data':'/home/opc/fox/data','receiver_jobs':str(receiver_root),'job_id':job}
+        first=_host_preclaim_collect(value['collector'],packet)
+        guard(h(first['fox_tree'])==entry['technical']['fox_tree_sha256'])
+        witness=entry['witness'];observed=datetime.now(timezone.utc)
+        expected={'job_id':job,'request_sha256':entry['technical']['request_sha256'],
+            'source_binding':entry['request']['source_binding'],'target_profile_sha256':entry['target_profile_sha256'],
+            'pair_sha256':h(pair),'scope_sha256':h(p['cli_scope']),
+            'lease_sha256':h({'release':v['release_sha256'],'configuration':v['configuration_sha256']}),
+            'original_terminal_sha256':witness['witness_sha256'],'technical_source_sha256':v['manifest']['images']['fox'][7:],
+            'mode':'startup','runtime_state':'running','stopped_writer_sha256':None}
+        paired[job]={'expected':expected,'readback':{'schema_version':1,'scope':'fox-paired-preclaim-maintenance-read-v1',
+            'observed_at_utc':observed.isoformat(),'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),
+            'binding':expected,**{k:first[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
+            'technical':{**entry['technical'],'receiver_manifest_raw_sha256':first['receiver_manifest_raw_sha256']},
+            'producer':{'fox_worker':'terminal_idle','receiver_servers':1,'receiver_operations':0,'unknown_producers':0,
+                'original_terminal_sha256':witness['witness_sha256']},
+            'serialization_barrier':{'kind':'current_serialized_read','observed_at_utc':observed.isoformat(),
+                'binding':{'pair_sha256':h(pair),'fox_tree_sha256':h(first['fox_tree']),
+                    'receiver_tree_sha256':h(first['receiver_tree'])},
+                'result':{'method':'GET','stage':'validate','job_id':job,'status':404}},
+            'gateway_witness':witness,'stopped_writer':None}}
+        captures[job]=(value['collector'],packet,first)
+    _host_preclaim_health()
+    return paired,captures,pair
+
+
+def _host_preclaim_recheck(captures,infrastructure,pair):
+    if not captures:return
+    _host_preclaim_health()
+    for code,packet,first in captures.values():
+        guard(_host_preclaim_collect(code,packet)==first)
+    for name,expected in pair.items():
+        response=subprocess.run(['podman','inspect',infrastructure[name]['id']],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+        guard(response.returncode==0 and not response.stderr.strip());item=json.loads(response.stdout)[0]
+        actual={'id':item['Id'],'image':item['Image'] if item['Image'].startswith('sha256:') else 'sha256:'+item['Image'],
+            'configuration_sha256':hashlib.sha256(json.dumps({'config':item['Config'],'host':item['HostConfig'],
+            'mounts':item['Mounts']},sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+        guard(actual==expected and item['State']['Running'] is True)
+    response=subprocess.run(['podman','top',infrastructure['forms2apex-mcp']['id'],'pid'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+    guard(response.returncode==0 and not response.stderr.strip() and len(response.stdout.decode().splitlines())==2
+          and response.stdout.decode().splitlines()[1].strip()=='1')
+
+
 def host_source(current_release, configuration_sha256, infrastructure):
     source = bridge.host_source()
     original = 'code=' + repr(bridge.container_source())
@@ -358,11 +510,20 @@ def host_source(current_release, configuration_sha256, infrastructure):
     source = source.replace(original, 'code=' + repr(container_source(current_release, configuration_sha256)), 1)
     source = source.replace(before, ' inventory_before=_host_inventory()\n' + before, 1)
     source = source.replace(identity, identity + '\n guard(container==' + repr(infrastructure['fox']['id']) + ')', 1)
+    framing=" framed=base64.b64encode(code.encode())+b'\\n'+json.dumps(v).encode()+b'\\n'"
+    _need(source.count(framing)==1,'RETIREMENT_REMOTE_PRECLAIM_TEMPLATE_CHANGED')
+    source=source.replace(framing,
+        ' paired,captures,pair=_host_preclaim(v,fox,'+repr(infrastructure)+','+repr(STARTUP_PRECLAIM)+')\n'
+        " v.pop('paired_preclaim',None)\n if paired:v['paired_preclaim']=paired\n"+framing,1)
     source = source.replace(after,
+        ' _host_preclaim_recheck(captures,'+repr(infrastructure)+',pair)\n'
         ' inventory_after=_host_inventory()\n guard(inventory_before==inventory_after)\n'
         " result.update(inventory=inventory_after,observed_at_utc=datetime.now(timezone.utc).isoformat())\n" + after, 1)
     source = source.replace('0<len(r.stdout)<=65536', '0<len(r.stdout)<=2000000', 1)
-    source = 'from datetime import datetime,timezone\n' + inspect.getsource(_host_inventory) + '\n' + source
+    source = 'from pathlib import Path\nfrom datetime import datetime,timezone,timedelta\n' + '\n'.join(inspect.getsource(item) for item in
+        (_host_inventory,_host_preclaim_health,_host_preclaim_collect,_host_preclaim,_host_preclaim_recheck)) + '\n' + source
+    source=source.replace("stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120)",
+                          "stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=240)")
     compile(source, '<retirement-host>', 'exec')
     return source
 

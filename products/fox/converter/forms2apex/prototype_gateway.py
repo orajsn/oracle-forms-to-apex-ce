@@ -355,6 +355,12 @@ class PrototypeGateway:
               "PROTOTYPE_SOURCE_REVIEW_AUTHORIZATION_FAILED")
 
     def _request(self, stage, request):
+        spec, raw = self._request_inputs(stage, request)
+        self._authorize(request)
+        return spec, raw
+
+    def _request_inputs(self, stage, request):
+        """Pure wire/rendering checks; deliberately NOT execution authority."""
         _need(stage in STAGES, "PROTOTYPE_STAGE_INVALID")
         _need(type(request) is dict and set(request) == _REQUEST,
               "PROTOTYPE_REQUEST_FIELDS_INVALID")
@@ -383,8 +389,63 @@ class PrototypeGateway:
         prior = STAGES[:STAGES.index(stage)]
         _need(type(request["prior_receipts"]) is dict and set(request["prior_receipts"]) == set(prior),
               "PROTOTYPE_PRIOR_STAGES_INVALID")
-        self._authorize(request)
         return spec, raw
+
+    def validate_preclaim_witness(self, request):
+        """Inspect a completely unclaimed staged draft, without granting a stage.
+
+        A missing request/receipt alone is insufficient. The WHOLE receiver job
+        must contain only the immutable staged authority and its manifest.
+        This method neither invokes the authority callback nor writes anything.
+        """
+        request = deepcopy(request)
+        with _LOCK:
+            _, raw = self._request_inputs("validate", request)
+            root = self._root(request, create=False)
+            _need(root.is_dir() and not root.is_symlink(), "PROTOTYPE_PRECLAIM_ROOT_MISSING")
+            _need({p.name for p in root.parent.iterdir()} == {"prototype-pipeline", "prototype-converter"}
+                  and {p.name for p in root.iterdir()} == {"authority-manifest.json"},
+                  "PROTOTYPE_PRECLAIM_ATTEMPT_OR_UNKNOWN_ENTRY")
+            staging = self.recover_source_authority(request["job_id"])
+            _need(staging is not None and staging["source_binding"] == request["source_binding"]
+                  and staging["source_authority"] == request["source_authority"],
+                  "PROTOTYPE_PRECLAIM_AUTHORITY_CHANGED")
+            source = root.parent / "prototype-pipeline"
+            native, rendered = read_object(source / "native-plan.json"), read_object(source / "rendered.json")
+            binding = read_object(source / "binding.json")
+            _need(native.get("plan_sha256") == request["plan_sha256"]
+                  and native.get("rendering_spec") == request["rendering_spec"]
+                  and rendered.get("zip_sha256") == request["rendered_zip_sha256"]
+                  and (source / "candidate-apexlang.zip").read_bytes() == raw
+                  and binding.get("project_id") == request["project_id"],
+                  "PROTOTYPE_PRECLAIM_DRAFT_CHANGED")
+            from .prototype_authority_client import execution_target
+            profile = (self.target_profile_loader(self.settings) if callable(self.target_profile_loader)
+                       else runtime_preflight.bound_target_profile(self.settings))
+            target = digest(execution_target(profile))
+            jobs = Path(self.settings.jobs_root).resolve()
+            metadata = jobs.stat()
+            # Opaque installation namespace/software binding, never a path on
+            # the wire and never processing permission. Re-evaluated per read.
+            receiver = digest({"jobs_root": str(jobs), "device": metadata.st_dev,
+                "inode": metadata.st_ino, "gateway_sha256": file_digest(Path(__file__))})
+            value = {"schema_version": 1, "scope": "fox-prototype-validate-preclaim-witness-v1",
+                "job_id": request["job_id"], "project_id": request["project_id"],
+                "request_sha256": digest(request), "source_binding": request["source_binding"],
+                "source_authority": deepcopy(request["source_authority"]),
+                "manifest_sha256": staging["manifest_sha256"],
+                "rendered_zip_sha256": request["rendered_zip_sha256"],
+                "execution_target_sha256": target, "receiver_sha256": receiver,
+                "source_review_authorized": False}
+            return {**value, "witness_sha256": digest(value)}
+
+    def continue_validation(self, request, witness, record_sha256):
+        """One first validation claim, never an uncertain validation replay."""
+        request, witness = deepcopy(request), deepcopy(witness)
+        with _LOCK:
+            _need(self.validate_preclaim_witness(request) == witness,
+                  "PROTOTYPE_PRECLAIM_WITNESS_CHANGED")
+            return self._run_stage("validate", request, preclaim_witness=witness, preclaim_record_sha256=record_sha256)
 
     def _root(self, request, *, create):
         jobs = Path(self.settings.jobs_root).absolute()
@@ -533,6 +594,9 @@ class PrototypeGateway:
                 "schema_ddl_sha256": hashlib.sha256(ddl.encode()).hexdigest(), "database_writes": bool(tables)}
 
     def run_stage(self, stage, request):
+        return self._run_stage(stage, request)
+
+    def _run_stage(self, stage, request, *, preclaim_witness=None, preclaim_record_sha256=None):
         request = deepcopy(request)
         with _LOCK:
             spec, raw = self._request(stage, request)
@@ -540,6 +604,15 @@ class PrototypeGateway:
                 return self._receipt(stage, request, "UNAVAILABLE", code="PROTOTYPE_STAGE_PROOF_NOT_IMPLEMENTED")
             root = self._root(request, create=True)
             self._check_prior(root, request)
+            if preclaim_witness is not None:
+                callback=getattr(self.authorize,'authorize_preclaim',None)
+                _need(callable(callback) and type(preclaim_record_sha256) is str and _SHA.fullmatch(preclaim_record_sha256),
+                      "PROTOTYPE_PRECLAIM_OWNER_AUTHORIZATION_UNAVAILABLE")
+                value=deepcopy(request)
+                _need(callback(value,preclaim_record_sha256)==request and value==request,
+                      "PROTOTYPE_PRECLAIM_OWNER_AUTHORIZATION_FAILED")
+                _need(stage == "validate" and self.validate_preclaim_witness(request) == preclaim_witness,
+                      "PROTOTYPE_PRECLAIM_WITNESS_CHANGED")
             archive, binding = self._snapshot(root, request, spec, raw, create=stage == "validate")
             intent = root / (stage + "-intent.json")
             _need(not intent.exists() and not intent.is_symlink() and not (root / (stage + ".json")).exists(),

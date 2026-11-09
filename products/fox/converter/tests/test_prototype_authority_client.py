@@ -47,12 +47,47 @@ def test_exact_unchanged_request_and_secure_transport_configuration(case, monkey
     assert connect[1:3] == ('fox.example.test', 443)
     context = connect[3]['context']
     assert context.check_hostname and context.verify_mode == 2
-    assert connect[3]['timeout'] == callback.timeout == client.DEFAULT_AUTHORITY_TIMEOUT_SECONDS == 30
+    assert connect[3]['timeout'] == callback.timeout == client.DEFAULT_AUTHORITY_TIMEOUT_SECONDS == 120
+    assert client.MAX_AUTHORITY_TIMEOUT_SECONDS == 120
     assert sent[1] == ('POST', client.AUTHORITY_PATH)
     assert sent[2]['headers']['Authorization'] == 'Bearer synthetic-converter-test-token'
     assert sent[2]['headers']['Origin'] == 'https://fox.example.test'
     assert json.loads(sent[2]['body']) == request
     assert state.closed == 1
+
+
+def test_preclaim_callback_binds_typed_consent_record_without_changing_original_request(case):
+    state,callback,request=case
+    record='c'*64
+    state.body.update(scope=client.PRECLAIM_RESPONSE_SCOPE,record_sha256=record)
+    assert callback.authorize_preclaim(request,record) is request
+    sent=[row for row in state.calls if row[0]=='request']
+    assert len(sent)==1 and sent[0][1]==('POST',client.PRECLAIM_AUTHORITY_PATH)
+    assert json.loads(sent[0][2]['body'])=={'schema_version':1,
+        'scope':'fox-prototype-preclaim-authorize-request-v1','request':request,'record_sha256':record}
+    assert state.closed==1
+
+
+@pytest.mark.parametrize('failure',['missing','forged','old-scope','unknown','response-loss'])
+def test_preclaim_callback_refuses_missing_forged_or_old_record_and_never_retries(case,failure):
+    state,callback,request=case
+    state.body.update(scope=client.PRECLAIM_RESPONSE_SCOPE,record_sha256='c'*64)
+    if failure=='missing': state.body.pop('record_sha256')
+    elif failure=='forged': state.body['record_sha256']='d'*64
+    elif failure=='old-scope': state.body['scope']=client.RESPONSE_SCOPE
+    elif failure=='unknown': state.body['permission']=True
+    else: state.fail_at='headers'
+    with pytest.raises(RuntimeError,match='UNAVAILABLE_NO_RETRY'):
+        callback.authorize_preclaim(request,'c'*64)
+    assert len([row for row in state.calls if row[0]=='request'])==1 and state.closed==1
+
+
+@pytest.mark.parametrize('record',[None,True,'z'*64,'a'*63,{},''])
+def test_invalid_preclaim_record_refuses_before_any_http(case,record):
+    state,callback,request=case
+    with pytest.raises(RuntimeError,match='UNAVAILABLE_NO_RETRY'):
+        callback.authorize_preclaim(request,record)
+    assert state.calls==[] and state.closed==0
 
 
 @pytest.mark.parametrize('failure', ['hash', 'destination', 'job', 'scope', 'extra', 'boolean_version',
@@ -86,7 +121,7 @@ def test_network_failure_has_no_retry(case, monkeypatch):
     assert state.calls == [('failed',)]
 
 
-@pytest.mark.parametrize('timeout', [15, 30, 30.0, 0.1])
+@pytest.mark.parametrize('timeout', [15, 30, 30.0, 0.1, 120, 120.0])
 def test_explicit_bounded_timeout_remains_supported(case, timeout):
     state, _, _ = case
     callback = client.PrototypeAuthorityClient(state.settings,
@@ -95,7 +130,8 @@ def test_explicit_bounded_timeout_remains_supported(case, timeout):
     assert callback.timeout == timeout
 
 
-@pytest.mark.parametrize('timeout', [0, -1, 30.1, True, '30', None, float('inf'), float('nan')])
+@pytest.mark.parametrize('timeout', [0, 0.0, -1, 120.000001, 121, True, False, '120', None,
+                                  float('inf'), float('-inf'), float('nan')])
 def test_timeout_cap_and_type_checks_are_unchanged(case, timeout):
     state, _, _ = case
     with pytest.raises(ValueError):
@@ -133,6 +169,26 @@ def test_registered_target_change_during_callback_revokes_authority(case, monkey
     with pytest.raises(RuntimeError, match='NO_RETRY'): callback(request)
     assert len(observations) == 2
     assert len([call for call in state.calls if call[0] == 'request']) == 1
+    assert state.closed == 1
+
+
+def test_payload_cannot_change_the_trusted_deadline(case):
+    state,callback,request=case
+    request['timeout']=0.1
+    state.body['request_sha256']=client._hash(request)
+    assert callback(request) is request
+    assert state.calls[0][3]['timeout']==120
+    assert len([call for call in state.calls if call[0]=='request'])==1 and state.closed==1
+
+
+@pytest.mark.parametrize('failure',['request','headers','body'])
+def test_default120_timeout_is_single_attempt_and_always_closes(case,failure):
+    state,callback,request=case;state.fail_at=failure
+    with pytest.raises(RuntimeError,match='^PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY$'):
+        callback(request)
+    assert state.calls[0][3]['timeout']==120
+    assert len([call for call in state.calls if call[0]=='connect'])==1
+    assert len([call for call in state.calls if call[0]=='request'])==1 and state.closed==1
 
 
 @pytest.mark.parametrize('url,origin', [

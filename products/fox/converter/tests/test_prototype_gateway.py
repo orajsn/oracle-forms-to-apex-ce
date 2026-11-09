@@ -390,16 +390,28 @@ def test_source_authority_staging_is_immutable_read_only_recoverable_and_not_app
         case.adapter.run_stage("validate", case.request)
 
 
-@pytest.mark.parametrize("bad_path", ["../binding.json", "/binding.json", "C:/binding.json",
-                                      "sources\\source-000.xml", "unknown.json", "assessment.json",
-                                      "focus-" + "a" * 24 + "/mapper-intent.json"])
-def test_staging_rejects_path_traversal_extra_artifacts_and_intents(case, bad_path):
+@pytest.mark.parametrize("bad_path,expected_error", [
+    ("../binding.json", "PATH_NOT_ALLOWED"),
+    ("/binding.json", "PATH_NOT_ALLOWED"),
+    ("C:/binding.json", "PATH_NOT_ALLOWED"),
+    ("sources\\source-000.xml", "PATH_NOT_ALLOWED"),
+    ("unknown.json", "PATH_NOT_ALLOWED"),
+    ("assessment.json", "PATH_NOT_ALLOWED"),
+    # Intent names are recognized provenance paths. Replacing the required
+    # binding member with one still rejects the incomplete authority closure.
+    ("focus-" + "a" * 24 + "/mapper-intent.json", "ROOT_FILES_MISSING"),
+])
+def test_staging_rejects_path_traversal_extra_artifacts_and_intents(case, bad_path, expected_error):
+    before = {p.relative_to(case.settings.jobs_root): p.read_bytes()
+              for p in case.settings.jobs_root.rglob('*') if p.is_file()}
     bundle = authority_bundle(case)
     bundle["files"][0]["path"] = bad_path
     rebind_bundle(bundle)
-    with pytest.raises(RuntimeError, match="PATH_NOT_ALLOWED"):
+    with pytest.raises(RuntimeError, match=expected_error):
         case.adapter.stage_source_authority(case.request["job_id"], bundle)
     assert not case.calls
+    assert {p.relative_to(case.settings.jobs_root): p.read_bytes()
+            for p in case.settings.jobs_root.rglob('*') if p.is_file()} == before
 
 
 def test_staging_rejects_changed_bytes_manifest_and_missing_review(case):
