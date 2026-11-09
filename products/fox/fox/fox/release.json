@@ -1,8 +1,10 @@
 {
-  "version": "0.21.0",
+  "version": "0.21.1",
   "released_on": "2026-11-09",
-  "title": "Continue validation of a saved draft",
+  "title": "Correct existing-host upgrade admission",
   "changes": [
+    "Recognize the existing hosted converter's approved root filesystem and exact jobs mount during upgrade checks.",
+    "Keep container identity, unchanged configuration and saved-job preservation checks mandatory.",
     "Continue an eligible saved reviewed draft on the same run without repeating AI calls.",
     "Require a fresh converter no-attempt check and owner confirmation before validation starts.",
     "Preserve original attempts and reviewed outputs; never automatically repeat an uncertain operation.",

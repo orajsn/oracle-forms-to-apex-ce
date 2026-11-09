@@ -4,6 +4,26 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.1] - 2026-11-09
+
+### Correct existing-host upgrade admission
+
+- Match the existing hosted container roles: the FOX root filesystem is
+  read-only; the converter uses its approved writable root filesystem.
+- Require the converter's exact existing jobs bind mount instead of an
+  unrelated parent directory. No container setting or mount is changed.
+- Retain identity, image, process, unchanged-configuration and paired-job
+  preservation checks. This correction grants no conversion retry or import.
+
+39 focused tests and 165 relevant regressions passed; 12 POSIX-only checks were
+skipped on Windows. The broader historical suite could not pass without its
+private legacy fixtures and is not included in those pass counts.
+Local modeled checks cover both approved role configurations and reject changed
+paths, mount types, access modes, identities and post-read evidence. These tests
+are not proof of a successful hosted upgrade or conversion. The failed 0.21.0
+upgrade and its original evidence remain retained; deployment and the real-file
+validation/import/export path require separate live verification.
+
 ## [0.21.0] - 2026-11-09
 
 ### Continue validation of a saved draft

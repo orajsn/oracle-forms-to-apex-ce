@@ -420,6 +420,9 @@ def _host_preclaim_collect(code,packet):
 
 def _host_preclaim(v,fox,infrastructure,startup_source):
     """NEW startup only; internally collected evidence, never request flags."""
+    # Fixed legacy JSN roles, matching activate_project_release's approved
+    # candidate contract. This is not a caller-selected/fresh deployment policy.
+    legacy_rootfs = {'fox': True, 'forms2apex-mcp': False}
     pins={}
     for name in ('fox','forms2apex-mcp'):
         response=subprocess.run(['podman','inspect',infrastructure[name]['id']],stdout=subprocess.PIPE,
@@ -428,7 +431,7 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
         item=json.loads(response.stdout)[0];image=item['Image'];image=image if image.startswith('sha256:') else 'sha256:'+image
         guard(item['Id']==infrastructure[name]['id'] and image==infrastructure[name]['image']
               and item['Name'].lstrip('/')==name and item['State']['Running'] is True and item['State']['Pid']>0
-              and item['HostConfig'].get('ReadonlyRootfs') is True)
+              and item['HostConfig'].get('ReadonlyRootfs') is legacy_rootfs[name])
         pins[name]=item
     response=subprocess.run(['podman','exec','-i',fox['Id'],'/usr/local/bin/python','-I','-B','-c',startup_source],
         input=json.dumps({'reader_sha256':v['manifest']['project']['queue_modules']['verification_recovery.py'],
@@ -447,7 +450,7 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
     guard(mount['Type']=='bind' and mount['RW'] is True)
     receiver_root=Path(mount['Source'])
     guard(receiver_root.is_absolute() and receiver_root.resolve()==receiver_root
-          and Path('/home/opc/fox') in receiver_root.parents)
+          and receiver_root == Path('/home/opc/forms2apex/outputs/jobs'))
     pair={name:{'id':item['Id'],'image':infrastructure[name]['image'],
         'configuration_sha256':hashlib.sha256(json.dumps({'config':item['Config'],'host':item['HostConfig'],
             'mounts':item['Mounts']},sort_keys=True,separators=(',',':')).encode()).hexdigest()}
