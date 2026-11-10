@@ -1,15 +1,12 @@
 {
-  "version": "0.21.1",
-  "released_on": "2026-11-09",
-  "title": "Correct existing-host upgrade admission",
+  "version": "0.21.2",
+  "released_on": "2026-11-11",
+  "title": "Prepare validation files and reuse saved checks",
   "changes": [
-    "Recognize the existing hosted converter's approved root filesystem and exact jobs mount during upgrade checks.",
-    "Keep container identity, unchanged configuration and saved-job preservation checks mandatory.",
-    "Continue an eligible saved reviewed draft on the same run without repeating AI calls.",
-    "Require a fresh converter no-attempt check and owner confirmation before validation starts.",
-    "Preserve original attempts and reviewed outputs; never automatically repeat an uncertain operation.",
-    "Reduce repeated pure checks and align validation waits with its existing processing budgets.",
-    "Use the established larger source-snapshot limit consistently throughout generation."
+    "Prepare APEX validation files in a private system temporary directory instead of requiring write access to the jobs directory's parent.",
+    "Reuse immutable saved-review checks within one converter phase instead of rebuilding overlapping proofs in separate nested scopes.",
+    "Keep source-file entry and exit checks and current owner, selection, target and consent checks mandatory.",
+    "End proof reuse before external execution; do not cache processing permission or repeat an uncertain operation."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

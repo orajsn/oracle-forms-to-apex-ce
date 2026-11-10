@@ -4,6 +4,34 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.2] - 2026-11-11
+
+### Prepare validation files and reuse saved checks
+
+- Use a private system temporary directory for APEX validation. A writable jobs
+  directory no longer requires its parent to be writable too. Keep the exact
+  retained ZIP, extracted-tree checks, validation log and receipt requirements.
+- Keep overlapping read-only epoch, review and model-proof checks inside the
+  existing operation-local proof scope during converter-phase reconstruction.
+- Preserve exact source-file entry/exit checks and fresh owner, selection,
+  target and consent checks. Reuse ends before external execution.
+- No persistent cache, cached processing permission, new model call or
+  automatic retry is introduced.
+
+Verification: 54 existing FOX regressions, 128 converter tests and the focused
+fresh historical-checkpoint test passed. The scratch-path regression failed
+before the fix and passed after it. In the synthetic checkpoint comparison,
+container-proof computations fell from 21 to 2 and derivations from 12 to 1;
+the typed phase, retained files and model-call count were unchanged. Source
+mutation and changed owner, consent and target were rejected. The measured
+phase took 49.29s before and 9.81s after, excluding fixture preparation; this is
+not a live conversion speed guarantee. Existing dependency warnings and a
+JUnit property-format warning remain.
+
+These are source-level checks, not proof of deployment or a successful real-file
+APEX import/export. Existing consumed validation attempts remain preserved and
+still require explicit reconciliation; this release does not authorize replay.
+
 ## [0.21.1] - 2026-11-09
 
 ### Correct existing-host upgrade admission

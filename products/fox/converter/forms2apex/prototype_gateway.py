@@ -631,9 +631,10 @@ class PrototypeGateway:
             if stage == "validate":
                 # SQLcl validates an actual app directory extracted from the
                 # exact deterministic ZIP, never a string or design surrogate.
-                # Keep the checked directory shallow on Windows (SQLcl's theme
-                # files are deep). The immutable ZIP remains in the job root.
-                with tempfile.TemporaryDirectory(prefix=".p-", dir=Path(self.settings.jobs_root).parent) as temporary:
+                # System temp is writable without write access to the jobs
+                # parent and stays shallow for SQLcl's deep files on Windows.
+                # The immutable ZIP remains in the job root.
+                with tempfile.TemporaryDirectory(prefix=".p-") as temporary:
                     app = Path(temporary) / "apexlang"
                     app.mkdir()
                     with zipfile.ZipFile(io.BytesIO(raw)) as archive_input:

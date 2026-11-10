@@ -455,6 +455,12 @@ def converter_phase(job, snapshot, original, stage, request):
     A caller dictionary cannot exempt an intent. All source/review/rendering and
     ordered prior-stage bindings must match durable proof before a token exists.
     """
+    from .prototype_read_scope import epoch_read_scope
+    with epoch_read_scope(Path(job) / 'prototype-pipeline'):
+        return _converter_phase(job, snapshot, original, stage, request)
+
+
+def _converter_phase(job, snapshot, original, stage, request):
     job = Path(job)
     record = _validated_epoch_record(job, snapshot, original)
     if record is None:
