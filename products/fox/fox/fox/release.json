@@ -1,12 +1,11 @@
 {
-  "version": "0.21.2",
+  "version": "0.21.3",
   "released_on": "2026-11-11",
-  "title": "Prepare validation files and reuse saved checks",
+  "title": "Retain export files in writable storage",
   "changes": [
-    "Prepare APEX validation files in a private system temporary directory instead of requiring write access to the jobs directory's parent.",
-    "Reuse immutable saved-review checks within one converter phase instead of rebuilding overlapping proofs in separate nested scopes.",
-    "Keep source-file entry and exit checks and current owner, selection, target and consent checks mandatory.",
-    "End proof reuse before external execution; do not cache processing permission or repeat an uncertain operation."
+    "Write private APEX export attempts inside the existing writable, persistent jobs storage instead of its protected parent.",
+    "Retain failed and uncertain export files for inspection without publishing an unverified package or repeating the attempt.",
+    "Keep export identity, runtime, SQLcl validation and byte-integrity checks unchanged."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

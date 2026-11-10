@@ -147,7 +147,7 @@ def export_prototype(settings, root, request, *, imported, artifact_binding, run
     app_id, alias = imported["application_id"], imported["application_alias"]
     # Keep SQLcl output below Windows path limits; retain the attempt on any
     # uncertainty. The parent stage's exclusive durable intent prevents replay.
-    attempt = Path(tempfile.mkdtemp(prefix=".px-", dir=Path(settings.jobs_root).parent))
+    attempt = Path(tempfile.mkdtemp(prefix=".px-", dir=Path(settings.jobs_root)))
     publish(root / "export-attempt.json", {"directory": str(attempt), "binding": identity})
     freshness_check()
     match = f"workspace='FORMS2APEX_POC' and application_id={app_id} and upper(alias)='{alias}'"

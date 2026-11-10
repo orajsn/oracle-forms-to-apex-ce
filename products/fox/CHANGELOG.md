@@ -4,6 +4,25 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.3] - 2026-11-11
+
+### Retain export files in writable storage
+
+- Create private export attempts under the existing persistent jobs directory,
+  rather than requiring its protected parent to be writable.
+- Keep failed or uncertain export files for inspection. No cleanup, automatic
+  replay, permission change or unverified package publication is introduced.
+- Preserve the existing application/runtime identity, SQLcl validation and
+  exact-byte checks. Export scratch is not a dispatchable job and remains
+  included in backup inventory.
+
+Verification: 125 relevant local tests passed, including six focused export
+cases that failed against the old path and passed after the fix. Tests exercised
+real persistent directories and snapshot/queue readers with modelled SQLcl and
+browser responses. This is not live Oracle export, clean-install or business
+acceptance proof. The stopped real validation claim still requires separately
+verified preservation and recovery; this source release does not authorize retry.
+
 ## [0.21.2] - 2026-11-11
 
 ### Prepare validation files and reuse saved checks
