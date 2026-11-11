@@ -3356,6 +3356,20 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
             'receiver_tree_sha256':hashed(receiver),'manifest_sha256':manifest['manifest_sha256']}
 
 
+def claimed_validation_snapshot(request):
+    """Pure selected-profile metadata; never source or execution authority."""
+    from forms2apex.blueprint_profiles import select
+    renderer = select(request['rendering_spec'])
+    _need(digest(renderer.deterministic_prototype_zip(request['rendering_spec'])) ==
+          request['rendered_zip_sha256'], 'CLAIMED_VALIDATION_RENDERED_ZIP_CHANGED')
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    return {'schema_version':1,'job_id':request['job_id'],'project_id':request['project_id'],
+        'source_binding':request['source_binding'],'plan_sha256':request['plan_sha256'],
+        'rendering_spec_sha256':hashed(request['rendering_spec']),'source_authority':request['source_authority'],
+        'draft_zip_sha256':request['rendered_zip_sha256'],'template':renderer.context()}
+
+
 def preclaim_technical_read(database, job_id, target, source_sha256):
     """NEW measured namespace only. Pure technical read, never current authority.
 
@@ -3387,16 +3401,9 @@ def preclaim_technical_read(database, job_id, target, source_sha256):
             claimed_snapshot = None
             if 'prototype-pipeline/validate-preclaim-continuation.json' in value['documents']:
                 from . import prototype_preclaim_continuation as continuation
-                from forms2apex import native_blueprint
                 continuation.validate_record(value['job'], value['snapshot'],
                     (value['job']/'source-snapshot.json').read_bytes(), db)
-                request = value['request']
-                _need(digest(native_blueprint.deterministic_prototype_zip(request['rendering_spec'])) ==
-                      request['rendered_zip_sha256'], 'CLAIMED_VALIDATION_RENDERED_ZIP_CHANGED')
-                claimed_snapshot = {'schema_version':1,'job_id':request['job_id'],'project_id':request['project_id'],
-                    'source_binding':request['source_binding'],'plan_sha256':request['plan_sha256'],
-                    'rendering_spec_sha256':hashed(request['rendering_spec']),'source_authority':request['source_authority'],
-                    'draft_zip_sha256':request['rendered_zip_sha256'],'template':native_blueprint.context()}
+                claimed_snapshot = claimed_validation_snapshot(value['request'])
         _need(preclaim_tree(value['job']) == value['tree'] and db.total_changes == 0,
               'PRECLAIM_TECHNICAL_READ_CHANGED_DATA')
         return {'status':'PURE_TECHNICAL_READ_ONLY_MATCH','request_sha256':hashed(value['request']),

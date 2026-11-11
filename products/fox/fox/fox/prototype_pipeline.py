@@ -39,7 +39,8 @@ from .forms_focus import build_focus_plan
 from .prototype_admission import bound_focus_limit, FOCUS_MAX_OWNED_OBJECTS
 from .prototype_claim_resolution import resolved_mapper, ARTIFACTS as RESOLUTION_ARTIFACTS
 from .forms_focus_merge import merge_focus_blueprints
-from .forms_native_plan import POLICY_ID, build_native_prototype_plan
+from .forms_native_plan import POLICY_ID
+from .forms_native_required_plan import build_native_plan, bound_native_input_policy
 from .forms_understanding_packet import local_packet
 from .native_pipeline import _json, _save_once, _sync
 from .opaf import OpafError, canonical_hash, validate_model_environment
@@ -54,8 +55,52 @@ class NativeBlueprintRenderer:
     def render(self, spec):
         # The app and converter are separate installation closures. A missing
         # converter is a real adapter blocker, never an invented rendered ZIP.
-        from forms2apex.native_blueprint import deterministic_prototype_zip, prototype_trace
-        return deterministic_prototype_zip(spec), prototype_trace(spec)
+        from forms2apex.blueprint_profiles import select
+        profile = select(spec)
+        return profile.deterministic_prototype_zip(spec), profile.prototype_trace(spec)
+
+
+def _saved_native_input_policy(job, *, binding=None, requested=None, documents=None,
+                               project_id=None, project_name=None, source_binding=None,
+                               staged_projection=False):
+    """Bind the creation-only choice to original consent before any new effects."""
+    try:
+        if type(staged_projection) is not bool:
+            raise ValueError('Invalid internal staged projection mode.')
+        requested = bound_native_input_policy({} if requested is None else {'native_input_policy': requested})
+        retained = bound_native_input_policy(binding) if binding is not None else requested
+        path = Path(job) / 'source-snapshot.json'
+        if path.exists() or path.is_symlink():
+            from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+            snapshot, _ = read_prototype_snapshot(job)
+            saved = bound_native_input_policy(snapshot.get('prototype', {}))
+            if (binding is not None and retained != saved) or (requested is not None and requested != saved):
+                raise ValueError('Native input policy differs from the immutable source snapshot.')
+            if saved is not None:
+                exact = validate_prototype_snapshot(snapshot)
+                selected = snapshot['prototype']
+                if binding is not None and any(
+                        (key in binding) != (key in selected) or binding.get(key) != selected.get(key)
+                        for key in ('schema_version', 'max_owned_objects', 'source_binding',
+                                    'focus_plan_sha256', 'approved_policy_id', 'metadata_task_policy',
+                                    'candidate_format_policy', 'native_input_policy')):
+                    raise ValueError('Native input policy binding differs from its admitted scope.')
+                if (documents is not None and documents != exact
+                        or project_id is not None and project_id != snapshot['project_id']
+                        or project_name is not None and project_name != snapshot['project_name']
+                        or source_binding is not None and source_binding != snapshot['prototype']['source_binding']):
+                    raise ValueError('Native input policy source or project differs from its immutable snapshot.')
+            return saved
+        if staged_projection and binding is not None:
+            # Converter-owned inert projection only. It contains technical
+            # provenance, not owner consent; current original-owner authority
+            # remains a separate mandatory gateway callback before effects.
+            return retained
+        if retained is not None or requested is not None:
+            raise ValueError('Native input policy requires its immutable admitted source snapshot.')
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise OpafError('Native input policy or its immutable source approval is invalid or changed.') from None
 
 
 def _directory(path):
@@ -240,7 +285,7 @@ def _scoped_review_index(checkpoints, plan):
             'focuses': [row(request) for request in plan['requests']]}
 
 
-def authorize_prototype_request(job: Path, request: dict) -> dict:
+def authorize_prototype_request(job: Path, request: dict, *, staged_projection=False) -> dict:
     """Read-only exact source/reviewer authority check for the private gateway.
 
     The caller selects ``job`` from its CONFIGURED private root and additionally
@@ -248,21 +293,28 @@ def authorize_prototype_request(job: Path, request: dict) -> dict:
     Do not resolve a filesystem path supplied by the request. This function
     reconstructs proofs from actual worker-owned artifacts; user booleans and
     claimed model approval are never authoritative.
+
+    ``staged_projection=True`` is an internal technical-only receiver mode,
+    never a request field or owner/execution grant. Its converter caller must
+    validate the staged source bundle and independently obtain current original
+    owner authority. The default requires the original admitted snapshot for
+    the new input policy; mere absence never opts into projection mode.
     """
     from .prototype_read_scope import epoch_read_scope, cached_read
     root = Path(job) / 'prototype-pipeline'
     with epoch_read_scope(root):
         return cached_read(root, 'active_focus', {'purpose': 'prototype-source-render-authority-v1',
-            'job': str(Path(job).absolute()), 'request': request},
-            lambda: _authorize_prototype_request(job, request))
+            'job': str(Path(job).absolute()), 'request': request, 'staged_projection': staged_projection},
+            lambda: _authorize_prototype_request(job, request, staged_projection=staged_projection))
 
 
-def _authorize_prototype_request(job: Path, request: dict) -> dict:
+def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=False) -> dict:
     job = Path(job)
     checkpoints = job / 'prototype-pipeline'
     if job.is_symlink() or checkpoints.is_symlink() or not checkpoints.is_dir():
         raise OpafError('Prototype authority directory is unsafe or missing.')
     binding = _json(checkpoints / 'binding.json')
+    native_input_policy = _saved_native_input_policy(job, binding=binding, staged_projection=staged_projection)
     manifest = _json(checkpoints / 'sources-manifest.json')
     if ((request.get('job_id'), request.get('project_id'), request.get('source_binding')) !=
             (job.name, binding.get('project_id'), binding.get('source_binding'))
@@ -283,6 +335,9 @@ def _authorize_prototype_request(job: Path, request: dict) -> dict:
             raise OpafError('Prototype retained source bytes changed.')
         documents.append((source['name'], raw))
     packet = local_packet(documents)
+    _saved_native_input_policy(job, binding=binding, documents=documents,
+        project_id=binding.get('project_id'), project_name=binding.get('project_name'),
+        source_binding=binding.get('source_binding'), staged_projection=staged_projection)
     if packet != _artifact_json(checkpoints / 'packet.json'):
         raise OpafError('Prototype facts do not match fresh retained source bytes.')
     plan = build_focus_plan(documents, expected_source_binding=binding['source_binding'],
@@ -324,7 +379,7 @@ def _authorize_prototype_request(job: Path, request: dict) -> dict:
             raise OpafError('Prototype authority lacks an approved source-bound design review.')
         candidates.append(candidate)
     merged = merge_focus_blueprints(documents, plan, candidates)
-    native_plan = build_native_prototype_plan(documents, merged['blueprint'],
+    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy,
         project_id=binding['project_id'], project_name=binding['project_name'], approved_policy_id=POLICY_ID)
     if (merged != _artifact_json(checkpoints / 'merged-blueprint.json')
             or native_plan != _artifact_json(checkpoints / 'native-plan.json')
@@ -408,7 +463,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            project_id, project_name, expected_source_binding,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
-                           converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None):
+                           converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
+                           native_input_policy=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -424,6 +480,9 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     if (not isinstance(project_id, str) or not forms_native_plan._PROJECT_ID.fullmatch(project_id)
             or not forms_native_plan._safe_label(project_name)):
         raise OpafError('Prototype project identity and name must satisfy the native rendering contract.')
+    native_input_policy = _saved_native_input_policy(job, requested=native_input_policy,
+        documents=documents, project_id=project_id, project_name=project_name,
+        source_binding=expected_source_binding)
     if (not isinstance(profile, dict) or any(not isinstance(profile.get(name), dict)
             for name in ('mapper', 'reviewer'))
             or any(not isinstance(profile[name].get('workflow_id'), str) for name in ('mapper', 'reviewer'))
@@ -451,6 +510,12 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     limit = bound_focus_limit(strategy)
     plan = build_focus_plan(documents, expected_source_binding=expected_source_binding,
                             approved_chunk_hashes=approved_chunk_hashes, max_owned_objects=limit)
+    if native_input_policy is not None:
+        if (persisted['schema_version'] != focus_schema_version
+                or persisted['approved_chunk_hashes'] != approved_chunk_hashes
+                or persisted['approved_policy_id'] != approved_policy_id
+                or persisted['focus_plan_sha256'] != canonical_hash(plan)):
+            raise OpafError('Native input policy focus scope differs from its immutable admission.')
     _directory(job)
     checkpoints = job / 'prototype-pipeline'
     _directory(checkpoints)
@@ -459,6 +524,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'focus_plan_sha256': canonical_hash(plan),
                'profile_sha256': canonical_hash({name: profile[name] for name in ('mapper', 'reviewer')}),
                'approved_policy_id': approved_policy_id}
+    if native_input_policy is not None:
+        binding['native_input_policy'] = native_input_policy
     if metadata_task_policy is not None:
         from .prototype_dsc_identity_repair import TASK_POLICY
         if metadata_task_policy != TASK_POLICY: raise OpafError('Unknown immutable prototype metadata task policy.')
@@ -537,7 +604,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         views.append(view)
     merged = merge_focus_blueprints(documents, plan, candidates)
     _save_artifact(checkpoints / 'merged-blueprint.json', merged)
-    native_plan = build_native_prototype_plan(documents, merged['blueprint'],
+    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy,
         project_id=project_id, project_name=project_name, approved_policy_id=approved_policy_id)
     _save_artifact(checkpoints / 'native-plan.json', native_plan)
     review_index = _review_index(checkpoints, plan)

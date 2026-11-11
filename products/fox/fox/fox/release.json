@@ -1,11 +1,11 @@
 {
-  "version": "0.21.6",
+  "version": "0.22.0",
   "released_on": "2026-11-12",
-  "title": "Recognize radio-button metadata and required-field properties",
+  "title": "Carry Forms required inputs into native APEX forms",
   "changes": [
-    "Recognize standard Oracle Forms RadioButton objects during local source assessment and redaction.",
-    "Preserve explicit boolean Required properties while continuing to mask radio selection values and private literals.",
-    "Keep original source identities, locations, inheritance provenance and secret checks; metadata recognition is not converted business behavior."
+    "New prototype runs can preserve explicit source Required properties as native APEX input validation on supported editable database fields.",
+    "Keep existing database nullability and legacy saved runs unchanged; bind the new input policy to each admitted source snapshot.",
+    "Carry the selected renderer through deterministic package validation, recovery, runtime checks and export without bypassing review or import gates."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

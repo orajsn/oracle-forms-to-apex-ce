@@ -46,7 +46,7 @@ QA_CONTRACT_FILES = ('__init__.py','intake.py','native_source.py','project_conve
                      'native_qa_plan.py','project_qa_plan.py','native_verification.py',
                      'native_verification_policy.py','native_pipeline.py','opaf.py',
                      'project_verification.py')
-APP_RENDERER_FILES = (
+LEGACY_APP_RENDERER_FILES = (
     'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
     'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
     'forms2apex/prototype_package.py',
@@ -55,6 +55,9 @@ APP_RENDERER_FILES = (
     'fox_source_contract/source-manifest.json',
     'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
     'defusedxml-0.7.1.dist-info/LICENSE',
+)
+APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
+    'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
 )
 APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
                                'forms2apex/templates/blueprint-prototype-v1/')
@@ -251,11 +254,11 @@ USER root
 RUN python -I -B -c "import pathlib,shutil; roots=[pathlib.Path('/app/fox'),pathlib.Path('/app/dist')]; optional=[pathlib.Path('/app/forms2apex'),pathlib.Path('/app/fox_source_contract'),pathlib.Path('/app/defusedxml'),pathlib.Path('/app/defusedxml-0.7.1.dist-info')]; roots += [p for p in optional if p.exists() or p.is_symlink()]; assert all(p.is_dir() and not p.is_symlink() and p.resolve()==p for p in roots); [shutil.rmtree(p) for p in roots]"
 COPY --chown=1000:1000 fox /app/fox
 COPY --chown=1000:1000 dist /app/dist
-# fox-prototype-renderer-closure-v1
+# fox-prototype-renderer-closure-v2
 COPY --chown=1000:1000 renderer /app
 WORKDIR /app
 USER 1000:1000
-RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; from forms2apex.native_blueprint import context; assert fox.project_conversion.PROFILE_ID=='native-project-v1'; assert context()['profile_id']=='native-blueprint-prototype-v1'"
+RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; from forms2apex import native_blueprint,native_blueprint_required,blueprint_profiles; assert fox.project_conversion.PROFILE_ID=='native-project-v1'; assert native_blueprint.context()['profile_id']=='native-blueprint-prototype-v1'; assert native_blueprint_required.context()['profile_id']=='native-blueprint-prototype-required-v1'"
 """
     converter = f"""FROM {BASE_IMAGES['converter']}
 USER root

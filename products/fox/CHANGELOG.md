@@ -8,6 +8,41 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.0] - 2026-11-12
+
+### Preserve required inputs in native APEX forms
+
+- New prototype runs opt into a source-bound input policy: an explicit Forms
+  Required property becomes native APEX value-required validation on supported
+  editable database fields. Existing NOT NULL checks remain effective; synthetic
+  database nullability is unchanged. Noneditable and unsupported items remain
+  remediation work rather than silently becoming mandatory fields.
+- Preserve the original renderer and all existing saved-run contracts. Old runs,
+  retries and continuations do not silently adopt the new policy. Reject unknown,
+  malformed or mismatched policies and renderer profiles.
+- Carry the selected profile through package checks, recovery, runtime evidence,
+  export and the paired application payload. New-run UI submission opts in while
+  retaining the existing explicit consent and independent review gates.
+- Add a developer-only runtime probe for missing required input. Its browser
+  check exercises client-side rejection; it does not establish server-side
+  rejected-write behavior or Forms transaction equivalence.
+
+Verification: the source planner suite passed 285 tests; renderer integration
+passed 677, with a further 62 browser-adapter tests and 10 Node tests. Packaging
+and package checks passed 118 with 10 skips; isolated payload checks passed 4;
+recovery/context checks passed 28. All 13 local UI browser scenarios passed with
+mocked APIs. Suites overlap and are not a count of unique end-to-end scenarios.
+Historical fixture failures and an initial malformed-package regression were
+retained; the regression was fixed and retested. Independent source review cleared
+this bounded change.
+
+A developer-authored structural candidate from one real, Oracle-extracted Forms
+module contains three native form blocks and six source-required inputs. Its
+exact APEXlang ZIP passed SQLcl 26.1.2 validation without a database connection.
+This is not an OPAF-reviewed mapping, hosted conversion, import/runtime proof,
+clean-package reimport, complete business-logic translation or human acceptance.
+Publication does not activate the feature on an existing installation.
+
 ## [0.21.6] - 2026-11-12
 
 ### Read standard radio-button and required-field metadata

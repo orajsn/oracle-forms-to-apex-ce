@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 import re
 import zipfile
 
-from . import native_blueprint
+from . import blueprint_profiles, native_blueprint_required
 
 
 RUNTIME_SCOPE = "fox-native-blueprint-runtime-v1"
@@ -57,10 +57,11 @@ def alias_for_job(job_id):
 
 def expected_runtime_pages(spec):
     """Each actual report/form/control page; no inferred business logic checks."""
-    spec = native_blueprint.validate_prototype_spec(spec)
+    renderer = blueprint_profiles.select(spec)
+    spec = renderer.validate_prototype_spec(spec)
     result = []
     for block in spec["blocks"]:
-        pages = native_blueprint._pages(block)
+        pages = renderer._pages(block)
         checks = ["render", "native_items"]
         if block["classification"] == "database":
             checks = ["render", "report_columns", "search"]
@@ -69,13 +70,24 @@ def expected_runtime_pages(spec):
         result.append({"page_id": pages["page_id"], "source_block_id": block["source_block_id"],
                        "checks": checks})
         if block["native_component"] == "form":
+            checks = ["render", "native_items", "create", "update", "synthetic_records_accounted"]
+            if renderer is native_blueprint_required:
+                checks.append("additional_required_input_validation")
             result.append({"page_id": pages["form_page_id"], "source_block_id": block["source_block_id"],
-                           "checks": ["render", "native_items", "create", "update", "synthetic_records_accounted"]})
+                           "checks": checks})
     return result
 
 
 def runtime_binding(request, imported, artifact_binding):
     """Original durable import identity, not a URL/app ID supplied by a caller."""
+    renderer = blueprint_profiles.select(request["rendering_spec"])
+    renderer.validate_prototype_spec(request["rendering_spec"])
+    # New-profile receipts must never bind an old/missing renderer context.
+    # Historical v1 binding semantics stay unchanged; its gateway/bridge still
+    # enforce their original exact snapshot context.
+    if renderer is native_blueprint_required:
+        _need(type(artifact_binding) is dict and artifact_binding.get("template") == renderer.context(),
+              "PROTOTYPE_RUNTIME_TEMPLATE_PROFILE_MISMATCH")
     app_id, alias = imported.get("application_id"), imported.get("application_alias")
     _need(imported.get("imported") is True and type(app_id) is int and app_id > 0
           and alias == alias_for_job(request["job_id"])
@@ -83,7 +95,7 @@ def runtime_binding(request, imported, artifact_binding):
           and all(type(imported.get(key)) is str and _SHA.fullmatch(imported[key])
                   for key in ("import_intent_sha256", "compiled_metadata_sha256")),
           "PROTOTYPE_RUNTIME_EXACT_IMPORT_REQUIRED")
-    return {"schema_version": 1, "scope": RUNTIME_SCOPE, "profile_id": native_blueprint.PROFILE_ID,
+    return {"schema_version": 1, "scope": RUNTIME_SCOPE, "profile_id": renderer.PROFILE_ID,
             "job_id": request["job_id"], "project_id": request["project_id"],
             "source_binding": request["source_binding"], "plan_sha256": request["plan_sha256"],
             "rendered_zip_sha256": request["rendered_zip_sha256"],
@@ -122,6 +134,9 @@ def _package_members(raw):
 
 def validate_prototype_package(raw, *, request, runtime_receipt, imported, artifact_binding, export_receipt=None):
     """Pure package integrity; explicitly NOT conventional-SQL reimport proof."""
+    _need(type(request) is dict and type(request.get("rendering_spec")) is dict,
+          "PROTOTYPE_PACKAGE_REQUEST_INVALID")
+    renderer = blueprint_profiles.select(request["rendering_spec"])
     members = _package_members(raw)
     manifest_raw = members.get("manifest.json", b"{}")
     manifest = json.loads(manifest_raw, object_pairs_hook=_unique_keys)
@@ -137,10 +152,16 @@ def validate_prototype_package(raw, *, request, runtime_receipt, imported, artif
                 "evidence/release-evidence.json", "evidence/source-summary.json", "evidence/target-requirements.json"}
     _need(required <= set(members), "PROTOTYPE_PACKAGE_INCOMPLETE")
     _need(members["native-blueprint-spec.json"] == canonical(request["rendering_spec"])
-          and members["source-to-apex.json"] == canonical(native_blueprint.prototype_trace(request["rendering_spec"]))
-          and members["schema/01_synthetic_schema.sql"] == native_blueprint.render_prototype_schema(request["rendering_spec"]).encode()
+          and members["source-to-apex.json"] == canonical(renderer.prototype_trace(request["rendering_spec"]))
+          and members["schema/01_synthetic_schema.sql"] == renderer.render_prototype_schema(request["rendering_spec"]).encode()
           and members["evidence/runtime-receipt.json"] == canonical(runtime_receipt),
           "PROTOTYPE_PACKAGE_EVIDENCE_MISMATCH")
+    requirements = json.loads(members["evidence/target-requirements.json"], object_pairs_hook=_unique_keys)
+    binding = runtime_binding(request, imported, artifact_binding)
+    _need(type(requirements) is dict and requirements.get("profile_id") == renderer.PROFILE_ID
+          and type(runtime_receipt) is dict
+          and all(runtime_receipt.get(key) == value for key, value in binding.items()),
+          "PROTOTYPE_PACKAGE_PROFILE_BINDING_MISMATCH")
     metadata = {name[len("apexlang/"):]: hashlib.sha256(value).hexdigest() for name, value in members.items()
                 if name.startswith("apexlang/")}
     allowed = required | {"apexlang/" + name for name in metadata} | {

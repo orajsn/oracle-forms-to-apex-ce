@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 import stat
 
-from forms2apex import native_blueprint
+from forms2apex import blueprint_profiles
 from forms2apex.project_reviews import canonical, digest, read_object
 from forms2apex.prototype_release import expected_runtime_pages, runtime_binding, validate_runtime_receipt
 from forms2apex.provenance import file_digest
@@ -139,8 +139,9 @@ class PrototypeBrowser:
             freshness_check()
             need(datetime.now(timezone.utc) < deadline, "PROTOTYPE_BROWSER_EXPIRED_UNKNOWN_NO_REPLAY")
         fresh()
-        spec = native_blueprint.validate_prototype_spec(request["rendering_spec"])
-        need(trace == native_blueprint.prototype_trace(spec), "PROTOTYPE_BROWSER_TRACE_CHANGED")
+        renderer = blueprint_profiles.select(request["rendering_spec"])
+        spec = renderer.validate_prototype_spec(request["rendering_spec"])
+        need(trace == renderer.prototype_trace(spec), "PROTOTYPE_BROWSER_TRACE_CHANGED")
         root, jobs = Path(root), Path(config.jobs_root)
         private(jobs, directory=True)
         private(root, directory=True)
@@ -249,6 +250,9 @@ class PrototypeBrowser:
         """Read completed private browser bytes only; no commands or retries."""
         config = self.config
         need(isinstance(config, PrototypeBrowserConfig), "PROTOTYPE_BROWSER_CONFIGURATION_UNAVAILABLE")
+        renderer = blueprint_profiles.select(request["rendering_spec"])
+        spec = renderer.validate_prototype_spec(request["rendering_spec"])
+        need(trace == renderer.prototype_trace(spec), "PROTOTYPE_BROWSER_TRACE_CHANGED")
         root = Path(root)
         need(root == Path(config.jobs_root) / request["job_id"] / "prototype-converter",
              "PROTOTYPE_BROWSER_EXACT_JOB_REQUIRED")

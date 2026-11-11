@@ -1,7 +1,7 @@
 /** Pure synthetic request checks; importing runner never launches Playwright. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {allowedRequest,validatePacket,assertUnexpired,run,ORIGIN} from '../run-prototype.mjs';
+import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,run,ORIGIN} from '../run-prototype.mjs';
 import {sha256,canonicalQaPlan} from '../lib/contracts.mjs';
 
 const packet=()=>{
@@ -78,4 +78,66 @@ test('expired packet cannot launch even a synthetic browser',async()=>{
   let launches=0;
   await assert.rejects(run(value,{}, {launch:async()=>{launches++;throw Error('Forbidden synthetic browser launch');}}),/expiry/);
   assert.equal(launches,0);
+});
+
+const requiredPacket=()=>{
+  const value=packet();
+  value.binding.profile_id=value.spec.profile_id='native-blueprint-prototype-required-v1';
+  value.spec.schema_version=2;value.spec.input_validation_policy='forms-required-inputs-v1';
+  value.spec.blocks=[{sequence:1,source_block_id:'block1',classification:'database',native_component:'form',
+    fields:[{source_item_id:'item1',name:'FIELD1',in_edit_form:true,widget:'text',value_required:true},
+      {source_item_id:'item2',name:'FIELD2',in_edit_form:true,widget:'number',value_required:false}]}];
+  value.pages=[{page_id:1,source_block_id:'block1',checks:['render','report_columns','search','detail_navigation']},
+    {page_id:2,source_block_id:'block1',checks:['render','native_items','create','update','synthetic_records_accounted',
+      'additional_required_input_validation']}];
+  return value;
+};
+
+test('required profile has an exact version policy and independent additional runtime check',()=>{
+  assert.equal(validatePacket(requiredPacket()).spec.schema_version,2);
+  for(const change of [value=>value.spec.schema_version=1,
+    value=>value.spec.input_validation_policy='other',value=>delete value.spec.input_validation_policy,
+    value=>value.pages[1].checks.pop(),value=>value.spec.profile_id='native-blueprint-prototype-v1']){
+    const value=requiredPacket();change(value);assert.throws(()=>validatePacket(value));
+  }
+});
+
+test('required profile refuses nonboolean flags and noneditable/report/control/display required targets',()=>{
+  for(const flag of [null,undefined,1,0,'true','false',{},[]]){
+    const value=requiredPacket();value.spec.blocks[0].fields[0].value_required=flag;
+    assert.throws(()=>validatePacket(value),/item policy/);
+  }
+  for(const change of [block=>block.native_component='report',block=>block.classification='control',
+    block=>block.fields[0].in_edit_form=false,block=>block.fields[0].widget='display']){
+    const value=requiredPacket();change(value.spec.blocks[0]);assert.throws(()=>validatePacket(value),/item policy/);
+  }
+});
+
+function requiredProbe({initial='',after='',errors=1,valueMissing=false}={}){
+  let submitted=false,waited=false;
+  const input={inputValue:async()=>submitted?after:initial,evaluate:async()=>valueMissing};
+  const page={locator:selector=>selector.startsWith('[name=')?input:{count:async()=>errors},
+    waitForLoadState:async mode=>{assert.equal(mode,'networkidle');waited=true;}};
+  return {page,submit:async()=>{submitted=true;},observed:()=>({submitted,waited})};
+}
+
+test('negative required probe needs a matching field rejection before continuation',async()=>{
+  for(const options of [{errors:1},{errors:0,valueMissing:true}]){
+    const probe=requiredProbe(options);let guards=0;
+    await assertAdditionalRequiredInputRejected(probe.page,'P2_FIELD1',probe.submit,()=>{guards++;});
+    assert.deepEqual(probe.observed(),{submitted:true,waited:true});assert.equal(guards,1);
+  }
+  const missing=requiredProbe({errors:0});
+  await assert.rejects(assertAdditionalRequiredInputRejected(missing.page,'P2_FIELD1',missing.submit,()=>{}),/not rejected/);
+  const nonempty=requiredProbe({initial:'A'});
+  await assert.rejects(assertAdditionalRequiredInputRejected(nonempty.page,'P2_FIELD1',nonempty.submit,()=>{}),/must be empty/);
+  assert.equal(nonempty.observed().submitted,false);
+  const changed=requiredProbe({after:'A'});
+  await assert.rejects(assertAdditionalRequiredInputRejected(changed.page,'P2_FIELD1',changed.submit,()=>{}),/unexpectedly changed/);
+});
+
+test('negative required probe never ignores a failed no-POST or freshness fence',async()=>{
+  const probe=requiredProbe();
+  await assert.rejects(assertAdditionalRequiredInputRejected(probe.page,'P2_FIELD1',probe.submit,
+    ()=>{throw Error('Unexpected POST blocked before DML');}),/POST blocked/);
 });

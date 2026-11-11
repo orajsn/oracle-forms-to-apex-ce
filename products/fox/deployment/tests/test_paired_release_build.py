@@ -130,6 +130,8 @@ def test_rehashed_changed_build_context_still_blocked(tmp_path, member):
 
 @pytest.mark.parametrize('member', [
     'build/fox/renderer/forms2apex/native_blueprint.py',
+    'build/fox/renderer/forms2apex/native_blueprint_required.py',
+    'build/fox/renderer/forms2apex/blueprint_profiles.py',
     'build/fox/renderer/forms2apex/prototype_package.py',
     'build/fox/renderer/forms2apex/templates/blueprint-prototype-v1/control.apx.tmpl',
     'build/fox/renderer/forms2apex/templates/native-table-v1/.apex/apexlang.json',
@@ -292,7 +294,8 @@ def test_missing_renderer_dependency_rejects_before_creating_candidate(tmp_path,
     assert not (tmp_path/'rejected').exists()
 
 
-def test_real_frozen_app_context_renders_one_native_zip_without_development_imports(tmp_path):
+@pytest.mark.parametrize('required_policy', [False, True])
+def test_real_frozen_app_context_renders_one_native_zip_without_development_imports(tmp_path, required_policy):
     value = inputs()
     # Public checkout deliberately excludes private legacy profile files. Only
     # the actual app package is needed for this frozen lazy-render import test.
@@ -322,8 +325,11 @@ from fox.prototype_pipeline import NativeBlueprintRenderer
 from forms2apex.prototype_package import validate_prototype_package
 from fox.forms_understanding_packet import local_packet
 from fox.forms_native_plan import POLICY_ID,build_native_prototype_plan
+from fox.forms_native_required_plan import build_native_plan,INPUT_POLICY_ID
 documents=[('first.xml',b'<FormModule Name="FIRST"><Block Name="BUSINESS" DatabaseBlock="true"><Item Name="VALUE" ItemType="Text Item" DataType="Char" MaximumLength="80" DatabaseItem="true" Prompt="Value"/></Block></FormModule>'),
  ('second.xml',b'<FormModule Name="SECOND"><Block Name="CONTROL" DatabaseBlock="false"><Item Name="SEARCH" ItemType="Text Item" DataType="Char" MaximumLength="80" DatabaseItem="false" Prompt="Search"/></Block></FormModule>')]
+if sys.argv[3]=='required':
+ documents=[(name,raw.replace(b'Prompt="Value"',b'Prompt="Value" Required="true"')) for name,raw in documents]
 packet=local_packet(documents)
 rows=[]
 for entry in packet['sources']:
@@ -336,7 +342,8 @@ for entry in packet['sources']:
 blueprint={'schema_version':1,'scope':'fox-forms-blueprint-v1','source_binding':packet['source_binding'],
  'objects':rows,'screens':[{'id':'synthetic-screen','title':'Synthetic prototype'}],
  **{name:[] for name in ('claims','relationships','actions','questions','assumptions')}}
-spec=build_native_prototype_plan(documents,blueprint,project_id='synthetic-project',project_name='Synthetic app',approved_policy_id=POLICY_ID)['rendering_spec']
+spec=build_native_plan(documents,blueprint,project_id='synthetic-project',project_name='Synthetic app',approved_policy_id=POLICY_ID,
+ native_input_policy=INPUT_POLICY_ID if sys.argv[3]=='required' else None)['rendering_spec']
 raw,trace=NativeBlueprintRenderer().render(spec)
 assert raw==NativeBlueprintRenderer().render(spec)[0]
 with zipfile.ZipFile(io.BytesIO(raw)) as archive:
@@ -346,6 +353,7 @@ with zipfile.ZipFile(io.BytesIO(raw)) as archive:
  assert 'pages/p00002-edit_1.apx' in archive.namelist()
  assert 'pages/p00003-block_2.apx' in archive.namelist()
  assert b'form' in archive.read('pages/p00002-edit_1.apx')
+ if sys.argv[3]=='required':assert b'valueRequired: true' in archive.read('pages/p00002-edit_1.apx')
  assert b'textField' in archive.read('pages/p00003-block_2.apx')
 for name,module in tuple(sys.modules.items()):
  if name.split('.')[0] in ('fox','forms2apex','fox_source_contract','defusedxml') and getattr(module,'__file__',None):
@@ -360,18 +368,21 @@ assert 'forms2apex.sqlcl' not in sys.modules and 'forms2apex.runtime_preflight' 
 proof={'scope':'isolated-frozen-app-renderer','source_bundle_sha256':sys.argv[2],
  'zip_sha256':hashlib.sha256(raw).hexdigest(),'zip_bytes':len(raw),
  'application_count':trace['application_count'],'block_count':trace['block_count'],
- 'site_packages_disabled':True,'development_paths_used':False,'sqlcl_or_oracle_run':False}
+ 'site_packages_disabled':True,'development_paths_used':False,'sqlcl_or_oracle_run':False,
+ 'profile_id':spec['profile_id']}
 proof['pure_prototype_package_validator_loaded']=True
 (app/'renderer-proof.json').write_text(json.dumps(proof,sort_keys=True))
 print(json.dumps(proof,sort_keys=True))
 '''
-    completed = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', code, str(app), result['source_bundle_sha256']],
+    completed = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', code, str(app), result['source_bundle_sha256'],
+                                'required' if required_policy else 'legacy'],
                                cwd=app, capture_output=True, timeout=30)
     assert completed.returncode == 0, completed.stderr.decode()
     proof = json.loads(completed.stdout)
     assert proof['application_count'] == 1 and proof['block_count'] == 2
     assert proof['site_packages_disabled'] is True and proof['development_paths_used'] is False
     assert proof['source_bundle_sha256'] == result['source_bundle_sha256']
+    assert proof['profile_id'] == ('native-blueprint-prototype-required-v1' if required_policy else 'native-blueprint-prototype-v1')
     assert p.digest((app/'candidate-apexlang.zip').read_bytes()) == proof['zip_sha256']
     with zipfile.ZipFile(app/'candidate-apexlang.zip') as archive:
         assert len(archive.namelist()) >= 10
@@ -382,6 +393,7 @@ def test_historical_app_context_without_renderer_marker_is_not_relabelled(tmp_pa
     files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
     recipe = 'bundle/deployment/Containerfile.project-fox'
     files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v1\n', b'').replace(
+        b'# fox-prototype-renderer-closure-v2\n', b'').replace(
         b'COPY --chown=1000:1000 renderer /app\n', b'')
     files['build/fox/Containerfile'] = files[recipe]
     for name in list(files):
@@ -395,6 +407,42 @@ def test_historical_app_context_without_renderer_marker_is_not_relabelled(tmp_pa
     files['manifest.json'] = r.canonical(manifest)
     checked, _ = r.validate_files(reseal(files))
     assert not any(name.startswith('build/fox/renderer/') for name in checked)
+
+
+def test_historical_v1_renderer_projection_keeps_its_original_member_set(tmp_path):
+    output, result = prepared(tmp_path)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    recipe = 'bundle/deployment/Containerfile.project-fox'
+    files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v2\n',
+                                        b'# fox-prototype-renderer-closure-v1\n')
+    files['build/fox/Containerfile'] = files[recipe]
+    for name in set(p.APP_RENDERER_FILES) - set(p.LEGACY_APP_RENDERER_FILES):
+        del files['build/fox/renderer/'+name]
+    inventory = json.loads(files['source-inventory.json'])
+    inventory['files']['deployment/Containerfile.project-fox'] = r.digest(files[recipe])
+    files['source-inventory.json'] = r.canonical(inventory)
+    manifest = json.loads(files['manifest.json'])
+    manifest['source_bundle_sha256'] = r.digest(files['source-inventory.json'])
+    files['manifest.json'] = r.canonical(manifest)
+    checked, _ = r.validate_files(reseal(files))
+    assert 'build/fox/renderer/forms2apex/native_blueprint.py' in checked
+    assert 'build/fox/renderer/forms2apex/native_blueprint_required.py' not in checked
+
+
+def test_conflicting_renderer_recipe_markers_are_rejected(tmp_path):
+    output, result = prepared(tmp_path)
+    files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
+    recipe = 'bundle/deployment/Containerfile.project-fox'
+    files[recipe] += b'\n# fox-prototype-renderer-closure-v1\n'
+    files['build/fox/Containerfile'] = files[recipe]
+    inventory = json.loads(files['source-inventory.json'])
+    inventory['files']['deployment/Containerfile.project-fox'] = r.digest(files[recipe])
+    files['source-inventory.json'] = r.canonical(inventory)
+    manifest = json.loads(files['manifest.json'])
+    manifest['source_bundle_sha256'] = r.digest(files['source-inventory.json'])
+    files['manifest.json'] = r.canonical(manifest)
+    with pytest.raises(r.StageError, match='AMBIGUOUS_APP_RENDERER_CLOSURE'):
+        r.validate_files(reseal(files))
 
 
 def test_release_metadata_is_copied_into_the_backend_image_context(tmp_path):

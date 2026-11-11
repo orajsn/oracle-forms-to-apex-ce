@@ -10,14 +10,14 @@ from types import SimpleNamespace
 import pytest
 
 from forms2apex.project_reviews import canonical, digest, read_object
-from forms2apex import native_blueprint
+from forms2apex import native_blueprint, native_blueprint_required, blueprint_profiles
 from forms2apex.prototype_release import runtime_binding, expected_runtime_pages
 from forms2apex.security import alias_for_job
 from qa.operator import prototype_browser as module
 
 
-@pytest.fixture
-def runtime_case(tmp_path_factory, monkeypatch):
+@pytest.fixture(params=["v1", "required-v1"])
+def runtime_case(tmp_path_factory, monkeypatch, request):
     base = tmp_path_factory.mktemp("pb")
     jobs, qa = base / "jobs", base / "qa"
     jobs.mkdir();qa.mkdir()
@@ -41,6 +41,13 @@ def runtime_case(tmp_path_factory, monkeypatch):
                         "name": native_blueprint._field_name(field_id), "label": f"Synthetic field {index}",
                         "data_type": "VARCHAR2", "widget": "text", "nullable": True, "length": 120,
                         "in_edit_form": classification == "database"}]})
+    if request.param == "required-v1":
+        value.update(schema_version=2, profile_id=native_blueprint_required.PROFILE_ID,
+                     input_validation_policy=native_blueprint_required.INPUT_VALIDATION_POLICY)
+        for block in value["blocks"]:
+            for field in block["fields"]:
+                field["value_required"] = block["native_component"] == "form"
+    renderer = blueprint_profiles.select(value)
     request = {"job_id": job_id, "project_id": value["project_id"], "source_binding": value["source_binding"],
                "plan_sha256": "b" * 64, "rendered_zip_sha256": "c" * 64, "rendering_spec": value}
     imported = {"imported": True, "application_id": 12345, "application_alias": alias_for_job(job_id),
@@ -80,13 +87,15 @@ def runtime_case(tmp_path_factory, monkeypatch):
                   "runner": {"kind": "authenticated_browser", "tool": "playwright", "code_sha256": packet["code_sha256"],
                              "image_id": config.image_id},
                   "pages": [{"page_id": page["page_id"], "source_block_id": page["source_block_id"], "passed": True,
-                             "authenticated": True, "checks": {name: True for name in page["checks"]}} for page in packet["pages"]]}
+                             "authenticated": True, "checks": {name: "PASSED" if name == "additional_required_input_validation"
+                                 else True for name in page["checks"]}} for page in packet["pages"]]}
         (root / "runtime-evidence/browser-report.json").write_bytes(canonical(report))
         return SimpleNamespace(stdout=b'{"status":"PASSED","business_behavior_accepted":false}', stderr=b"", returncode=0)
     adapter = module.PrototypeBrowser(config, command=command,
         credential_authorizer=lambda req, **kwargs: deepcopy(authority))
-    args = {"root": root, "imported": imported, "trace": native_blueprint.prototype_trace(value),
-            "artifact_binding": {"job_id": job_id, "draft_zip_sha256": request["rendered_zip_sha256"]},
+    args = {"root": root, "imported": imported, "trace": renderer.prototype_trace(value),
+            "artifact_binding": {"job_id": job_id, "draft_zip_sha256": request["rendered_zip_sha256"],
+                                 "template": renderer.context()},
             "freshness_check": lambda: None}
     return SimpleNamespace(adapter=adapter, request=request, args=args, config=config, authority=authority,
                            calls=calls, root=root, inspected=inspected)
@@ -196,9 +205,22 @@ def test_forms_without_labelled_marker_policy_stop_before_browser(runtime_case):
         for field in block["fields"]:
             if field["data_type"] == "VARCHAR2":
                 field["length"] = 1
-    case.args["trace"] = native_blueprint.prototype_trace(case.request["rendering_spec"])
+    case.args["trace"] = blueprint_profiles.select(case.request["rendering_spec"]).prototype_trace(case.request["rendering_spec"])
     with pytest.raises(RuntimeError, match="LABELLED_FORM_INPUT_POLICY_UNAVAILABLE"):
         case.adapter(case.request, **case.args)
+    assert not case.calls
+
+
+def test_other_profile_trace_never_launches_or_recovers_browser(runtime_case):
+    case = runtime_case
+    selected = blueprint_profiles.select(case.request["rendering_spec"])
+    other = native_blueprint_required if selected is native_blueprint else native_blueprint
+    case.args["trace"] = {**case.args["trace"], "scope": other.PROFILE_ID + "-trace"}
+    with pytest.raises(RuntimeError, match="TRACE_CHANGED"):
+        case.adapter(case.request, **case.args)
+    recover_args = {key: value for key, value in case.args.items() if key != "freshness_check"}
+    with pytest.raises(RuntimeError, match="TRACE_CHANGED"):
+        case.adapter.recover(case.request, **recover_args)
     assert not case.calls
 
 

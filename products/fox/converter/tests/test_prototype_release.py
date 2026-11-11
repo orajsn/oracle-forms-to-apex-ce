@@ -8,16 +8,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from forms2apex import native_blueprint, prototype_release as release
+from forms2apex import blueprint_profiles, prototype_release as release
 from forms2apex.project_reviews import canonical, digest, read_object
 from forms2apex.security import alias_for_job
 from forms2apex.target_profile import load_target_profile
-from test_prototype_gateway import case, advance
+from test_prototype_gateway import profile_case as case, advance
 
 
 def browser_receipt(request, *, root, imported, trace, artifact_binding, freshness_check):
     freshness_check()
     now = datetime.now(timezone.utc).isoformat()
+    def checks(page):
+        result = {name: True for name in page["checks"]}
+        if "additional_required_input_validation" in result:
+            block = next(block for block in request["rendering_spec"]["blocks"]
+                         if block["source_block_id"] == page["source_block_id"])
+            result["additional_required_input_validation"] = (
+                "PASSED" if any(field["value_required"] for field in block["fields"])
+                else "NOT_EXERCISED_NO_ADDITIONAL_REQUIRED_FIELDS")
+        return result
     result = {**release.runtime_binding(request, imported, artifact_binding), "passed": True,
         "authenticated": True, "business_pages_tested": True, "business_behavior_accepted": False,
         "started_at_utc": now, "completed_at_utc": now,
@@ -29,7 +38,7 @@ def browser_receipt(request, *, root, imported, trace, artifact_binding, freshne
         "runner": {"kind": "authenticated_browser", "tool": "playwright", "code_sha256": "a" * 64,
                    "image_id": "sha256:" + "b" * 64},
         "pages": [{"page_id": row["page_id"], "source_block_id": row["source_block_id"], "passed": True,
-                   "authenticated": True, "checks": {name: True for name in row["checks"]}}
+                   "authenticated": True, "checks": checks(row)}
                   for row in release.expected_runtime_pages(request["rendering_spec"])]}
     folder = root / "runtime-evidence"
     folder.mkdir()
@@ -42,7 +51,7 @@ def browser_receipt(request, *, root, imported, trace, artifact_binding, freshne
 
 @pytest.fixture
 def imported_case(case):
-    files = native_blueprint.render_native_blueprint(case.request["rendering_spec"])
+    files = blueprint_profiles.select(case.request["rendering_spec"]).render_native_blueprint(case.request["rendering_spec"])
     compiled = digest({name: hashlib.sha256(text.encode()).hexdigest() for name, text in files.items()})
     original = case.adapter.importer
     def imported(*args, **kwargs):

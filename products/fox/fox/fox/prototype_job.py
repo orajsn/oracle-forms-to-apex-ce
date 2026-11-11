@@ -19,6 +19,7 @@ import re
 import tempfile
 
 from . import forms_native_plan
+from .forms_native_required_plan import bound_native_input_policy
 from .native_pipeline import _save_once, _sync
 from .opaf import ConverterClient, OpafClient, OpafError, canonical_hash
 from .project_conversion import _validated_source_bytes
@@ -57,10 +58,13 @@ def validate_prototype_snapshot(snapshot):
             raise ValueError()
         approvals, selected = snapshot['approvals'], snapshot['prototype']
         bound_focus_limit(selected)
+        native_input_policy = bound_native_input_policy(selected)
         selected_keys = {'schema_version', 'source_binding', 'focus_plan_sha256',
                          'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
         if selected['schema_version'] == 2:
             selected_keys.add('max_owned_objects')
+        if native_input_policy is not None:
+            selected_keys.add('native_input_policy')
         if 'metadata_task_policy' in selected:
             from .prototype_dsc_identity_repair import TASK_POLICY
             if selected['metadata_task_policy'] != TASK_POLICY: raise ValueError()
@@ -91,7 +95,7 @@ def validate_prototype_snapshot(snapshot):
             approved_external_ai=approvals['external_ai'],
             approved_prototype_scope=approvals['synthetic_prototype'],
             schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
-            candidate_format_policy=selected.get('candidate_format_policy'))
+            candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy)
         if rebuilt['prototype'] != selected:
             raise ValueError()
         from .prototype_mapping_recovery import validate_retry_lineage
@@ -251,7 +255,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         target_profile_loader=runtime['target_profile_loader'], processing_approval_check=still_approved,
         converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
         focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
-        candidate_format_policy=selected.get('candidate_format_policy'))
+        candidate_format_policy=selected.get('candidate_format_policy'),
+        native_input_policy=selected.get('native_input_policy'))
     still_approved()
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record

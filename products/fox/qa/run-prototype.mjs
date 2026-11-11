@@ -10,6 +10,7 @@ import {randomBytes} from 'node:crypto';
 import {check,sha256,canonicalQaPlan,parseUniqueJson,nativeFilterControl,fillNativeQaValue} from './lib/contracts.mjs';
 
 export const ORIGIN='https://asz8eqwfm8unca2-jsnf2apex.adb.us-ashburn-1.oraclecloudapps.com';
+const REQUIRED_PROFILE='native-blueprint-prototype-required-v1';
 const same=(a,b)=>canonicalQaPlan(a)===canonicalQaPlan(b);
 const now=()=>new Date().toISOString();
 export function assertUnexpired(packet,nowMs=Date.now()) {
@@ -26,13 +27,22 @@ export function validatePacket(packet,nowMs=Date.now()) {
   assertUnexpired(packet,nowMs);
   const b=packet?.binding;
   check(b?.schema_version===1&&b.scope==='fox-native-blueprint-runtime-v1'
-    &&b.profile_id==='native-blueprint-prototype-v1'&&b.workspace==='FORMS2APEX_POC'
+    &&['native-blueprint-prototype-v1',REQUIRED_PROFILE].includes(b.profile_id)&&b.workspace==='FORMS2APEX_POC'
     &&Number.isSafeInteger(b.application_id)&&b.application_id>0
     &&/^F2A_[A-Z0-9_]{3,48}$/.test(b.application_alias),'Unbound runtime target');
   check(packet.url===`${ORIGIN}/ords/r/forms2apex_poc/${b.application_alias.toLowerCase()}/`
     &&packet.spec?.profile_id===b.profile_id&&packet.spec.project_id===b.project_id
     &&packet.spec.source_binding===b.source_binding&&Array.isArray(packet.spec.blocks)
     &&packet.spec.blocks.length>0&&packet.spec.blocks.length<=50,'Runtime specification differs');
+  if(b.profile_id===REQUIRED_PROFILE){
+    check(packet.spec.schema_version===2&&packet.spec.input_validation_policy==='forms-required-inputs-v1',
+      'Required-input profile policy differs');
+    for(const block of packet.spec.blocks){
+      check(Array.isArray(block.fields)&&block.fields.every(field=>typeof field?.value_required==='boolean'
+        &&(!field.value_required||(block.classification==='database'&&block.native_component==='form'
+          &&field.in_edit_form===true&&field.widget!=='display'))),'Required-input item policy differs');
+    }
+  }
   check(packet.data_retention==='synthetic_test_rows_retained'
     &&packet.credential_authority?.scope==='fox-prototype-runtime-credentials-target-v1'
     &&packet.credential_authority.workspace===b.workspace&&packet.credential_authority.ords_origin===ORIGIN
@@ -44,7 +54,8 @@ export function validatePacket(packet,nowMs=Date.now()) {
       :['render','native_items'];
     pages.push({page_id:page,source_block_id:block.source_block_id,checks});
     if(block.native_component==='form')pages.push({page_id:page+1,source_block_id:block.source_block_id,
-      checks:['render','native_items','create','update','synthetic_records_accounted']});
+      checks:['render','native_items','create','update','synthetic_records_accounted',
+        ...(b.profile_id===REQUIRED_PROFILE?['additional_required_input_validation']:[])]});
   }
   check(same(packet.pages,pages),'Runtime page checks differ from the independent specification');
   check(/^sha256:[a-f0-9]{64}$/.test(packet.image_id)
@@ -96,13 +107,25 @@ function durable(file,value){
   try{writeFileSync(fd,canonicalQaPlan(value));fsyncSync(fd);}finally{closeSync(fd);}
 }
 
+export async function assertAdditionalRequiredInputRejected(page,itemId,submit,guard) {
+  // The caller blocks and fails any POST during this probe. A matching field
+  // error (or browser-native valueMissing) is required, not just staying put.
+  const input=page.locator(`[name="${itemId}"]`);
+  check(await input.inputValue()==='','Negative required-input probe must be empty');
+  await submit();await page.waitForLoadState('networkidle');guard();
+  check(await input.inputValue()==='','Required-input probe value unexpectedly changed');
+  const errors=page.locator(`[id="${itemId}"][aria-invalid="true"],[id="${itemId}_error"]:visible`);
+  check(await errors.count()>0||await input.evaluate(element=>element.validity?.valueMissing===true),
+    'Additional required input was not rejected');
+}
+
 export async function run(packet,accounts,chromium,{output='/results',dispatch='/dispatch'}={}) {
   validatePacket(packet);
   const report={...packet.binding,passed:false,authenticated:false,business_pages_tested:false,business_behavior_accepted:false,
     started_at_utc:now(),completed_at_utc:now(),data_retention:'synthetic_test_rows_retained',retained_rows:[],
     runner:{kind:'authenticated_browser',tool:'playwright',code_sha256:packet.code_sha256,image_id:packet.image_id},pages:[]};
   const progress=()=>writeFileSync(path.join(dispatch,'progress.json'),canonicalQaPlan(report),{mode:0o600});
-  let browser,unsafe=false,sequence=0;
+  let browser,unsafe=false,sequence=0,invalidRequiredProbe=false;
   const guard=()=>{assertUnexpired(packet);check(!unsafe,'Unsafe browser state; no further write allowed');};
   const act=async action=>{guard();return action();};
   try {
@@ -113,6 +136,11 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       ignoreHTTPSErrors:false,acceptDownloads:false,serviceWorkers:'block'});
     context.setDefaultTimeout(15000);context.setDefaultNavigationTimeout(45000);
     await context.route('**/*',async route=>{
+      // No server write is allowed by a negative required-input probe. Any
+      // unexpected POST fails closed and is never continued or retried.
+      if(invalidRequiredProbe&&route.request().method()==='POST'){
+        unsafe=true;await route.abort('blockedbyclient');return;
+      }
       if(allowedRequest(route.request(),packet))return route.continue();
       unsafe=true;await route.abort('blockedbyclient');
     });
@@ -210,6 +238,34 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       await act(()=>page.getByRole('button',{name:'Create Record',exact:true}).click());await settled();await identity(formPage);await items(block,formPage);
       const detail={page_id:formPage,source_block_id:block.source_block_id,passed:false,authenticated:true,checks:{render:true,native_items:true}};
       report.pages.push(detail);pageRow.checks.detail_navigation=true;
+      if(packet.spec.profile_id===REQUIRED_PROFILE){
+        const required=editable.find(field=>field.value_required);
+        detail.checks.additional_required_input_validation=required?'NOT_COMPLETED':'NOT_EXERCISED_NO_ADDITIONAL_REQUIRED_FIELDS';
+        if(required){
+          for(const field of editable)await act(()=>fillNativeQaValue(page.locator(`[name="P${formPage}_${field.name}"]`),
+            {name:field.name,data_type:field.data_type,max_length:field.length},field===required?'':values[field.name]));
+          check(await page.locator(`input[name="P${formPage}_FOX_ROW_ID"]`).inputValue()==='',
+            'Required-input negative probe must target a new row');
+          durable(path.join(dispatch,`required-input-${String(++sequence).padStart(3,'0')}.json`),
+            {binding:packet.binding,source_block_id:block.source_block_id,source_item_id:required.source_item_id,
+              state:'INVALID_SUBMIT_ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'});
+          invalidRequiredProbe=true;
+          try{
+            await assertAdditionalRequiredInputRejected(page,`P${formPage}_${required.name}`,
+              ()=>act(()=>page.getByRole('button',{name:'Create',exact:true}).click()),guard);
+          }finally{invalidRequiredProbe=false;}
+          await identity(formPage);await account();
+          check(await page.locator(`input[name="P${formPage}_FOX_ROW_ID"]`).inputValue()==='',
+            'Rejected required input acquired a row identity');
+          await act(()=>page.getByRole('button',{name:'Cancel',exact:true}).click());await settled();await identity(formPage-1);
+          await reset();
+          check(await page.locator('.a-IRR-noDataMsg').isVisible(),
+            'Rejected required input unexpectedly created a synthetic row');
+          detail.checks.additional_required_input_validation='PASSED';progress();
+          await act(()=>page.getByRole('button',{name:'Create Record',exact:true}).click());
+          await settled();await identity(formPage);await items(block,formPage);
+        }
+      }
       for(const field of editable)await act(()=>fillNativeQaValue(page.locator(`[name="P${formPage}_${field.name}"]`),
         {name:field.name,data_type:field.data_type,max_length:field.length},values[field.name]));
       await submit(block,'Create','',values);ledger.created=true;progress();

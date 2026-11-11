@@ -18,7 +18,7 @@ import tempfile
 import time
 from typing import Protocol
 
-from . import native_blueprint
+from . import blueprint_profiles
 from .project_reviews import canonical, digest
 from .prototype_gateway import PrototypeGateway
 from .prototype_release import runtime_binding, validate_runtime_receipt
@@ -203,17 +203,18 @@ def validate_context(request, imported, trace, artifact_binding):
     # This identity callback is NOT authority; both endpoints separately invoke
     # their real current authorizers before publication or any browser write.
     spec, _ = PrototypeGateway(None, authorize=lambda value: value)._request("verify_runtime", request)
+    renderer = blueprint_profiles.select(spec)
     need(imported == request["prior_receipts"]["import"], "PROTOTYPE_BRIDGE_IMPORT_CHANGED")
     for stage, value in request["prior_receipts"].items():
         original = {**request, "prior_receipts": {key: request["prior_receipts"][key]
                     for key in ("validate", "prepare_schema", "import")[:("validate", "prepare_schema", "import").index(stage)]}}
         need(value.get("status") == "COMPLETE", "PROTOTYPE_BRIDGE_PRIOR_INCOMPLETE")
         PrototypeGateway._check_receipt(stage, original, value)
-    need(trace == native_blueprint.prototype_trace(spec), "PROTOTYPE_BRIDGE_TRACE_CHANGED")
+    need(trace == renderer.prototype_trace(spec), "PROTOTYPE_BRIDGE_TRACE_CHANGED")
     expected = {"schema_version": 1, "job_id": request["job_id"], "project_id": request["project_id"],
                 "source_binding": request["source_binding"], "plan_sha256": request["plan_sha256"],
                 "rendering_spec_sha256": digest(spec), "source_authority": request["source_authority"],
-                "draft_zip_sha256": request["rendered_zip_sha256"], "template": native_blueprint.context()}
+                "draft_zip_sha256": request["rendered_zip_sha256"], "template": renderer.context()}
     need(artifact_binding == expected, "PROTOTYPE_BRIDGE_SNAPSHOT_CHANGED")
     return runtime_binding(request, imported, artifact_binding)
 

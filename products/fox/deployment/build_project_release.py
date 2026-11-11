@@ -43,7 +43,7 @@ QA_CONTRACT_FILES = LEGACY_QA_CONTRACT_FILES + ('native_verification.py',
                      'project_verification.py')
 # Keep this independent archive admission projection equal to the preparer's
 # explicit pure closure. Historical recipes without its marker remain unchanged.
-APP_RENDERER_FILES = (
+LEGACY_APP_RENDERER_FILES = (
     'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
     'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
     'forms2apex/prototype_package.py',
@@ -52,6 +52,9 @@ APP_RENDERER_FILES = (
     'fox_source_contract/source-manifest.json',
     'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
     'defusedxml-0.7.1.dist-info/LICENSE',
+)
+APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
+    'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
 )
 APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
                                'forms2apex/templates/blueprint-prototype-v1/')
@@ -196,12 +199,17 @@ def validate_files(files):
         recipe = "deployment/Containerfile.project-" + role
         need(recipe in bundle, "BOUND_IMAGE_RECIPE_REQUIRED")
         contexts["build/" + role + "/Containerfile"] = bundle[recipe]
-    if b'# fox-prototype-renderer-closure-v1\n' in bundle['deployment/Containerfile.project-fox']:
+    recipe = bundle['deployment/Containerfile.project-fox']
+    legacy_renderer = b'# fox-prototype-renderer-closure-v1\n' in recipe
+    required_renderer = b'# fox-prototype-renderer-closure-v2\n' in recipe
+    need(not (legacy_renderer and required_renderer), 'AMBIGUOUS_APP_RENDERER_CLOSURE')
+    if legacy_renderer or required_renderer:
         converter = {name.removeprefix('converter/'): raw for name, raw in bundle.items()
                      if name.startswith('converter/')}
-        names = set(APP_RENDERER_FILES)
+        required_files = APP_RENDERER_FILES if required_renderer else LEGACY_APP_RENDERER_FILES
+        names = set(required_files)
         names.update(name for name in converter if name.startswith(APP_RENDERER_TEMPLATE_ROOTS))
-        need(set(APP_RENDERER_FILES).issubset(converter)
+        need(set(required_files).issubset(converter)
              and set(APP_RENDERER_REQUIRED_TEMPLATES).issubset(names), 'COMPLETE_APP_RENDERER_CLOSURE_REQUIRED')
         contexts.update({'build/fox/renderer/'+name:converter[name] for name in names})
     # Retained historical archives have no QA-contract COPY instruction and

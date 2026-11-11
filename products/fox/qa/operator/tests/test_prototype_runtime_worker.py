@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from forms2apex import native_blueprint
+from forms2apex import blueprint_profiles
 from forms2apex import prototype_runtime_bridge as bridge_module
 from forms2apex.project_reviews import canonical, digest, read_object
 from forms2apex.prototype_gateway import PrototypeGateway
@@ -31,7 +31,8 @@ def bridge_case(runtime_case):
     request.update(schema_version=1, scope="fox-prototype-converter-request-v1", prior_receipts={},
                    source_authority={"schema_version": 1, "scope": "fox-prototype-source-authority-v1",
                        "binding_sha256": "a"*64, "sources_manifest_sha256": "b"*64, "review_index_sha256": "c"*64})
-    archive = native_blueprint.deterministic_prototype_zip(request["rendering_spec"])
+    renderer = blueprint_profiles.select(request["rendering_spec"])
+    archive = renderer.deterministic_prototype_zip(request["rendering_spec"])
     request["rendered_zip_sha256"] = hashlib.sha256(archive).hexdigest()
     for stage, result in (("validate", {"passed": True}), ("prepare_schema", {"ready_for_import": True}),
                           ("import", case.args["imported"])):
@@ -42,7 +43,7 @@ def bridge_case(runtime_case):
     binding = {"schema_version": 1, "job_id": request["job_id"], "project_id": request["project_id"],
                "source_binding": request["source_binding"], "plan_sha256": request["plan_sha256"],
                "rendering_spec_sha256": digest(request["rendering_spec"]), "source_authority": request["source_authority"],
-               "draft_zip_sha256": request["rendered_zip_sha256"], "template": native_blueprint.context()}
+               "draft_zip_sha256": request["rendered_zip_sha256"], "template": renderer.context()}
     for name, value in (("snapshot.json", binding), ("verify_runtime-request.json", request),
                         ("verify_runtime-intent.json", {"request_sha256": digest(request)})):
         (case.root / name).write_bytes(canonical(value))
@@ -70,7 +71,8 @@ def bridge_case(runtime_case):
                   "runner": {"kind": "authenticated_browser", "tool": "playwright", "code_sha256": target["code_sha256"],
                              "image_id": browser.config.image_id},
                   "pages": [{"page_id": page["page_id"], "source_block_id": page["source_block_id"], "passed": True,
-                      "authenticated": True, "checks": {key: True for key in page["checks"]}} for page in target["pages"]]}
+                      "authenticated": True, "checks": {key: "PASSED" if key == "additional_required_input_validation"
+                          else True for key in page["checks"]}} for page in target["pages"]]}
         (staging / request["job_id"] / "prototype-converter/runtime-evidence/browser-report.json").write_bytes(canonical(report))
         return SimpleNamespace(stdout=b'{"status":"PASSED","business_behavior_accepted":false}', stderr=b"", returncode=0)
     browser.command = synthetic_command
@@ -80,7 +82,7 @@ def bridge_case(runtime_case):
         return deepcopy(request)
     io = LocalJobIO(case.config.jobs_root)
     config = worker.RuntimeWorkerConfig(io, staging, browser, authorize)
-    packet = packet_for(request, imported, native_blueprint.prototype_trace(request["rendering_spec"]), binding)
+    packet = packet_for(request, imported, renderer.prototype_trace(request["rendering_spec"]), binding)
     return SimpleNamespace(config=config, root=case.root, request=request, imported=imported, packet=packet,
                            io=io, staging=staging, calls=calls, authority_calls=authority_calls)
 

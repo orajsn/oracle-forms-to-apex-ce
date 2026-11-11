@@ -17,7 +17,7 @@ import re
 import tempfile
 import zipfile
 
-from . import native_blueprint, runtime_preflight, sqlcl
+from . import blueprint_profiles, runtime_preflight, sqlcl
 from .project_reviews import canonical, digest, publish, read_object
 from .provenance import file_digest, tree_digest
 from .release import _tree_hashes
@@ -89,12 +89,19 @@ def validate_runtime_receipt(root, request, imported, artifact_binding, value):
     _need(type(value["pages"]) is list and len(value["pages"]) == len(pages),
           "PROTOTYPE_RUNTIME_PAGE_COVERAGE_INVALID")
     for actual, page in zip(value["pages"], pages):
+        expected_checks = {name: True for name in page["checks"]}
+        if "additional_required_input_validation" in expected_checks:
+            block = next(block for block in forms if block["source_block_id"] == page["source_block_id"])
+            expected_checks["additional_required_input_validation"] = (
+                "PASSED" if any(field["value_required"] for field in block["fields"])
+                else "NOT_EXERCISED_NO_ADDITIONAL_REQUIRED_FIELDS")
         _need(type(actual) is dict and set(actual) == {"page_id", "source_block_id", "passed", "authenticated", "checks"}
               and type(actual["page_id"]) is int and actual["page_id"] == page["page_id"]
               and actual["source_block_id"] == page["source_block_id"] and actual["passed"] is True
               and actual["authenticated"] is True and type(actual["checks"]) is dict
               and set(actual["checks"]) == set(page["checks"])
-              and all(item is True for item in actual["checks"].values()),
+              and all(type(actual["checks"][name]) is type(expected) and actual["checks"][name] == expected
+                      for name, expected in expected_checks.items()),
               "PROTOTYPE_RUNTIME_PAGE_COVERAGE_INVALID")
     artifacts = value["artifacts"]
     _need(type(artifacts) is list and 1 <= len(artifacts) <= 100, "PROTOTYPE_RUNTIME_ARTIFACTS_REQUIRED")
@@ -124,7 +131,7 @@ def verify_runtime(settings, root, request, *, imported, artifact_binding, verif
     _need(callable(verifier), "PROTOTYPE_RUNTIME_VERIFIER_UNAVAILABLE")
     freshness_check()
     receipt = verifier(request, root=Path(root), imported=imported,
-        trace=native_blueprint.prototype_trace(request["rendering_spec"]), artifact_binding=artifact_binding,
+        trace=blueprint_profiles.select(request["rendering_spec"]).prototype_trace(request["rendering_spec"]), artifact_binding=artifact_binding,
         freshness_check=freshness_check)
     freshness_check()
     validate_runtime_receipt(root, request, imported, artifact_binding, receipt)
@@ -137,6 +144,7 @@ def export_prototype(settings, root, request, *, imported, artifact_binding, run
                      freshness_check, runner=None, validator=None, target_profile_loader=None):
     """Actual guarded SQLcl export of the existing app; no allocation/import."""
     runner, validator = runner or sqlcl._run_script, validator or sqlcl.validate_apexlang
+    renderer = blueprint_profiles.select(request["rendering_spec"])
     root = Path(root)
     validate_runtime_receipt(root, request, imported, artifact_binding, runtime_receipt)
     identity = runtime_binding(request, imported, artifact_binding)
@@ -188,7 +196,7 @@ def export_prototype(settings, root, request, *, imported, artifact_binding, run
                "block_count": len(request["rendering_spec"]["blocks"]),
                "item_count": sum(len(block["fields"]) for block in request["rendering_spec"]["blocks"]),
                "files": source_manifest["files"], "coverage": plan["coverage"], "remediation": plan["remediation"]}
-    requirements = {"profile_id": native_blueprint.PROFILE_ID, "tested_versions": profile["tested_versions"],
+    requirements = {"profile_id": renderer.PROFILE_ID, "tested_versions": profile["tested_versions"],
                     "workspace": profile["apex"]["workspace"], "parsing_schema": profile["database"]["parsing_schema"],
                     "synthetic_schema_only": True, "new_application_id_and_alias_required": True,
                     "other_target_import_guaranteed": False}
@@ -205,8 +213,8 @@ def export_prototype(settings, root, request, *, imported, artifact_binding, run
         "on the original imported app. Conventional SQL reimport and clean-schema install are NOT proven by this package.\n")
     members = {f"sql/{sql.name}": sql.read_bytes(), "README.txt": readme.encode(),
                "native-blueprint-spec.json": canonical(request["rendering_spec"]),
-               "source-to-apex.json": canonical(native_blueprint.prototype_trace(request["rendering_spec"])),
-               "schema/01_synthetic_schema.sql": native_blueprint.render_prototype_schema(request["rendering_spec"]).encode(),
+               "source-to-apex.json": canonical(renderer.prototype_trace(request["rendering_spec"])),
+               "schema/01_synthetic_schema.sql": renderer.render_prototype_schema(request["rendering_spec"]).encode(),
                "evidence/runtime-receipt.json": canonical(runtime_receipt),
                "evidence/release-evidence.json": canonical(evidence), "evidence/source-summary.json": canonical(summary),
                "evidence/target-requirements.json": canonical(requirements)}

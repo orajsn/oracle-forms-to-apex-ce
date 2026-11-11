@@ -252,7 +252,7 @@ export default function PrototypeConversion({projectId,source,busy,unknownOutcom
   if(!enabled||!assessment)return;
   const approved=Object.fromEntries(assessment.chunks.filter(c=>selected.includes(c.id)).map(c=>[c.id,c.sha256]));
   await execute(async()=>{
-   try{const result=await request(`/api/projects/${encodeURIComponent(projectId)}/prototype-runs`,{source_hash:assessment.source_hash,source_binding:assessment.source_binding,expected_current_source_set_id:assessment.selected_source_set_id,target_profile_sha256:assessment.target_profile_sha256,approved_chunk_hashes:approved,approved_redacted_source:consents[0],approved_external_ai:consents[1],approved_prototype_scope:consents[2]});
+   try{const result=await request(`/api/projects/${encodeURIComponent(projectId)}/prototype-runs`,{source_hash:assessment.source_hash,source_binding:assessment.source_binding,expected_current_source_set_id:assessment.selected_source_set_id,target_profile_sha256:assessment.target_profile_sha256,approved_chunk_hashes:approved,approved_redacted_source:consents[0],approved_external_ai:consents[1],approved_prototype_scope:consents[2],native_input_policy:'forms-required-inputs-v1'});
     if(typeof result?.id!=='string'||!/^fox-[a-f0-9]{20}$/.test(result.id)||result.state!=='QUEUED'||result.conversion_profile!=='native-blueprint-prototype-v1')throw new Error('Unconfirmed prototype request');
     setSubmitted(true);if(onRefresh)await onRefresh();
     return {status:'confirmed',message:'Prototype request submitted. Check the run status; generation, technical verification and business acceptance are separate steps.'};

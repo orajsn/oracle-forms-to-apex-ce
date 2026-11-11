@@ -7,18 +7,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from forms2apex import native_blueprint as renderer
+from forms2apex import blueprint_profiles
 from forms2apex import prototype_gateway as gateway
 from forms2apex.project_reviews import digest, read_object
 from test_native_blueprint import spec
+from test_native_blueprint_required import spec as required_spec
 
 
-@pytest.fixture
-def case(tmp_path_factory):
+def _case(tmp_path_factory, profile="v1"):
     tmp_path = tmp_path_factory.mktemp("p")
     jobs = tmp_path / "jobs"
     jobs.mkdir()
-    value = spec(2)
+    make_spec = spec if profile == "v1" else required_spec
+    value = make_spec(2)
+    renderer = blueprint_profiles.select(value)
     request = {"schema_version": 1, "scope": "fox-prototype-converter-request-v1",
                "job_id": "fox-0123456789abcdefabcd", "project_id": value["project_id"],
                "source_binding": value["source_binding"], "plan_sha256": "b" * 64,
@@ -71,7 +73,19 @@ def case(tmp_path_factory):
                 "import_intent_sha256": "1" * 64, "compiled_metadata_sha256": "2" * 64}
     adapter = gateway.PrototypeGateway(settings, authorize=lambda request: deepcopy(request),
         validator=validate, importer=imported, runner=run, preflight=fresh)
-    return SimpleNamespace(adapter=adapter, request=request, calls=calls, settings=settings, run=run)
+    return SimpleNamespace(adapter=adapter, request=request, calls=calls, settings=settings, run=run,
+                           renderer=renderer, make_spec=make_spec)
+
+
+@pytest.fixture
+def case(tmp_path_factory):
+    """Preserve direct legacy fixture callers outside this test module."""
+    return _case(tmp_path_factory)
+
+
+@pytest.fixture(params=["v1", "required-v1"])
+def profile_case(tmp_path_factory, request):
+    return _case(tmp_path_factory, request.param)
 
 
 def advance(case, stage):
@@ -104,7 +118,8 @@ def test_three_real_adapters_bind_snapshot_schema_and_durable_import(case):
     assert "preflight:prepare-schema" in case.calls and "fresh:import" in case.calls
     root = case.settings.jobs_root / case.request["job_id"] / "prototype-converter"
     assert read_object(root / "snapshot.json")["source_authority"] == case.request["source_authority"]
-    assert (root / "synthetic-schema.sql").read_text() == renderer.render_prototype_schema(case.request["rendering_spec"])
+    assert (root / "synthetic-schema.sql").read_text() == case.renderer.render_prototype_schema(case.request["rendering_spec"])
+    assert read_object(root / "snapshot.json")["template"] == case.renderer.context()
     assert not case.adapter.supports("verify_runtime") and not case.adapter.supports("export")
     unavailable = case.adapter.run_stage("verify_runtime", case.request)
     assert unavailable["status"] == "UNAVAILABLE" and "passed" not in unavailable
@@ -258,8 +273,8 @@ def test_default_target_preflight_transports_do_not_reuse_old_profile_gate(case,
     profile = load_target_profile(PROFILE_PATH)
     # The old profile's settings are target/environment identity, not an old
     # rendering contract. 109 fields still use the independent strict renderer.
-    case.request["rendering_spec"].update(spec(109))
-    case.request["rendered_zip_sha256"] = hashlib.sha256(renderer.deterministic_prototype_zip(
+    case.request["rendering_spec"].update(case.make_spec(109))
+    case.request["rendered_zip_sha256"] = hashlib.sha256(case.renderer.deterministic_prototype_zip(
         case.request["rendering_spec"])).hexdigest()
     case.settings.target_profile_path = PROFILE_PATH
     case.settings.generator_model = profile["opaf"]["roles"]["mapper"]["model"]

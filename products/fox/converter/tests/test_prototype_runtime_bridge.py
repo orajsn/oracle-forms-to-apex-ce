@@ -4,6 +4,7 @@ from copy import deepcopy
 import pytest
 
 from forms2apex.project_reviews import canonical, read_object
+from forms2apex import native_blueprint, native_blueprint_required, blueprint_profiles
 from forms2apex.prototype_runtime_bridge import (
     REQUEST, RESULT, PrototypeRuntimeBridge, code_sha256, object_bytes,
 )
@@ -83,6 +84,20 @@ def test_mismatched_callback_context_rejected_before_publication(bridge_case, fi
     case = bridge_case
     with pytest.raises((RuntimeError, ValueError), match="CHANGED"):
         invoke(verifier(case), case, **{field: {}})
+    assert not (case.root / REQUEST).exists() and not case.calls
+
+
+@pytest.mark.parametrize("field", ["trace", "template"])
+def test_cross_profile_context_cannot_be_downgraded_before_runtime_dispatch(bridge_case, field):
+    case = bridge_case
+    selected = blueprint_profiles.select(case.request["rendering_spec"])
+    other = native_blueprint_required if selected is native_blueprint else native_blueprint
+    if field == "trace":
+        overrides = {"trace": {**case.packet["trace"], "scope": other.PROFILE_ID + "-trace"}}
+    else:
+        overrides = {"artifact_binding": {**case.packet["artifact_binding"], "template": other.context()}}
+    with pytest.raises(RuntimeError, match="TRACE_CHANGED|SNAPSHOT_CHANGED"):
+        invoke(verifier(case), case, **overrides)
     assert not (case.root / REQUEST).exists() and not case.calls
 
 

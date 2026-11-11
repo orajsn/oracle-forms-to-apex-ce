@@ -25,7 +25,7 @@ import tempfile
 import threading
 import zipfile
 
-from . import native_blueprint, native_target, runtime_preflight, sqlcl
+from . import blueprint_profiles, native_target, runtime_preflight, sqlcl
 from .project_reviews import canonical, digest, publish, read_object, publish_directory, cleanup_temporary
 from .provenance import file_digest, tree_digest
 from .review_receipts import _unique_keys
@@ -380,10 +380,11 @@ class PrototypeGateway:
               and all(type(authority[key]) is str and _SHA.fullmatch(authority[key])
                       for key in ("binding_sha256", "sources_manifest_sha256", "review_index_sha256")),
               "PROTOTYPE_SOURCE_AUTHORITY_FIELDS_INVALID")
-        spec = native_blueprint.validate_prototype_spec(request["rendering_spec"])
+        renderer = blueprint_profiles.select(request["rendering_spec"])
+        spec = renderer.validate_prototype_spec(request["rendering_spec"])
         _need(spec == request["rendering_spec"] and spec["source_binding"] == request["source_binding"]
               and spec["project_id"] == request["project_id"], "PROTOTYPE_SOURCE_BINDING_MISMATCH")
-        raw = native_blueprint.deterministic_prototype_zip(spec)
+        raw = renderer.deterministic_prototype_zip(spec)
         _need(hashlib.sha256(raw).hexdigest() == request["rendered_zip_sha256"],
               "PROTOTYPE_RENDERED_ZIP_MISMATCH")
         prior = STAGES[:STAGES.index(stage)]
@@ -508,7 +509,7 @@ class PrototypeGateway:
                    "plan_sha256": request["plan_sha256"], "rendering_spec_sha256": digest(spec),
                    "source_authority": request["source_authority"],
                    "draft_zip_sha256": request["rendered_zip_sha256"],
-                   "template": native_blueprint.context()}
+                   "template": blueprint_profiles.select(spec).context()}
         if create:
             _new_bytes(archive, raw)
             publish(root / "snapshot.json", binding)
@@ -547,6 +548,7 @@ class PrototypeGateway:
 
     def _observe(self, root, spec):
         """Exact bounded dictionary metadata, without the old 20-column gate."""
+        renderer = blueprint_profiles.select(spec)
         for block in spec["blocks"]:
             if block["classification"] != "database":
                 continue
@@ -566,14 +568,14 @@ class PrototypeGateway:
             counts, columns, keys = native_target._parse_output(output)
             expected = [{"name": col["name"], "data_type": col["data_type"], "nullable": col["nullable"],
                          "char_length": col.get("length", 0), "identity": col["identity"]}
-                        for col in native_blueprint._columns(block)]
+                        for col in renderer._columns(block)]
             _need(counts["TABLE_COUNT"] == counts["PK_COUNT"] == 1
                   and counts["ENABLED_TRIGGER_COUNT"] == 0 and columns == expected
-                  and keys == [native_blueprint.KEY], "PROTOTYPE_SCHEMA_METADATA_MISMATCH")
+                  and keys == [renderer.KEY], "PROTOTYPE_SCHEMA_METADATA_MISMATCH")
 
     def _prepare_schema(self, root, request, spec, check):
         tables = [block["table_name"] for block in spec["blocks"] if block["classification"] == "database"]
-        ddl = native_blueprint.render_prototype_schema(spec)
+        ddl = blueprint_profiles.select(spec).render_prototype_schema(spec)
         _new_bytes(root / "synthetic-schema.sql", ddl.encode("utf-8"))
         if tables:
             names = ",".join("'" + table + "'" for table in tables)

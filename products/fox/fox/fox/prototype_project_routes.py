@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 import time
 import uuid
+from typing import Literal
 
 from fastapi import HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
@@ -35,6 +36,11 @@ class PrototypeRunInput(BaseModel):
 
 class PrototypeContinuationInput(PrototypeRunInput):
     checkpoint_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class PrototypeNewRunInput(PrototypeRunInput):
+    # A creation-only choice: continuations cannot upgrade old immutable jobs.
+    native_input_policy: Literal['forms-required-inputs-v1'] | None = None
 
 
 class PrototypeEpochInput(PrototypeContinuationInput):
@@ -240,7 +246,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             target_profile_sha256=target['target_profile_sha256'],
             approved_redacted_source=True, approved_external_ai=True,
             approved_prototype_scope=True, schema_version=2,metadata_task_policy=selected.get('metadata_task_policy'),
-            candidate_format_policy=selected.get('candidate_format_policy'))
+            candidate_format_policy=selected.get('candidate_format_policy'),
+            native_input_policy=selected.get('native_input_policy'))
         child_id = retry_run_id(rid)
         child = c.execute('SELECT * FROM runs WHERE id=?', (child_id,)).fetchone()
         child_job = root / 'jobs' / child_id
@@ -1214,7 +1221,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         return result
 
     @app.post('/api/projects/{pid}/prototype-runs', status_code=202)
-    def submit_prototype(pid: str, body: PrototypeRunInput, request: Request):
+    def submit_prototype(pid: str, body: PrototypeNewRunInput, request: Request):
         p = project(request, pid)
         digest = target_hash()
         if digest != body.target_profile_sha256:
@@ -1236,7 +1243,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     approved_external_ai=body.approved_external_ai,
                     approved_prototype_scope=body.approved_prototype_scope, schema_version=2,
                     metadata_task_policy='same-byte-dsc-identity-metadata-v1',
-                    candidate_format_policy='exact-source-envelope-and-item-fact-aliases-v1')
+                    candidate_format_policy='exact-source-envelope-and-item-fact-aliases-v1',
+                    native_input_policy=body.native_input_policy)
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Source approval is missing or changed. Review the exact files, code selection and processing permissions again.') from None
             old = c.execute('SELECT id,state FROM runs WHERE project=? AND source_hash=?', (pid, body.source_hash)).fetchone()
