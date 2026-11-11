@@ -1,11 +1,11 @@
 {
-  "version": "0.22.3",
+  "version": "0.22.4",
   "released_on": "2026-11-12",
-  "title": "Exercise native APEX report controls reliably",
+  "title": "Wait for actual native form save results",
   "changes": [
-    "Open the native APEX Report submenu by clicking, then wait for unique visible reset controls during runtime verification.",
-    "Record a bounded static reset-step failure code for operators without exposing credentials or browser contents.",
-    "Preserve exact target, expiry, validation, source evidence and separate technical and human acceptance checks."
+    "Wait for the exact destination application and page after Create or Save instead of reading an already-idle previous page.",
+    "Keep invalid-input submissions blocked through confirmed Cancel navigation while allowing previously retained synthetic records.",
+    "Preserve single-attempt write intents, target and expiry checks, source evidence and separate business acceptance."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

@@ -1,7 +1,8 @@
 /** Pure synthetic request checks; importing runner never launches Playwright. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,resetNativeReport,run,ORIGIN} from '../run-prototype.mjs';
+import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,resetNativeReport,
+  submitAndWaitForPage,closeRejectedNewRecord,run,ORIGIN} from '../run-prototype.mjs';
 import {sha256,canonicalQaPlan} from '../lib/contracts.mjs';
 
 const packet=()=>{
@@ -239,4 +240,122 @@ test('native report reset never ignores a revoked target or write fence',async()
   await assert.rejects(resetNativeReport(value.page,value.options),/SYNTHETIC_TARGET_REVOKED/);
   assert.deepEqual(value.clicks,['Actions','Report']);assert.equal(value.observed().settled,0);
   assert.equal(value.phases.at(-1),'RESET_MENUITEM');
+});
+
+function submitPage({app='12345',pageId='2',destinationApp='12345',destinationPage='1',delay=5}={}){
+  let registered=false,actions=0;
+  const page={locator:selector=>({inputValue:async()=>selector.includes('p_flow_id')?app:pageId}),
+    waitForFunction:(predicate,args,{timeout})=>{
+      registered=true;
+      return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>{clearInterval(poll);reject(Error('SYNTHETIC_DESTINATION_TIMEOUT'));},timeout);
+        const poll=setInterval(()=>{
+          const before=globalThis.document;
+          globalThis.document={querySelector:selector=>({value:selector.includes('p_flow_id')?app:pageId})};
+          try{if(predicate(args)){clearInterval(poll);clearTimeout(timer);resolve();}}
+          finally{globalThis.document=before;}
+        },1);
+      });
+    }};
+  const options={applicationId:12345,fromPageId:2,toPageId:1,timeout:30,action:async()=>{
+    assert.equal(registered,true,'Destination waiter must be registered before click');actions++;
+    setTimeout(()=>{app=destinationApp;pageId=destinationPage;},delay);
+  }};
+  return {page,options,observed:()=>({registered,actions,app,pageId})};
+}
+
+test('positive native submit waits for deferred exact destination DOM, not an already-idle form',async()=>{
+  for(const button of ['Create','Save Changes']){
+    const value=submitPage();await submitAndWaitForPage(value.page,value.options);
+    assert.deepEqual(value.observed(),{registered:true,actions:1,app:'12345',pageId:'1'},button);
+  }
+});
+
+test('positive native submit rejects wrong source app/page or already-arrived destination before clicking',async()=>{
+  for(const source of [{app:'999'},{pageId:'3'},{pageId:'1'}]){
+    const value=submitPage(source);
+    await assert.rejects(submitAndWaitForPage(value.page,value.options),/Wrong app\/page/);
+    assert.equal(value.observed().actions,0);assert.equal(value.observed().registered,false);
+  }
+});
+
+test('positive native submit never accepts a wrong destination app/page or retries after timeout',async()=>{
+  for(const destination of [{destinationApp:'999'},{destinationPage:'3'},{destinationPage:'2'}]){
+    const value=submitPage(destination);
+    await assert.rejects(submitAndWaitForPage(value.page,value.options),/SYNTHETIC_DESTINATION_TIMEOUT/);
+    assert.equal(value.observed().actions,1);
+  }
+});
+
+test('positive native submit preserves a revoked action guard without clicking',async()=>{
+  const value=submitPage();
+  value.options.action=async()=>{throw Error('SYNTHETIC_GUARD_REVOKED');};
+  await assert.rejects(submitAndWaitForPage(value.page,value.options),/SYNTHETIC_GUARD_REVOKED/);
+  assert.equal(value.observed().actions,0);
+});
+
+test('positive native submit requires a bounded timeout and distinct valid page IDs',async()=>{
+  for(const timeout of [0,-1,Infinity,45001]){
+    const value=submitPage();value.options.timeout=timeout;
+    await assert.rejects(submitAndWaitForPage(value.page,value.options),/Invalid native submit destination/);
+    assert.equal(value.observed().registered,false);assert.equal(value.observed().actions,0);
+  }
+});
+
+test('negative required probe can return to a report with retained rows, without clearing or counting them',async()=>{
+  const calls=[],existingRows=[{key:'1',marker:'FPQ-prior-retained'}];let pageId='2',fence=true;
+  const probe=requiredProbe();await assertAdditionalRequiredInputRejected(probe.page,'P2_FIELD1',probe.submit,()=>{});
+  const page={locator:selector=>{
+    if(selector==='input[name="p_flow_id"]')return {inputValue:async()=> '12345'};
+    if(selector==='input[name="p_flow_step_id"]')return {inputValue:async()=>pageId};
+    assert.equal(selector,'input[name="P2_FOX_ROW_ID"]');return {inputValue:async()=>''};
+  },waitForFunction:async()=>{
+    await new Promise(resolve=>setTimeout(resolve,1));assert.equal(pageId,'1');
+  },getByRole:(role,{name,exact})=>{
+    assert.equal(role,'button');assert.equal(name,'Cancel');assert.equal(exact,true);
+    return {click:async()=>{assert.equal(fence,true);calls.push('cancel');pageId='1';}};
+  }};
+  await closeRejectedNewRecord(page,{applicationId:12345,formPage:2,identity:async id=>{calls.push('page:'+id);},
+    account:async()=>{calls.push('account');},act:async action=>action(),
+    settled:async()=>{calls.push('settled');},clearFence:()=>{fence=false;calls.push('release');},
+    reset:async()=>{assert.equal(fence,false);calls.push('reset');}});
+  assert.deepEqual(calls,['page:2','account','cancel','settled','page:1','account','release','reset']);
+  assert.deepEqual(existingRows,[{key:'1',marker:'FPQ-prior-retained'}]);
+});
+
+test('negative probe still rejects a nonempty new-row key before any return action',async()=>{
+  let actions=0;
+  const page={locator:()=>({inputValue:async()=> '99'}),getByRole:()=>{actions++;throw Error('Must not act');}};
+  await assert.rejects(closeRejectedNewRecord(page,{applicationId:12345,formPage:2,identity:async()=>{},account:async()=>{},
+    act:async action=>action(),settled:async()=>{},reset:async()=>{},clearFence:()=>{}}),/acquired a row identity/);
+  assert.equal(actions,0);
+});
+
+test('late negative POST during Cancel or report-account verification is aborted and can never become PASSED',async()=>{
+  for(const lateAt of ['cancel','report-account']){
+    let pageId='2',fence=true,unsafe=false,forwarded=0,aborted=0,passed=false,resets=0;
+    const latePost=()=>{if(fence){aborted++;unsafe=true;}else forwarded++;};
+    const guard=()=>{if(unsafe)throw Error('SYNTHETIC_UNSAFE_ABORT');};
+    const page={locator:selector=>({inputValue:async()=>selector.includes('p_flow_id')?'12345':selector.includes('p_flow_step_id')?pageId:''}),
+      waitForFunction:async()=>{await new Promise(resolve=>setTimeout(resolve,1));assert.equal(pageId,'1');},
+      getByRole:()=>({click:async()=>{if(lateAt==='cancel')latePost();pageId='1';}})};
+    await assert.rejects((async()=>{
+      await closeRejectedNewRecord(page,{applicationId:12345,formPage:2,identity:async()=>{},
+        account:async()=>{if(pageId==='1'&&lateAt==='report-account')latePost();},
+        act:async action=>{guard();return action();},settled:async()=>{guard();},
+        clearFence:()=>{guard();fence=false;},reset:async()=>{resets++;}});
+      passed=true;
+    })(),/SYNTHETIC_UNSAFE_ABORT/);
+    assert.equal(aborted,1);assert.equal(forwarded,0);assert.equal(unsafe,true);
+    assert.equal(fence,true);assert.equal(passed,false);assert.equal(resets,0);
+  }
+});
+
+test('failed Cancel destination wait never releases the negative no-POST fence',async()=>{
+  let fence=true,resets=0;
+  const page={locator:selector=>({inputValue:async()=>selector.includes('p_flow_id')?'12345':selector.includes('p_flow_step_id')?'2':''}),
+    waitForFunction:async()=>{throw Error('SYNTHETIC_CANCEL_TIMEOUT');},getByRole:()=>({click:async()=>{}})};
+  await assert.rejects(closeRejectedNewRecord(page,{applicationId:12345,formPage:2,identity:async()=>{},account:async()=>{},
+    act:async action=>action(),settled:async()=>{},clearFence:()=>{fence=false;},reset:async()=>{resets++;}}),/SYNTHETIC_CANCEL_TIMEOUT/);
+  assert.equal(fence,true);assert.equal(resets,0);
 });

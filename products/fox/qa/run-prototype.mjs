@@ -151,6 +151,39 @@ export async function resetNativeReport(page,{act,settled,onPhase=()=>{}}) {
   await apply.waitFor({state:'hidden'});onPhase('RESET_SETTLE');await settled();
 }
 
+export async function submitAndWaitForPage(page,{applicationId,fromPageId,toPageId,action,timeout=45000}) {
+  check(Number.isSafeInteger(applicationId)&&applicationId>0&&Number.isSafeInteger(fromPageId)
+    &&fromPageId>0&&Number.isSafeInteger(toPageId)&&toPageId>0&&fromPageId!==toPageId&&typeof action==='function'
+    &&Number.isInteger(timeout)&&timeout>=1&&timeout<=45000,
+    'Invalid native submit destination');
+  check(await page.locator('input[name="p_flow_id"]').inputValue()===String(applicationId)
+    &&await page.locator('input[name="p_flow_step_id"]').inputValue()===String(fromPageId),
+    'Wrong app/page before native submit');
+  // Register before the single action. APEX can defer its POST while the old
+  // form is already network-idle; only the exact destination DOM proves arrival.
+  const arrived=page.waitForFunction(({app,pageId})=>
+    document.querySelector('input[name="p_flow_id"]')?.value===app
+    &&document.querySelector('input[name="p_flow_step_id"]')?.value===pageId,
+    {app:String(applicationId),pageId:String(toPageId)},{timeout});
+  await Promise.all([arrived,action()]);
+}
+
+export async function closeRejectedNewRecord(page,{applicationId,formPage,identity,account,act,settled,reset,clearFence}) {
+  check(typeof clearFence==='function','Required-input no-POST fence release is required');
+  await identity(formPage);await account();
+  check(await page.locator(`input[name="P${formPage}_FOX_ROW_ID"]`).inputValue()==='',
+    'Rejected required input acquired a row identity');
+  await submitAndWaitForPage(page,{applicationId,fromPageId:formPage,toPageId:formPage-1,
+    action:()=>act(()=>page.getByRole('button',{name:'Cancel',exact:true}).click())});
+  await settled();await identity(formPage-1);await account();
+  // The old form is now gone and the exact report/account is verified. Only
+  // now release the fence for the reset menu's legitimate same-app AJAX.
+  clearFence();
+  await reset();
+  // Existing retained rows are unrelated to this new-record probe. Rejection
+  // is proved by its field error, zero-POST fence and still-empty new-row key.
+}
+
 export async function run(packet,accounts,chromium,{output='/results',dispatch='/dispatch'}={}) {
   validatePacket(packet);
   const report={...packet.binding,passed:false,authenticated:false,business_pages_tested:false,business_behavior_accepted:false,
@@ -242,7 +275,9 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       durable(path.join(dispatch,`write-${String(++sequence).padStart(3,'0')}.json`),
         {binding:packet.binding,source_block_id:block.source_block_id,table_name:block.table_name,button,primary_key:key||null,
           intended_values_sha256:sha256(canonicalQaPlan(values)),state:'ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'});
-      await act(()=>page.getByRole('button',{name:button,exact:true}).click());await settled();await identity(formPage-1);
+      await submitAndWaitForPage(page,{applicationId:packet.binding.application_id,fromPageId:formPage,toPageId:formPage-1,
+        action:()=>act(()=>page.getByRole('button',{name:button,exact:true}).click())});
+      await settled();await identity(formPage-1);
       await page.getByText('Record saved.',{exact:true}).waitFor({state:'visible'});
     }
     for(const block of packet.spec.blocks){
@@ -280,17 +315,11 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
             {binding:packet.binding,source_block_id:block.source_block_id,source_item_id:required.source_item_id,
               state:'INVALID_SUBMIT_ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'});
           invalidRequiredProbe=true;
-          try{
-            await assertAdditionalRequiredInputRejected(page,`P${formPage}_${required.name}`,
-              ()=>act(()=>page.getByRole('button',{name:'Create',exact:true}).click()),guard);
-          }finally{invalidRequiredProbe=false;}
-          await identity(formPage);await account();
-          check(await page.locator(`input[name="P${formPage}_FOX_ROW_ID"]`).inputValue()==='',
-            'Rejected required input acquired a row identity');
-          await act(()=>page.getByRole('button',{name:'Cancel',exact:true}).click());await settled();await identity(formPage-1);
-          await reset();
-          check(await page.locator('.a-IRR-noDataMsg').isVisible(),
-            'Rejected required input unexpectedly created a synthetic row');
+          await assertAdditionalRequiredInputRejected(page,`P${formPage}_${required.name}`,
+            ()=>act(()=>page.getByRole('button',{name:'Create',exact:true}).click()),guard);
+          // Any failure leaves the no-POST fence active through browser close.
+          await closeRejectedNewRecord(page,{applicationId:packet.binding.application_id,formPage,identity,account,act,settled,reset,
+            clearFence:()=>{guard();invalidRequiredProbe=false;}});
           detail.checks.additional_required_input_validation='PASSED';progress();
           await act(()=>page.getByRole('button',{name:'Create Record',exact:true}).click());
           await settled();await identity(formPage);await items(block,formPage);

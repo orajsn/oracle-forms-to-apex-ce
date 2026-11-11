@@ -8,6 +8,28 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.4] - 2026-11-12
+
+### Wait for native saves and keep retained test records
+
+- Register an exact destination app/page wait before a single Create or Save
+  click. An already-idle form is not evidence that its deferred submission has
+  finished. Preserve write intents, expiry, source values, row identity,
+  confirmation and account checks; never retry an uncertain submission.
+- Keep the negative required-input probe's no-POST fence active through verified
+  Cancel navigation and the report account check. Release it only before the
+  report's legitimate reset request; failures keep the fence active until close.
+- Allow prior synthetic records instead of requiring the whole report to be
+  empty. The field-error, zero-POST and empty-new-row-key checks remain required.
+
+Verification:26 Node tests and 62 adapter tests passed without skips, including
+delayed submits, wrong targets, timeout, revoked authority and late negative POSTs.
+A separately controlled actual native Create returned to its report with
+"Record saved"; read-only database reconciliation confirmed one retained synthetic
+row. Its request was ordinary supported form encoding, so no request allowlist
+was broadened. Full multi-form runtime, hosted conversion and business acceptance
+remain distinct checks; this source release does not claim them complete.
+
 ## [0.22.3] - 2026-11-12
 
 ### Use the actual APEX Report submenu interaction
