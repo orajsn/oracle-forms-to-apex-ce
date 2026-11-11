@@ -8,6 +8,26 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.1] - 2026-11-12
+
+### Accept Oracle's empty list-entry name
+
+- Preserve an empty Name on a ListItemElement when matching paired Oracle
+  OVERRIDDEN and ALL exports. Do not reject the entire module for this standard
+  metadata shape, invent a name, or join entries by their position.
+- Keep empty distinct from missing, reject duplicate empty sibling identities,
+  and continue to reject empty names on other object kinds. Inherited identities,
+  foreign namespaces and secret checks retain their existing protections.
+
+Verification:327 effective-view, intake and redaction tests passed with no skips;
+independent source review cleared the bounded fix. A second real Oracle-validated
+module previously stopped on this exact metadata value. It now produces a local
+developer structural candidate with two native form blocks and seven required
+inputs; its APEXlang passed actual SQLcl26.1.2 validation without a database
+connection. Original code, dependencies and unsupported behavior remain explicit
+remediation. This is not hosted conversion, OPAF design review, import/runtime
+proof or business acceptance.
+
 ## [0.22.0] - 2026-11-12
 
 ### Preserve required inputs in native APEX forms

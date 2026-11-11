@@ -1,11 +1,11 @@
 {
-  "version": "0.22.0",
+  "version": "0.22.1",
   "released_on": "2026-11-12",
-  "title": "Carry Forms required inputs into native APEX forms",
+  "title": "Accept empty Oracle list-entry identities without guessing",
   "changes": [
-    "New prototype runs can preserve explicit source Required properties as native APEX input validation on supported editable database fields.",
-    "Keep existing database nullability and legacy saved runs unchanged; bind the new input policy to each admitted source snapshot.",
-    "Carry the selected renderer through deterministic package validation, recovery, runtime checks and export without bypassing review or import gates."
+    "Read an Oracle-exported empty ListItemElement name while preserving its exact identity and original content.",
+    "Continue to reject duplicate empty entries, missing-versus-empty identity mismatches and empty names on other Forms objects.",
+    "Preserve source-required native APEX inputs, explicit omissions and all existing review and deterministic import gates."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

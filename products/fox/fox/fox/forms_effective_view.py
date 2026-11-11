@@ -62,8 +62,11 @@ def _typed(prop: str, value: str, *, element_kind: str | None = None) -> str:
     if prop in _IDENTITY_PROPERTIES:
         # Oracle serializes list-entry indices as Names. They are exact XML
         # identities, not SQL/object identifiers; never coerce away leading zeroes.
-        numeric_list_entry = prop == "Name" and element_kind == "ListItemElement" and re.fullmatch(r"[0-9]{1,10}", value) is not None
-        valid = _identifier(value) is not None or numeric_list_entry
+        list_entry_identity = (prop == "Name" and element_kind == "ListItemElement"
+                               and (value == "" or re.fullmatch(r"[0-9]{1,10}", value) is not None))
+        # Oracle can emit one empty list-entry name. Preserve its exact identity;
+        # _index still rejects duplicate siblings and empty/absent mismatches.
+        valid = _identifier(value) is not None or list_entry_identity
     elif prop in _BOOL:
         parsed = {"true": "true", "yes": "true", "false": "false", "no": "false"}.get(value.lower())
         if parsed is not None:

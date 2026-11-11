@@ -161,6 +161,31 @@ def test_numeric_general_object_names_still_rejected(kind):
         derive(raw, raw)
 
 
+def test_empty_list_entry_name_is_preserved_not_guessed_or_joined_by_position():
+    original = b'<FormModule Name="S"><Item Name="I"><ListItemElement Name="" ListItemLabel="Choose"/><ListItemElement Name="1"/></Item></FormModule>'
+    expanded = (f'<FormModule xmlns:S_overridden="{NS}" S_overridden:Name="S"><Item S_overridden:Name="I">'
+                '<ListItemElement S_overridden:Name="1"/><ListItemElement S_overridden:Name="" ListItemLabel="Choose"/>'
+                '</Item></FormModule>').encode()
+    result = derive(original, expanded)
+    entries = list(XML.fromstring(result['derived_xml']).iter('ListItemElement'))
+    assert [entry.get('Name') for entry in entries] == ['', '1']
+    assert entries[0].get('ListItemLabel') == 'Choose'
+    assert result['receipt']['original_unchanged'] is True
+    assert result['receipt']['changes'] == []
+    with pytest.raises(ValueError, match='structures or exact names differ'):
+        derive(original, expanded.replace(b'S_overridden:Name=""', b''))
+    with pytest.raises(ValueError, match='ambiguous object identity'):
+        duplicate = original.replace(b'Name="1"', b'Name=""')
+        derive(duplicate, duplicate)
+
+
+@pytest.mark.parametrize('kind', ['FormModule', 'Block', 'Item', 'Trigger', 'RadioButton', 'PropertyClass'])
+def test_empty_general_object_names_still_rejected(kind):
+    raw = (f'<{kind} Name=""/>' if kind == 'FormModule' else f'<FormModule Name="S"><{kind} Name=""/></FormModule>').encode()
+    with pytest.raises(ValueError, match='bounded property type'):
+        derive(raw, raw)
+
+
 def test_numeric_list_entry_name_is_bounded():
     for value in ['12345678901', '-1', '1.5']:
         raw = f'<FormModule Name="S"><Item Name="I"><ListItemElement Name="{value}"/></Item></FormModule>'.encode()
