@@ -24,7 +24,7 @@ OBJECT_KINDS = MODULE_KINDS | frozenset({
     "Alert", "AttachedLibrary", "Block", "Canvas", "Item", "Trigger",
     "ProgramUnit", "PropertyClass", "RecordGroup", "RecordGroupColumn", "LOV",
     "Report", "Window", "Parameter", "Relation", "VisualAttribute", "Menu",
-    "MenuItem", "TabPage", "ObjectGroup", "Graphics", "DataSourceColumn",
+    "MenuItem", "TabPage", "ObjectGroup", "Graphics", "DataSourceColumn", "RadioButton",
 })
 CODE_ATTRIBUTES = frozenset({
     "TriggerText", "ProgramUnitText", "RecordGroupQuery", "WhereClause",

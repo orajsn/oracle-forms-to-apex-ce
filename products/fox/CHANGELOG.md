@@ -8,6 +8,27 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.21.6] - 2026-11-12
+
+### Read standard radio-button and required-field metadata
+
+- Recognize Oracle Forms RadioButton objects rather than rejecting an otherwise
+  readable module during local redaction. Keep scoped names, IDs and locations.
+- Preserve explicit boolean Required properties for subsequent conversion work.
+  RadioButtonValue remains masked; no private option value is inferred.
+- Keep existing XML namespace, inherited/default-property, DSC identity and
+  source-permission boundaries unchanged. Oracle ALL output remains provenance
+  evidence, not a substitute for the normal OVERRIDDEN source export.
+
+Verification:900 relevant tests passed,12 were skipped, and9 subtests passed.
+The39 new cases had35 failures before the fix and all passed afterward. Two
+real Oracle-validated OVERRIDDEN exports passed the updated local redaction,
+facts and source-packet path; one contained9 radio buttons. One code unit in
+that larger module was withheld by redaction rather than reconstructed.
+
+These are local intake results, not hosted extraction, generated APEX, native
+radio/Required validation behavior, import/export or business acceptance.
+
 ## [0.21.5] - 2026-11-11
 
 ### Back up larger retained development histories

@@ -43,7 +43,7 @@ _REFERENCES = frozenset({
     "MasterBlock", "DetailBlock", "MenuModule", "DMLDataTargetName", "DSCName",
     "ColumnName", "SubclassObjectGroup", "SubclassModule", "SubclassObject",
 })
-_BOOLEANS = frozenset({"DatabaseBlock", "DatabaseItem", "PrimaryKey"})
+_BOOLEANS = frozenset({"DatabaseBlock", "DatabaseItem", "PrimaryKey", "Required"})
 _NUMERIC_METADATA = frozenset({
     "MaximumLength", "DSCLength", "DSCPrecision", "DSCScale", "Precision", "Scale",
 })
@@ -317,7 +317,7 @@ def redact_forms_xml(name: str, raw: bytes) -> dict:
             # remove them rather than copying either key or value to output.
             known = (key == "Name" or key in facts.CODE_ATTRIBUTES or key in _REFERENCES
                      or key in _BOOLEANS or key in _NUMERIC_METADATA or key in _ENUMS
-                     or key in {"Prompt", "StaticItemPrompt", "InitialValue", "Value", "ListItemValue",
+                     or key in {"Prompt", "StaticItemPrompt", "InitialValue", "Value", "ListItemValue", "RadioButtonValue",
                                 "CanvasName", "WindowName", "LovName", "RecordGroupName", "VisualAttributeName",
                                 "TabPageName", "PropertyClassName", "FontName"})
             if not known:

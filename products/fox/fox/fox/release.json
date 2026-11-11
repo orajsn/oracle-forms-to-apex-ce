@@ -1,11 +1,11 @@
 {
-  "version": "0.21.5",
-  "released_on": "2026-11-11",
-  "title": "Back up larger retained development histories",
+  "version": "0.21.6",
+  "released_on": "2026-11-12",
+  "title": "Recognize radio-button metadata and required-field properties",
   "changes": [
-    "Raise the bounded upgrade snapshot capacity to 25,000 entries and 160 MiB so retained development history can be preserved.",
-    "Keep the 64 MiB per-file and 8 MiB manifest limits, integrity checks, safe paths and isolated restore requirements unchanged.",
-    "Require a fresh capacity check before deployment; this change does not delete history, add cloud resources or complete a conversion."
+    "Recognize standard Oracle Forms RadioButton objects during local source assessment and redaction.",
+    "Preserve explicit boolean Required properties while continuing to mask radio selection values and private literals.",
+    "Keep original source identities, locations, inheritance provenance and secret checks; metadata recognition is not converted business behavior."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
