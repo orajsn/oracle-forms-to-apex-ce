@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "tag": "fox-deploy-v0.1.0",
+  "released_on": "2026-11-11",
+  "scope": "deployment-tools-only",
+  "title": "Include the measured shared contract in isolated proof reads",
+  "tools": {
+    "current_pair_transition.py": "46026c22b349014617f65bbcf0de857e4a97882ef07a8a65e683adc1a2692de3"
+  },
+  "tested_application_bundle": {
+    "fox_version": "0.21.5",
+    "source_bundle_sha256": "f57cffeadcd2b68088e0ba86cc15cdeaa9bac79a3ffc37dbc39241ef7f7df05e"
+  },
+  "changes": [
+    "Load fox_source_contract through the same hash-verified closed namespace as FOX and the renderer.",
+    "Require all four shared-package modules and matching hashes for the three canonical source mirrors.",
+    "Retain module-origin checks, immutable application artifacts and separate transition authorization."
+  ],
+  "verification": {
+    "focused_linux_tests_passed": 110,
+    "retained_real_draft_read_only_reconstruction_passed": true,
+    "live_transition_verified": false,
+    "apex_conversion_completed": false
+  }
+}

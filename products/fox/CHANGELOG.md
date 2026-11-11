@@ -4,6 +4,10 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+Independently pinned deployment-only corrections have a separate
+[deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
+application version or relabel existing images.
+
 ## [0.21.5] - 2026-11-11
 
 ### Back up larger retained development histories

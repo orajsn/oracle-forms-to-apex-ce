@@ -262,7 +262,7 @@ print(json.dumps(result,sort_keys=True))
 
 def preclaim_module_origin(name,new_sha256,physical_sha256):
     """Never let new bytes attest a different old physical module file."""
-    package=name in ('fox','forms2apex')
+    package=name in ('fox','forms2apex','fox_source_contract')
     path='/app/'+name.replace('.','/')+('/__init__.py' if package else '.py')
     return path if new_sha256==physical_sha256 else '<measured-new:'+name+':'+new_sha256+'>'
 
@@ -275,15 +275,15 @@ for name,row in p['sources'].items():
  assert hashlib.sha256(raw).hexdigest()==row['sha256'];sources[name]=raw
 class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
  def find_spec(self,name,path=None,target=None):
-  if name.split('.')[0] not in ('fox','forms2apex'):return None
+  if name.split('.')[0] not in ('fox','forms2apex','fox_source_contract'):return None
   assert name in sources,'UNMEASURED_PURE_READER_DEPENDENCY'
-  return importlib.util.spec_from_loader(name,self,is_package=name in ('fox','forms2apex'))
+  return importlib.util.spec_from_loader(name,self,is_package=name in ('fox','forms2apex','fox_source_contract'))
  def create_module(self,spec):return None
  def exec_module(self,m):
-  path=pathlib.Path('/app/'+m.__name__.replace('.','/')+('/__init__.py' if m.__name__ in ('fox','forms2apex') else '.py'))
+  path=pathlib.Path('/app/'+m.__name__.replace('.','/')+('/__init__.py' if m.__name__ in ('fox','forms2apex','fox_source_contract') else '.py'))
   physical=hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() and not path.is_symlink() else None
   m.__file__=preclaim_module_origin(m.__name__,hashlib.sha256(sources[m.__name__]).hexdigest(),physical)
-  if m.__name__ in ('fox','forms2apex'):m.__path__=[]
+  if m.__name__ in ('fox','forms2apex','fox_source_contract'):m.__path__=[]
   exec(compile(sources[m.__name__],m.__file__,'exec'),m.__dict__)
 sys.meta_path.insert(0,Finder());sys.dont_write_bytecode=True
 from fox import verification_recovery as r
@@ -385,7 +385,8 @@ class Transition:
         inventory=document(self.A.read(absolute(self.new_i['layout']['inventory']['path']),private=True))
         result={}
         for name,expected in inventory['files'].items():
-            for prefix,package in (('fox/fox/','fox'),('converter/forms2apex/','forms2apex')):
+            for prefix,package in (('fox/fox/','fox'),('converter/forms2apex/','forms2apex'),
+                                   ('converter/fox_source_contract/','fox_source_contract')):
                 if name.startswith(prefix) and name.endswith('.py'):
                     tail=name[len(prefix):-3]
                     need('/' not in tail and tail.isidentifier(),'PRECLAIM_PYTHON_NAMESPACE_INVALID')
@@ -394,6 +395,12 @@ class Transition:
                     result[module]={'sha256':expected,'bytes':base64.b64encode(raw).decode()}
         need('fox.verification_recovery' in result and 'forms2apex.native_blueprint' in result,
              'PRECLAIM_TECHNICAL_NAMESPACE_INCOMPLETE')
+        need(all(name in result for name in ('fox_source_contract',
+             'fox_source_contract.intake','fox_source_contract.native_source',
+             'fox_source_contract.project_conversion')),'PRECLAIM_TECHNICAL_NAMESPACE_INCOMPLETE')
+        for tail in ('intake','native_source','project_conversion'):
+            need('fox.'+tail in result and result['fox.'+tail]['sha256']==
+                 result['fox_source_contract.'+tail]['sha256'],'PRECLAIM_TECHNICAL_MIRROR_CHANGED')
         return result
 
     def preclaim_profile(self,fox,pin,baseline,*,stopped=False,retained=None):

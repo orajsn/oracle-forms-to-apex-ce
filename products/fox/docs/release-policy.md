@@ -37,6 +37,21 @@ release, without treating that comparison as technical or business acceptance.
 
 ## Next product increments
 
+### Independently pinned deployment tools
+
+Deployment-only corrections outside the measured application bundle may use
+`deployment/RELEASE.json`, `deployment/CHANGELOG.md` and `fox-deploy-vX.Y.Z` tags.
+Record the exact controller hash and the tested FOX version/bundle. This narrow
+category does not apply to bundled backend, converter, frontend or runtime
+configuration changes, which still require the full product release checklist.
+
+Keep the existing application version, images, installation, frozen source and
+handoff unchanged. Bind the new published tool bytes explicitly in a fresh tool
+directory and transition plan; obtain a fresh successful inspection and all
+normal backup/restore/activation evidence. An old handoff or failed inspection
+cannot attest a corrected controller. Never move an existing application tag or
+claim a deployment-tool test proves a completed conversion.
+
 Developer-only QA tooling can be released independently. The project observer
 uses `qa/product-project-journey/RELEASE.json`, its own changelog and
 `fox-qa-vX.Y.Z` tags. Such a release must report the tested runtime separately
