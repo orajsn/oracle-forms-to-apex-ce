@@ -8,6 +8,24 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.2] - 2026-11-12
+
+### Verify native APEX tree navigation correctly
+
+- Recognize exact source-name navigation anchors exposed as APEX tree items,
+  including labels hidden by the collapsed sidebar, as well as ordinary links.
+- Continue to require one unique observed URL for the exact application and
+  expected page. Preserve origin, expiry, authentication and page-identity
+  checks; do not invent URLs or click hidden controls.
+
+Verification:14 Node tests passed with no skips, including tree/link roles,
+hidden labels, ambiguous targets, foreign apps/origins, wrong pages, non-anchor
+elements and expired requests. A read-only authenticated diagnostic of an actual
+native app confirmed all four expected entries were hidden-label tree items and
+performed zero business POSTs. The previous browser attempt stopped after login,
+before page or record checks; that failure is preserved. This source correction
+is not a successful runtime rerun, deployment or business acceptance.
+
 ## [0.22.1] - 2026-11-12
 
 ### Accept Oracle's empty list-entry name

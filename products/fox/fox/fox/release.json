@@ -1,11 +1,11 @@
 {
-  "version": "0.22.1",
+  "version": "0.22.2",
   "released_on": "2026-11-12",
-  "title": "Accept empty Oracle list-entry identities without guessing",
+  "title": "Recognize native APEX tree navigation during verification",
   "changes": [
-    "Read an Oracle-exported empty ListItemElement name while preserving its exact identity and original content.",
-    "Continue to reject duplicate empty entries, missing-versus-empty identity mismatches and empty names on other Forms objects.",
-    "Preserve source-required native APEX inputs, explicit omissions and all existing review and deterministic import gates."
+    "Recognize source-bound native APEX navigation tree items as well as ordinary links during authenticated runtime verification.",
+    "Keep exact application, page, expiry and unique-target checks; do not invent navigation URLs or relax validation gates.",
+    "Preserve generated required inputs, original source evidence, explicit omissions and separate technical and human acceptance states."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

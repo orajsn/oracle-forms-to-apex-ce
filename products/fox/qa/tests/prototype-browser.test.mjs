@@ -1,7 +1,7 @@
 /** Pure synthetic request checks; importing runner never launches Playwright. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,run,ORIGIN} from '../run-prototype.mjs';
+import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,run,ORIGIN} from '../run-prototype.mjs';
 import {sha256,canonicalQaPlan} from '../lib/contracts.mjs';
 
 const packet=()=>{
@@ -140,4 +140,58 @@ test('negative required probe never ignores a failed no-POST or freshness fence'
   const probe=requiredProbe();
   await assert.rejects(assertAdditionalRequiredInputRejected(probe.page,'P2_FIELD1',probe.submit,
     ()=>{throw Error('Unexpected POST blocked before DML');}),/POST blocked/);
+});
+
+function navigationPage(elements){
+  // Synthetic DOM query model: ensure the actual helper requests both exact
+  // roles including hidden elements, then intersects with real href anchors.
+  function locator(selected){return {
+    selected,
+    or:other=>locator([...new Set([...selected,...other.selected])]),
+    and:other=>locator(selected.filter(element=>other.selected.includes(element))),
+    evaluateAll:async callback=>callback(selected)
+  };}
+  return {
+    getByRole:(role,options)=>{
+      assert.equal(options.exact,true);assert.equal(options.includeHidden,true);
+      return locator(elements.filter(element=>element.role===role&&element.name===options.name));
+    },
+    locator:selector=>{
+      assert.equal(selector,'a[href]');
+      return locator(elements.filter(element=>element.tag==='a'&&element.hasHref));
+    }
+  };
+}
+const navElement=(href,overrides={})=>({tag:'a',hasHref:true,role:'treeitem',name:'SOURCE_BLOCK',hidden:true,href,...overrides});
+const navBlock={name:'SOURCE_BLOCK',sequence:1,source_block_id:'synthetic-block'};
+
+test('source navigation accepts standard hidden APEX treeitems and existing visible links without clicking',async()=>{
+  for(const shape of [{role:'treeitem',hidden:true},{role:'treeitem',hidden:false},{role:'link',hidden:false},{role:'link',hidden:true}]){
+    const value=packet(),href=value.url+'block_1?session=synthetic';
+    assert.equal(await sourceNavigationUrl(navigationPage([navElement(href,shape)]),navBlock,value),href);
+  }
+});
+
+test('source navigation deduplicates the same URL but rejects distinct bound URL collisions',async()=>{
+  const value=packet(),href=value.url+'block_1?session=synthetic';
+  assert.equal(await sourceNavigationUrl(navigationPage([navElement(href),navElement(href,{role:'link'})]),navBlock,value),href);
+  await assert.rejects(sourceNavigationUrl(navigationPage([navElement(href),navElement(value.url+'block_1?session=different')]),navBlock,value),/missing or ambiguous/);
+});
+
+test('source navigation never substitutes foreign apps wrong pages wrong names or non-anchor tree controls',async()=>{
+  const value=packet(),valid=value.url+'block_1';
+  const rejected=[navElement('https://example.test/block_1'),navElement(ORIGIN+'/ords/r/forms2apex_poc/other/block_1'),
+    navElement(value.url+'block_2'),navElement(valid,{name:'SOURCE_BLOCK other'}),
+    navElement(valid,{tag:'div'}),navElement(valid,{hasHref:false}),navElement('javascript:alert(1)'),
+    navElement(ORIGIN+'/ords/f?p=999:1:synthetic'),navElement(ORIGIN+'/ords/f?p=12345:3:synthetic')];
+  for(const element of rejected)
+    await assert.rejects(sourceNavigationUrl(navigationPage([element]),navBlock,value),/missing or ambiguous/);
+  assert.equal(await sourceNavigationUrl(navigationPage([...rejected,navElement(valid)]),navBlock,value),valid);
+});
+
+test('source navigation retains numeric f?p page matching and absolute expiry guards',async()=>{
+  const value=packet(),href=ORIGIN+'/ords/f?p=12345:1:synthetic';
+  assert.equal(await sourceNavigationUrl(navigationPage([navElement(href)]),navBlock,value),href);
+  value.deadline_at_utc='2026-01-01T00:00:00.000Z';
+  await assert.rejects(sourceNavigationUrl(navigationPage([navElement(href)]),navBlock,value),/missing or ambiguous/);
 });

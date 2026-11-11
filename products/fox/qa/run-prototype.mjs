@@ -119,6 +119,22 @@ export async function assertAdditionalRequiredInputRejected(page,itemId,submit,g
     'Additional required input was not rejected');
 }
 
+export async function sourceNavigationUrl(page,block,packet) {
+  // Standard APEX tree navigation uses anchors with role=treeitem, and its
+  // collapsed accessibility state can hide them from a default role query.
+  // Read the exact source-labelled anchor's URL; never click hidden controls.
+  const options={name:block.name,exact:true,includeHidden:true};
+  const anchors=page.getByRole('link',options).or(page.getByRole('treeitem',options))
+    .and(page.locator('a[href]'));
+  const links=await anchors.evaluateAll(items=>items.map(item=>item.href));
+  const candidates=[...new Set(links)].filter(href=>{try{const url=new URL(href);
+    return allowedRequest({url:()=>href,method:()=> 'GET',resourceType:()=> 'document'},packet)
+      &&(url.pathname.toLowerCase().replace(/\/$/,'').endsWith(`/block_${block.sequence}`)
+        ||url.searchParams.get('p')?.split(':')[1]===String(2*block.sequence-1));}catch{return false;}});
+  check(candidates.length===1,'Source-bound navigation link missing or ambiguous');
+  return candidates[0];
+}
+
 export async function run(packet,accounts,chromium,{output='/results',dispatch='/dispatch'}={}) {
   validatePacket(packet);
   const report={...packet.binding,passed:false,authenticated:false,business_pages_tested:false,business_behavior_accepted:false,
@@ -168,12 +184,7 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
     const urls=new Map();
     async function navigate(block){
       if(!urls.has(block.source_block_id)){
-        const links=await page.getByRole('link',{name:block.name,exact:true}).evaluateAll(items=>items.map(item=>item.href));
-        const candidates=[...new Set(links)].filter(href=>{try{const url=new URL(href);
-          return allowedRequest({url:()=>href,method:()=> 'GET',resourceType:()=> 'document'},packet)
-            &&(url.pathname.toLowerCase().replace(/\/$/,'').endsWith(`/block_${block.sequence}`)
-              ||url.searchParams.get('p')?.split(':')[1]===String(2*block.sequence-1));}catch{return false;}});
-        check(candidates.length===1,'Source-bound navigation link missing or ambiguous');urls.set(block.source_block_id,candidates[0]);
+        urls.set(block.source_block_id,await sourceNavigationUrl(page,block,packet));
       }
       await act(()=>page.goto(urls.get(block.source_block_id),{waitUntil:'domcontentloaded'}));await settled();
       await identity(2*block.sequence-1);await account();
