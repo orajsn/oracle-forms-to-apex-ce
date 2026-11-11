@@ -1,11 +1,11 @@
 {
-  "version": "0.22.2",
+  "version": "0.22.3",
   "released_on": "2026-11-12",
-  "title": "Recognize native APEX tree navigation during verification",
+  "title": "Exercise native APEX report controls reliably",
   "changes": [
-    "Recognize source-bound native APEX navigation tree items as well as ordinary links during authenticated runtime verification.",
-    "Keep exact application, page, expiry and unique-target checks; do not invent navigation URLs or relax validation gates.",
-    "Preserve generated required inputs, original source evidence, explicit omissions and separate technical and human acceptance states."
+    "Open the native APEX Report submenu by clicking, then wait for unique visible reset controls during runtime verification.",
+    "Record a bounded static reset-step failure code for operators without exposing credentials or browser contents.",
+    "Preserve exact target, expiry, validation, source evidence and separate technical and human acceptance checks."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

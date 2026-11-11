@@ -8,6 +8,23 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.3] - 2026-11-12
+
+### Use the actual APEX Report submenu interaction
+
+- Click the Report submenu instead of relying on hover. Wait for each reset
+  control to be visible and unique, checking the execution fence before clicks.
+- Preserve the request allowlist, target checks and existing confirmation step.
+  On failure, retain only a static reset-phase/error code for operators, never
+  raw browser errors, credentials or page contents.
+
+Verification:17 Node tests and 62 adapter tests passed without skips. A read-only
+authenticated diagnostic showed that hover left Reset hidden while clicking
+Report exposed it. The previous live test passed navigation, report rendering,
+column checks and search, then stopped before any business record write. That
+failed attempt remains preserved. Confirmation, full form runtime and deployment
+still need their actual checks; this source release does not claim them complete.
+
 ## [0.22.2] - 2026-11-12
 
 ### Verify native APEX tree navigation correctly

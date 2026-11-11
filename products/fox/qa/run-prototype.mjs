@@ -135,6 +135,22 @@ export async function sourceNavigationUrl(page,block,packet) {
   return candidates[0];
 }
 
+export async function resetNativeReport(page,{act,settled,onPhase=()=>{}}) {
+  async function control(role,name){
+    const locator=page.getByRole(role,{name,exact:true});
+    await locator.waitFor({state:'visible'});
+    check(await locator.count()===1,'Native report reset control missing or ambiguous');
+    return locator;
+  }
+  onPhase('RESET_ACTIONS');const actions=await control('button','Actions');await act(()=>actions.click());
+  // Standard APEX menu submenus are activated by click; hover can leave the
+  // Reset entry hidden even though the Report menu item is visible.
+  onPhase('RESET_REPORT_SUBMENU');const report=await control('menuitem','Report');await act(()=>report.click());
+  onPhase('RESET_MENUITEM');const reset=await control('menuitem','Reset');await act(()=>reset.click());
+  onPhase('RESET_CONFIRMATION');const apply=await control('button','Apply');await act(()=>apply.click());
+  await apply.waitFor({state:'hidden'});onPhase('RESET_SETTLE');await settled();
+}
+
 export async function run(packet,accounts,chromium,{output='/results',dispatch='/dispatch'}={}) {
   validatePacket(packet);
   const report={...packet.binding,passed:false,authenticated:false,business_pages_tested:false,business_behavior_accepted:false,
@@ -204,10 +220,13 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       await identity(2*block.sequence-1);
     }
     async function reset(){
-      await act(()=>page.getByRole('button',{name:'Actions',exact:true}).click());
-      await act(()=>page.getByRole('menuitem',{name:'Report',exact:true}).hover());
-      await act(()=>page.getByRole('menuitem',{name:'Reset',exact:true}).click());
-      const apply=page.getByRole('button',{name:'Apply',exact:true});await act(()=>apply.click());await apply.waitFor({state:'hidden'});await settled();
+      let phase='RESET_ACTIONS';
+      try{await resetNativeReport(page,{act,settled,onPhase:value=>{phase=value;}});}
+      catch(error){
+        durable(path.join(dispatch,'reset-failure.json'),{scope:'fox-prototype-reset-failure-v1',
+          phase,error_code:'RESET_UI_STEP_FAILED'});
+        throw error;
+      }
     }
     async function items(block,formPage){
       const expected=block.fields.filter(field=>formPage?field.in_edit_form:true).map(field=>`P${formPage??2*block.sequence-1}_${field.name}`);

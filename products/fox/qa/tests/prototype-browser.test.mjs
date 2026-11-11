@@ -1,7 +1,7 @@
 /** Pure synthetic request checks; importing runner never launches Playwright. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,run,ORIGIN} from '../run-prototype.mjs';
+import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,resetNativeReport,run,ORIGIN} from '../run-prototype.mjs';
 import {sha256,canonicalQaPlan} from '../lib/contracts.mjs';
 
 const packet=()=>{
@@ -194,4 +194,49 @@ test('source navigation retains numeric f?p page matching and absolute expiry gu
   assert.equal(await sourceNavigationUrl(navigationPage([navElement(href)]),navBlock,value),href);
   value.deadline_at_utc='2026-01-01T00:00:00.000Z';
   await assert.rejects(sourceNavigationUrl(navigationPage([navElement(href)]),navBlock,value),/missing or ambiguous/);
+});
+
+function resetPage({badName=null,badCount=0}={}){
+  const clicks=[],waits=[],phases=[];let settled=0,guards=0;
+  const page={getByRole:(role,{name,exact})=>{
+    assert.equal(exact,true);
+    const expectedRole=['Actions','Apply'].includes(name)?'button':'menuitem';assert.equal(role,expectedRole);
+    return {
+      waitFor:async({state})=>{
+        waits.push(name+':'+state);
+        if(name==='Report')assert.ok(clicks.includes('Actions'));
+        if(name==='Reset')assert.ok(clicks.includes('Report'),'Report must be clicked before Reset becomes visible');
+        if(name==='Apply')assert.ok(clicks.includes('Reset'));
+      },
+      count:async()=>name===badName?badCount:1,
+      click:async()=>{clicks.push(name);},
+      hover:async()=>{throw Error('Hover must not be used to activate the Report submenu');}
+    };
+  }};
+  return {page,clicks,waits,phases,options:{act:async action=>{guards++;return action();},
+    settled:async()=>{settled++;},onPhase:phase=>phases.push(phase)},observed:()=>({settled,guards})};
+}
+
+test('native report reset clicks Report and waits for visible unique Reset before confirmation',async()=>{
+  const value=resetPage();await resetNativeReport(value.page,value.options);
+  assert.deepEqual(value.clicks,['Actions','Report','Reset','Apply']);
+  assert.deepEqual(value.waits,['Actions:visible','Report:visible','Reset:visible','Apply:visible','Apply:hidden']);
+  assert.deepEqual(value.observed(),{settled:1,guards:4});
+  assert.deepEqual(value.phases,['RESET_ACTIONS','RESET_REPORT_SUBMENU','RESET_MENUITEM','RESET_CONFIRMATION','RESET_SETTLE']);
+});
+
+test('native report reset rejects every missing or ambiguous control without a fallback',async()=>{
+  for(const name of ['Actions','Report','Reset','Apply'])for(const count of [0,2]){
+    const value=resetPage({badName:name,badCount:count});
+    await assert.rejects(resetNativeReport(value.page,value.options),/missing or ambiguous/);
+    assert.equal(value.clicks.includes(name),false);assert.equal(value.observed().settled,0);
+  }
+});
+
+test('native report reset never ignores a revoked target or write fence',async()=>{
+  const value=resetPage();let guards=0;
+  value.options.act=async action=>{if(++guards===3)throw Error('SYNTHETIC_TARGET_REVOKED');return action();};
+  await assert.rejects(resetNativeReport(value.page,value.options),/SYNTHETIC_TARGET_REVOKED/);
+  assert.deepEqual(value.clicks,['Actions','Report']);assert.equal(value.observed().settled,0);
+  assert.equal(value.phases.at(-1),'RESET_MENUITEM');
 });
