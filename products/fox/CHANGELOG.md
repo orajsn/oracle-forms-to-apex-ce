@@ -27,6 +27,19 @@ zero rows only after the matching refresh event. The old already-idle check was
 too early. This verifies the cause and bounded source correction, not a complete
 runtime rerun or hosted conversion. Business acceptance remains separate.
 
+Post-release verification, 12 November 2026: the exact published 0.22.5 QA code
+completed an actual authenticated manual-lab run in 45.305 seconds. All seven
+content pages passed. Each of three native forms passed Create, Update, reread
+and one required-input client-rejection probe; report search and control items
+also passed. Separate read-only database checks confirmed all three updated
+synthetic rows and preserved the earlier test row. Independent evidence review
+confirmed the original process exit and source/import/artifact bindings.
+
+This is a developer-authored structural candidate from a real Forms module,
+not an OPAF-reviewed or automatic hosted conversion. The runtime duration excludes
+extraction, inference and import. Clean-schema portability, original business
+behavior and human acceptance are not established. No hosted cutover was made.
+
 ## [0.22.4] - 2026-11-12
 
 ### Wait for native saves and keep retained test records
