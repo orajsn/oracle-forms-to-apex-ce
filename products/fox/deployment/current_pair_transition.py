@@ -156,10 +156,11 @@ with store._db(False) as db:
    run=dict(db.execute('SELECT * FROM runs WHERE id=?',(job,)).fetchone())
    assert value['admission']['blocks_admission'] is True and value['admission']['retry_eligible'] is False
    if job in paired:
-    assert value['preservation_state']=='preclaim_validate_history'
+    state='claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
+    assert value['preservation_state']==state
     preserved=m.validate_preclaim_pair(store.database,db,run,paired[job]['readback'],paired[job]['expected'])
     assert value['preserved']==preserved
-    preservation[job]={'state':'preclaim_validate_history','preserved':preserved}
+    preservation[job]={'state':state,'preserved':preserved}
    else:
     assert value['preservation_state']=='closed_provider_history' and m.terminal_closed_provider_preservation(store.database,db,run) is True
     preservation[job]='closed_provider_history'
@@ -460,7 +461,8 @@ class Transition:
             'request_sha256','source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256',
             'manifest_sha256','original_handler'},'PRECLAIM_REVIEWED_BASELINE_INVALID')
         need(type(baseline['schema_version'])is int and baseline['schema_version']==1
-            and baseline['scope']=='fox-reviewed-preclaim-terminal-baseline-v1'
+            and baseline['scope'] in ('fox-reviewed-preclaim-terminal-baseline-v1',
+                'fox-reviewed-claimed-validation-terminal-baseline-v1')
             and type(baseline['job_id'])is str and re.fullmatch('fox-[a-f0-9]{20}',baseline['job_id'])
             and all(type(baseline[k])is str and SHA.fullmatch(baseline[k]) for k in ('request_sha256',
                 'source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256','manifest_sha256')),
@@ -507,6 +509,8 @@ class Transition:
                 need(len(rows)==2 and rows[1].strip()=='1','PRECLAIM_RECEIVER_PROCESS_UNCERTAIN')
             return items
         first_pins=current_pair();first=collect()
+        claimed=baseline['scope']=='fox-reviewed-claimed-validation-terminal-baseline-v1'
+        need(claimed == ('receiver_claims' in first),'CLAIMED_VALIDATION_BASELINE_SCOPE_CHANGED')
         # NEW candidate modules run only in a separate fresh child. Never patch
         # the serving old namespace, source files, model records or intent.
         retained_profile=(getattr(self,'_preclaim_live_proof',{}).get('profile') if stopped else None)
@@ -527,10 +531,15 @@ class Transition:
                 input=cb(proof_packet),capture_output=True,timeout=240)
             need(run.returncode==0 and not run.stderr.strip() and 0<len(run.stdout)<=2_000_000,'PRECLAIM_PURE_TECHNICAL_READ_FAILED')
             proof=document(run.stdout)
-            run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_BARRIER],
-                input=cb({'job_id':baseline['job_id'],'target_profile_sha256':baseline['target_profile_sha256']}),capture_output=True,timeout=180)
-            need(run.returncode==0 and not run.stderr.strip(),'PRECLAIM_SERIALIZATION_BARRIER_FAILED')
-            barrier_result=document(run.stdout);stopped_writer=None
+            if claimed:
+                barrier_result={'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate',
+                    'job_id':baseline['job_id'],'maintenance_only':True,'source_review_authorized':False}
+            else:
+                run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_BARRIER],
+                    input=cb({'job_id':baseline['job_id'],'target_profile_sha256':baseline['target_profile_sha256']}),capture_output=True,timeout=180)
+                need(run.returncode==0 and not run.stderr.strip(),'PRECLAIM_SERIALIZATION_BARRIER_FAILED')
+                barrier_result=document(run.stdout)
+            stopped_writer=None
         second=collect();second_pins=current_pair();lease.require_active(self.old.release,journal.root)
         need(self.preclaim_profile(self.A.inspect_container(pins['fox']['id']),pins['fox'],baseline,
             stopped=stopped,retained=retained_profile)==profile,'PRECLAIM_FOCUSED_PROFILE_CHANGED_DURING_PROOF')
@@ -556,13 +565,17 @@ class Transition:
             'original_terminal_sha256':ref['sha256'],'technical_source_sha256':self.new_i['layout']['inventory']['sha256'],'mode':'transition',
             'runtime_state':'stopped' if stopped else 'running',
             'stopped_writer_sha256':model_hash(stopped_writer) if stopped else None}
-        readback={'schema_version':1,'scope':reader.PRECLAIM_MAINTENANCE_SCOPE,'observed_at_utc':observed.isoformat(),
+        technical={**proof['technical'],'receiver_manifest_raw_sha256':second['receiver_manifest_raw_sha256']}
+        readback={'schema_version':1,'scope':reader.CLAIMED_VALIDATION_MAINTENANCE_SCOPE if claimed else reader.PRECLAIM_MAINTENANCE_SCOPE,'observed_at_utc':observed.isoformat(),
             'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),'binding':expected,
             **{k:second[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
-            'technical':{**proof['technical'],'receiver_manifest_raw_sha256':second['receiver_manifest_raw_sha256']},
+            **({'receiver_claims':second['receiver_claims']} if claimed else {}),
+            'technical':technical,
             'producer':{'fox_worker':'stopped' if stopped else 'terminal_idle','receiver_servers':0 if stopped else 1,
                 'receiver_operations':0,'unknown_producers':0,'original_terminal_sha256':ref['sha256']},
-            'serialization_barrier':barrier,'gateway_witness':None,'stopped_writer':stopped_writer}
+            'serialization_barrier':barrier,
+            'gateway_witness':reader.claimed_validation_observation(second,technical) if claimed else None,
+            'stopped_writer':stopped_writer}
         return {baseline['job_id']:{'readback':readback,'expected':expected}}
 
     def data(self,*,stopped=False,new=False,lease=None):

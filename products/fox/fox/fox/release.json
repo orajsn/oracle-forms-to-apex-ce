@@ -1,11 +1,11 @@
 {
-  "version": "0.21.3",
+  "version": "0.21.4",
   "released_on": "2026-11-11",
-  "title": "Retain export files in writable storage",
+  "title": "Preserve stopped validation history during upgrades",
   "changes": [
-    "Write private APEX export attempts inside the existing writable, persistent jobs storage instead of its protected parent.",
-    "Retain failed and uncertain export files for inspection without publishing an unverified package or repeating the attempt.",
-    "Keep export identity, runtime, SQLcl validation and byte-integrity checks unchanged."
+    "Recognize an exact stopped validation claim for read-only maintenance preservation without treating it as completed validation.",
+    "Bind paired source and receiver files, continuation history and original transition provenance during upgrade and startup checks.",
+    "Keep ordinary admission and retry permissions unchanged; preservation does not run models, import applications or grant business acceptance."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

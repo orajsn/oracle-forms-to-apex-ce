@@ -39,18 +39,23 @@ for row in db.execute("SELECT * FROM runs WHERE state='ATTENTION' AND artifact I
  assert target['target_profile_sha256']==value['snapshot']['prototype']['target_profile_sha256']
  # Only after maintenance-specific stopped-owner/source/proof checks. This
  # constructs the trusted existing client; it grants no ordinary admission.
- client=configured_download_client(target['target_profile_sha256'])
- adapter=PrototypeHttpConverterAdapter(job,client)
- first_witness=adapter.validate_preclaim_witness(value['request'])
- technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'])
- witness=adapter.validate_preclaim_witness(value['request'])
- assert first_witness==witness
- intent=value['documents']['prototype-transport/authority-intent.json']
- check_witness(value['request'],witness,intent['manifest_sha256'],target['target_profile'])
- assert adapter._get(adapter.path+'/stages/validate') is None
+ claimed='prototype-pipeline/validate-preclaim-continuation.json' in value['documents']
+ if claimed:
+  technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'])
+  witness=None
+ else:
+  client=configured_download_client(target['target_profile_sha256'])
+  adapter=PrototypeHttpConverterAdapter(job,client)
+  first_witness=adapter.validate_preclaim_witness(value['request'])
+  technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'])
+  witness=adapter.validate_preclaim_witness(value['request'])
+  assert first_witness==witness
+  intent=value['documents']['prototype-transport/authority-intent.json']
+  check_witness(value['request'],witness,intent['manifest_sha256'],target['target_profile'])
+  assert adapter._get(adapter.path+'/stages/validate') is None
  assert r.preclaim_tree(job)==value['tree']
  result[row['id']]={'technical':technical,'request':value['request'],'witness':witness,
-   'target_profile_sha256':target['target_profile_sha256']}
+   'target_profile_sha256':target['target_profile_sha256'],**({'claimed_validation':True} if claimed else {})}
 assert db.total_changes==0
 print(json.dumps({'jobs':result,'collector':r.preclaim_collector_source()},sort_keys=True))
 '''
@@ -172,13 +177,15 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
             if protected['preservation_allowed']:
                 if paired is not None:
                     run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
+                    state = ('claimed_validation_history' if paired['readback']['scope'] ==
+                        recovery_module.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history')
                     _need(value['blocks_admission'] is True and value['retry_eligible'] is False
-                        and protected['preservation_state'] == 'preclaim_validate_history' and run is not None,
+                        and protected['preservation_state'] == state and run is not None,
                         'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
                     checked = recovery_module.validate_preclaim_pair(root/'fox.sqlite3',db,dict(run),
                         paired['readback'],paired['expected'])
                     _need(checked == protected['preserved'],'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
-                    preservation[job_id] = {'state':'preclaim_validate_history','preserved':checked}
+                    preservation[job_id] = {'state':state,'preserved':checked}
                     eligibility[job_id] = value
                     continue
                 # Independently reopen the sealed lineage; a projected ready
@@ -418,6 +425,106 @@ def _host_preclaim_collect(code,packet):
     return json.loads(response.stdout)
 
 
+def _host_claimed_provenance(v, infrastructure):
+    """Read only the current release's retained transition, never historical code.
+
+    The digest below correlates the actual outer HeldOperatorLock; it does not
+    replace RetirementArchive.require_admission_under_lock's before/after checks.
+    """
+    import os, stat
+    h=lambda raw:hashlib.sha256(raw).hexdigest()
+    captures={}
+    def unique(rows):
+        value={}
+        for key,item in rows:
+            guard(key not in value);value[key]=item
+        return value
+    def read(path, expected=None, private=True):
+        path=Path(path)
+        guard(path.is_absolute() and path.resolve(strict=True)==path)
+        for parent in (path,*path.parents):guard(not parent.is_symlink())
+        info=path.stat()
+        guard(stat.S_ISREG(info.st_mode) and info.st_nlink==1 and info.st_uid==os.getuid()
+              and not info.st_mode & (0o077 if private else 0o022) and 0<info.st_size<=2_000_000)
+        raw=path.read_bytes();after=path.stat()
+        guard((info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns)==
+              (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns)
+              and (expected is None or h(raw)==expected))
+        captures[str(path)]={'sha256':h(raw),'device':info.st_dev,'inode':info.st_ino}
+        return json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:guard(False))
+    def ref(value):
+        guard(type(value)is dict and set(value)=={'path','sha256'}
+            and re.fullmatch('[a-f0-9]{64}',value['sha256']))
+        return read(value['path'],value['sha256'])
+    release=v['release_sha256'];guard(re.fullmatch('[a-f0-9]{64}',release))
+    plan=read(Path('/home/opc/.local/share/fox-project-transitions')/release/'plan.json')
+    guard(plan['schema_version']==2 and plan['scope']=='fox-current-pair-transition-v2')
+    new=ref(plan['new_installation']);old=ref(plan['old_installation'])
+    guard(new['release']['sha256']==release and new['admission']['sha256']==v['configuration_sha256']
+          and new['provider']['sha256']==v['provider_configuration_sha256'])
+    guard(ref(new['release'])==v['manifest'])
+    admission=ref(new['admission'])
+    guard(admission['infrastructure']==infrastructure)
+    provider=ref(new['provider'])
+    inventory=ref(new['layout']['inventory'])
+    guard(plan['recovery']=={'path':str(Path(new['layout']['release_root'])/'fox/fox/verification_recovery.py'),
+        'sha256':v['manifest']['project']['queue_modules']['verification_recovery.py']}
+        and inventory['files']['fox/fox/verification_recovery.py']==plan['recovery']['sha256'])
+    baseline=ref(plan['preclaim_preservation']);old_admission=ref(old['admission'])
+    guard(set(baseline)=={'schema_version','scope','job_id','request_sha256','source_binding',
+        'target_profile_sha256','fox_tree_sha256','receiver_tree_sha256','manifest_sha256','original_handler'}
+        and type(baseline['schema_version'])is int and baseline['schema_version']==1
+        and baseline['scope']=='fox-reviewed-claimed-validation-terminal-baseline-v1')
+    terminal=baseline['original_handler'];pin=old_admission['infrastructure']['forms2apex-mcp']
+    guard(set(terminal)=={'method','stage','status','container_id','completed_at_utc'}
+        and terminal['method']=='POST' and terminal['stage']=='validate' and type(terminal['status'])is int
+        and terminal['status']==409 and terminal['container_id']==pin['id'])
+    when=datetime.fromisoformat(terminal['completed_at_utc'].replace('Z','+00:00'))
+    guard(when.tzinfo is not None and when<=datetime.now(timezone.utc))
+    response=subprocess.run(['podman','inspect',pin['id']],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
+    item=json.loads(response.stdout)[0];state=item['State'];image=item['Image']
+    guard(item['Id']==pin['id'] and item['Name'].lstrip('/')=='forms2apex-pre-upgrade-'+release[:16]
+        and (image if image.startswith('sha256:') else 'sha256:'+image)==pin['image']
+        and state['Running'] is False and type(state['Pid'])is int and state['Pid']==0
+        and state['Status'] in ('stopped','exited')
+        and datetime.fromisoformat(state['FinishedAt'].replace('Z','+00:00'))>=when)
+    profile_path=Path(new['layout']['release_root'])/'deployment/target-profile.jsn-project-v2.json'
+    profile=read(profile_path,inventory['files']['deployment/target-profile.jsn-project-v2.json'],private=False)
+    guard(profile==provider['target_profile'])
+    projection=_host_claimed_execution_target(profile)
+    response=subprocess.run(['podman','inspect',infrastructure['forms2apex-mcp']['id']],
+        stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
+    current=json.loads(response.stdout)[0]
+    mounts=[m for m in current['Mounts'] if m['Destination']=='/run/fox-target/profile.json']
+    guard(current['Id']==infrastructure['forms2apex-mcp']['id'] and len(mounts)==1
+        and mounts[0]['Source']==str(profile_path) and mounts[0]['Type']=='bind' and mounts[0]['RW'] is False
+        and 'F2A_TARGET_PROFILE_PATH=/run/fox-target/profile.json' in current['Config']['Env'])
+    canonical=lambda value:json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
+    return {'baseline':baseline,'original_terminal_sha256':plan['preclaim_preservation']['sha256'],
+        'captures':captures,'old_converter':item,'current_converter':current,
+        'converter_target_sha256':h(canonical(profile)),'execution_target_sha256':h(canonical(projection))}
+
+
+def _host_claimed_execution_target(profile):
+    """Wire projection only; full focused/converter profile pins stay separate."""
+    for name,fields in {'oci':{'compartment_id','database_id','instance_id','region'},
+        'database':{'db_name','session_user','parsing_schema'},
+        'apex':{'workspace','workspace_id','ords_origin','ords_base_path'},
+        'sqlcl':{'saved_connection'},'tested_versions':{'apex','sqlcl','apexlang_mmd','opaf'}}.items():
+        guard(type(profile[name])is dict and set(profile[name])==fields
+            and all(type(value)is str and 0<len(value)<=2048 for value in profile[name].values()))
+    scope=profile['scope']
+    guard(profile['active']is True and scope['data_mode']=='synthetic_test_only'
+        and scope['existing_resources_only']is True and scope['customer_deployment_authorized']is False
+        and scope['supported_operations']==['query','insert','update'])
+    return {'schema_version':1,'active':True,**{key:profile[key] for key in ('oci','database','apex','sqlcl')},
+        'tested_versions':{key:profile['tested_versions'][key] for key in ('apex','sqlcl','apexlang_mmd')},
+        'scope':{key:scope[key] for key in ('data_mode','existing_resources_only',
+            'customer_deployment_authorized','supported_operations')}}
+
+
 def _host_preclaim(v,fox,infrastructure,startup_source):
     """NEW startup only; internally collected evidence, never request flags."""
     # Fixed legacy JSN roles, matching activate_project_release's approved
@@ -457,30 +564,54 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
         for name,item in pins.items()}
     h=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
     paired,captures={},{}
+    provenance=(_host_claimed_provenance(v,infrastructure)
+        if any(entry.get('claimed_validation') is True for entry in value['jobs'].values()) else None)
     for job,entry in value['jobs'].items():
         guard(re.fullmatch('fox-[a-f0-9]{20}',job))
         packet={'fox_data':'/home/opc/fox/data','receiver_jobs':str(receiver_root),'job_id':job}
         first=_host_preclaim_collect(value['collector'],packet)
         guard(h(first['fox_tree'])==entry['technical']['fox_tree_sha256'])
+        claimed=entry.get('claimed_validation') is True
+        guard(claimed==('receiver_claims' in first))
         witness=entry['witness'];observed=datetime.now(timezone.utc)
+        if claimed:
+            baseline=provenance['baseline']
+            guard(baseline['job_id']==job and baseline['request_sha256']==entry['technical']['request_sha256']
+                and baseline['source_binding']==entry['request']['source_binding']
+                and baseline['target_profile_sha256']==entry['target_profile_sha256']
+                and baseline['fox_tree_sha256']==h(first['fox_tree'])
+                and baseline['receiver_tree_sha256']==h(first['receiver_tree'])
+                and baseline['manifest_sha256']==first['receiver_manifest']['manifest_sha256']
+                and provenance['execution_target_sha256']==entry['technical']['execution_target_sha256'])
+            fields={'schema_version':1,'scope':'fox-claimed-validation-maintenance-witness-v1',
+                'fox_tree_sha256':h(first['fox_tree']),'receiver_tree_sha256':h(first['receiver_tree']),
+                'request_sha256':entry['technical']['request_sha256'],
+                'execution_target_sha256':entry['technical']['execution_target_sha256'],
+                'source_review_authorized':False,'maintenance_only':True}
+            witness={**fields,'witness_sha256':h(fields)}
+        terminal_pin=provenance['original_terminal_sha256'] if claimed else witness['witness_sha256']
         expected={'job_id':job,'request_sha256':entry['technical']['request_sha256'],
             'source_binding':entry['request']['source_binding'],'target_profile_sha256':entry['target_profile_sha256'],
             'pair_sha256':h(pair),'scope_sha256':h(p['cli_scope']),
             'lease_sha256':h({'release':v['release_sha256'],'configuration':v['configuration_sha256']}),
-            'original_terminal_sha256':witness['witness_sha256'],'technical_source_sha256':v['manifest']['images']['fox'][7:],
+            'original_terminal_sha256':terminal_pin,'technical_source_sha256':v['manifest']['images']['fox'][7:],
             'mode':'startup','runtime_state':'running','stopped_writer_sha256':None}
-        paired[job]={'expected':expected,'readback':{'schema_version':1,'scope':'fox-paired-preclaim-maintenance-read-v1',
+        paired[job]={'expected':expected,'readback':{'schema_version':1,'scope':
+            'fox-paired-claimed-validation-maintenance-read-v1' if claimed else 'fox-paired-preclaim-maintenance-read-v1',
             'observed_at_utc':observed.isoformat(),'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),
             'binding':expected,**{k:first[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
+            **({'receiver_claims':first['receiver_claims']} if claimed else {}),
             'technical':{**entry['technical'],'receiver_manifest_raw_sha256':first['receiver_manifest_raw_sha256']},
             'producer':{'fox_worker':'terminal_idle','receiver_servers':1,'receiver_operations':0,'unknown_producers':0,
-                'original_terminal_sha256':witness['witness_sha256']},
+                'original_terminal_sha256':terminal_pin},
             'serialization_barrier':{'kind':'current_serialized_read','observed_at_utc':observed.isoformat(),
                 'binding':{'pair_sha256':h(pair),'fox_tree_sha256':h(first['fox_tree']),
                     'receiver_tree_sha256':h(first['receiver_tree'])},
-                'result':{'method':'GET','stage':'validate','job_id':job,'status':404}},
+                'result':({'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate','job_id':job,
+                    'maintenance_only':True,'source_review_authorized':False} if claimed else
+                    {'method':'GET','stage':'validate','job_id':job,'status':404})},
             'gateway_witness':witness,'stopped_writer':None}}
-        captures[job]=(value['collector'],packet,first)
+        captures[job]=(value['collector'],packet,first,provenance if claimed else None,v)
     _host_preclaim_health()
     return paired,captures,pair
 
@@ -488,8 +619,9 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
 def _host_preclaim_recheck(captures,infrastructure,pair):
     if not captures:return
     _host_preclaim_health()
-    for code,packet,first in captures.values():
+    for code,packet,first,provenance,v in captures.values():
         guard(_host_preclaim_collect(code,packet)==first)
+        if provenance is not None:guard(_host_claimed_provenance(v,infrastructure)==provenance)
     for name,expected in pair.items():
         response=subprocess.run(['podman','inspect',infrastructure[name]['id']],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
         guard(response.returncode==0 and not response.stderr.strip());item=json.loads(response.stdout)[0]
@@ -524,7 +656,8 @@ def host_source(current_release, configuration_sha256, infrastructure):
         " result.update(inventory=inventory_after,observed_at_utc=datetime.now(timezone.utc).isoformat())\n" + after, 1)
     source = source.replace('0<len(r.stdout)<=65536', '0<len(r.stdout)<=2000000', 1)
     source = 'from pathlib import Path\nfrom datetime import datetime,timezone,timedelta\n' + '\n'.join(inspect.getsource(item) for item in
-        (_host_inventory,_host_preclaim_health,_host_preclaim_collect,_host_preclaim,_host_preclaim_recheck)) + '\n' + source
+        (_host_inventory,_host_preclaim_health,_host_preclaim_collect,_host_claimed_execution_target,
+            _host_claimed_provenance,_host_preclaim,_host_preclaim_recheck)) + '\n' + source
     source=source.replace("stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120)",
                           "stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=240)")
     compile(source, '<retirement-host>', 'exec')

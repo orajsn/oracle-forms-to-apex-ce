@@ -2938,6 +2938,54 @@ def terminal_closed_provider_preservation(database, db, run):
 
 
 PRECLAIM_MAINTENANCE_SCOPE = 'fox-paired-preclaim-maintenance-read-v1'
+CLAIMED_VALIDATION_MAINTENANCE_SCOPE = 'fox-paired-claimed-validation-maintenance-read-v1'
+
+
+def claimed_validation_observation(collected, technical):
+    """Typed collector-derived maintenance witness. Never execution authority."""
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    value = {'schema_version':1,'scope':'fox-claimed-validation-maintenance-witness-v1',
+        'fox_tree_sha256':hashed(collected['fox_tree']),
+        'receiver_tree_sha256':hashed(collected['receiver_tree']),
+        'request_sha256':technical['request_sha256'],
+        'execution_target_sha256':technical['execution_target_sha256'],
+        'source_review_authorized':False,'maintenance_only':True}
+    return {**value,'witness_sha256':hashed(value)}
+
+
+def claimed_validation_record(job, snapshot, documents, tree):
+    """Structural durable consent/consumed-claim check; never a current grant."""
+    import math
+    hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
+        ensure_ascii=False, allow_nan=False).encode())
+    record = documents['prototype-pipeline/validate-preclaim-continuation.json']
+    keys = {'schema_version','scope','job_id','project_id','snapshot_sha256','source_hash',
+        'source_binding','target_profile_sha256','owner','approved_at','approvals','before_files',
+        'request','witness','checkpoint_sha256'}
+    _need(type(record) is dict and set(record) == keys and type(record['schema_version']) is int
+        and record['schema_version'] == 1 and record['scope'] == 'fox-prototype-validate-preclaim-continuation-v1'
+        and record['job_id'] == job.name and record['project_id'] == snapshot['project_id']
+        and record['snapshot_sha256'] == tree['files']['source-snapshot.json']['sha256']
+        and record['owner'] == snapshot['approvals']['owner'] and record['source_hash'] == snapshot['source_hash']
+        and record['source_binding'] == snapshot['prototype']['source_binding']
+        and record['target_profile_sha256'] == snapshot['prototype']['target_profile_sha256']
+        and type(record['approved_at']) in (int,float) and math.isfinite(record['approved_at']) and record['approved_at'] > 0
+        and record['approvals'] == {'redacted_source':True,'external_ai':True,'synthetic_prototype':True}
+        and all(v is True for v in record['approvals'].values())
+        and hashed(record['request']) == hashed(preclaim_request(job))
+        and record['checkpoint_sha256'] == hashed({'scope':record['scope'],'before_files':record['before_files'],
+            'request':record['request'],'witness':record['witness']})
+        and documents.get('prototype-pipeline/validate-preclaim-attempt.json') == {
+            'record_sha256':hashed(record),'request_sha256':hashed(record['request']),
+            'witness_sha256':record['witness'].get('witness_sha256')}, 'CLAIMED_VALIDATION_RECORD_CHANGED')
+    _need(type(record['before_files']) is dict and record['before_files'], 'CLAIMED_VALIDATION_HISTORY_REQUIRED')
+    for name, pin in record['before_files'].items():
+        _need(type(name) is str and _sha(pin), 'CLAIMED_VALIDATION_HISTORY_CHANGED')
+        matches = [info for path,info in tree['files'].items() if path == name or
+            name == 'prototype-result.json' and path.startswith('prototype-results/') and path.endswith('.json')]
+        _need(any(info['sha256'] == pin for info in matches), 'CLAIMED_VALIDATION_HISTORY_CHANGED')
+    return record
 
 
 def preclaim_tree(root):
@@ -3008,9 +3056,12 @@ fox=Path(p['fox_data'])/'jobs'/p['job_id']; receiver=Path(p['receiver_jobs'])/p[
 before={'fox_tree':preclaim_tree(fox),'receiver_tree':preclaim_tree(receiver)}
 manifest_path=receiver/'prototype-converter/authority-manifest.json'
 manifest_raw=manifest_path.read_bytes(); manifest=_load(manifest_raw,2000000)
+claims={name:__import__('base64').b64encode((receiver/'prototype-converter'/name).read_bytes()).decode('ascii')
+ for name in ('validate-request.json','validate-intent.json','snapshot.json')
+ if (receiver/'prototype-converter'/name).exists()}
 after={'fox_tree':preclaim_tree(fox),'receiver_tree':preclaim_tree(receiver)}
 assert before==after
-print(json.dumps({**after,'receiver_manifest':manifest,
+print(json.dumps({**after,'receiver_manifest':manifest,**({'receiver_claims':claims} if claims else {}),
  'receiver_manifest_raw_sha256':hashlib.sha256(manifest_raw).hexdigest()},sort_keys=True))
 ''')
 
@@ -3054,6 +3105,9 @@ def preclaim_fox_lineage(database, db, run):
                   'PRECLAIM_LATER_LEDGER_PRESENT')
     documents = {name: _load((job / name).read_bytes(), 20_000_000)
                  for name in tree['files'] if name.endswith('.json')}
+    claimed = 'prototype-pipeline/validate-preclaim-continuation.json' in documents
+    if claimed:
+        record = claimed_validation_record(job, snapshot, documents, tree)
     cf_name = 'prototype-pipeline/candidate-format-continuation.json'
     _need(cf_name in documents, 'PRECLAIM_CF_LINEAGE_REQUIRED')
     cf = documents[cf_name]
@@ -3094,6 +3148,9 @@ def preclaim_fox_lineage(database, db, run):
                 ':dsc-identity-repair:000001:' + hashed(value), value['approved_at']))
     expected_events.append((owner[0], 'approved_prototype_candidate_format_continuation',
         run['id'] + ':candidate-format:000001:' + hashed(cf), cf['approved_at']))
+    if claimed:
+        expected_events.append((owner[0], 'approved_prototype_validate_preclaim_continuation',
+            run['id'] + ':validate-preclaim:000001:' + hashed(record), record['approved_at']))
     events = [tuple(row) for row in db.execute('SELECT owner,action,object_id,created FROM events WHERE object_id=? OR object_id LIKE ?',
         (run['id'], run['id'] + ':%'))]
     continuation = documents.get('mapping-continuation.json')
@@ -3141,10 +3198,12 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
     """
     hashed = lambda value: digest(json.dumps(value, sort_keys=True, separators=(',', ':'),
         ensure_ascii=False, allow_nan=False).encode())
+    claimed = type(readback) is dict and readback.get('scope') == CLAIMED_VALIDATION_MAINTENANCE_SCOPE
     keys = {'schema_version','scope','observed_at_utc','expires_at_utc','binding','fox_tree','receiver_tree',
             'receiver_manifest','technical','producer','serialization_barrier','gateway_witness','stopped_writer'}
+    if claimed: keys.add('receiver_claims')
     _need(type(readback) is dict and set(readback) == keys and type(readback.get('schema_version')) is int and readback.get('schema_version') == 1
-          and readback.get('scope') == PRECLAIM_MAINTENANCE_SCOPE and type(expected) is dict
+          and readback.get('scope') == (CLAIMED_VALIDATION_MAINTENANCE_SCOPE if claimed else PRECLAIM_MAINTENANCE_SCOPE) and type(expected) is dict
           and readback['binding'] == expected, 'PRECLAIM_PAIRED_BINDING_CHANGED')
     _need(set(expected) == {'job_id','request_sha256','source_binding','target_profile_sha256','pair_sha256',
           'scope_sha256','lease_sha256','original_terminal_sha256','technical_source_sha256','mode'}
@@ -3157,6 +3216,8 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
     _need(-5 <= clock - observed <= 30 and observed < expires <= observed + 30 and clock <= expires,
           'PRECLAIM_READBACK_EXPIRED')
     value = preclaim_fox_lineage(database, db, run); request = value['request']; documents = value['documents']
+    _need(claimed == ('prototype-pipeline/validate-preclaim-continuation.json' in documents),
+          'CLAIMED_VALIDATION_SCOPE_REQUIRED')
     _need(value['tree'] == readback['fox_tree'] and hashed(request) == expected['request_sha256']
           and request['source_binding'] == expected['source_binding']
           and value['snapshot']['prototype']['target_profile_sha256'] == expected['target_profile_sha256'],
@@ -3186,6 +3247,25 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
           and all(type(v) is int and v >= 0 for v in receiver['namespace'].values()),
           'PRECLAIM_RECEIVER_NAMESPACE_INVALID')
     manifest_pin = files.pop('prototype-converter/authority-manifest.json', None)
+    if claimed:
+        claims = readback['receiver_claims']
+        _need(type(claims) is dict and set(claims) == {'validate-request.json','validate-intent.json','snapshot.json'},
+              'CLAIMED_VALIDATION_DOCUMENTS_REQUIRED')
+        parsed = {}
+        for name, encoded in claims.items():
+            _need(type(encoded) is str and len(encoded) <= 28_000_000, 'CLAIMED_VALIDATION_RAW_INVALID')
+            try: raw = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError): raise RecoveryError('CLAIMED_VALIDATION_RAW_INVALID') from None
+            _need(files.pop('prototype-converter/'+name, None) == {'sha256':digest(raw),'bytes':len(raw)},
+                  'CLAIMED_VALIDATION_RAW_CHANGED')
+            parsed[name] = _load(raw, 20_000_000)
+        _need(hashed(parsed['validate-request.json']) == hashed(request) and request['prior_receipts'] == {}
+              and hashed(parsed['validate-intent.json']) == hashed({'request_sha256':hashed(request)}),
+              'CLAIMED_VALIDATION_REQUEST_CHANGED')
+        _need(hashed(parsed['snapshot.json']) == hashed(readback['technical'].get('claimed_snapshot')),
+              'CLAIMED_VALIDATION_SNAPSHOT_CHANGED')
+        _need(files.pop('prototype-converter/candidate-apexlang.zip', None) ==
+              value['tree']['files']['prototype-pipeline/candidate-apexlang.zip'], 'CLAIMED_VALIDATION_ZIP_CHANGED')
     _need(type(manifest_pin) is dict and manifest_pin['sha256'] == readback['technical']['receiver_manifest_raw_sha256']
           and files == expected_receiver and receiver['directories'] == sorted(directories),
           'PRECLAIM_RECEIVER_ATTEMPT_OR_UNKNOWN_ENTRY')
@@ -3198,6 +3278,9 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
           **transport,'staged':True,'source_review_authorized':False}, 'PRECLAIM_TRANSPORT_RECEIPT_CHANGED')
     allowed = set(documents['prototype-pipeline/candidate-format-continuation.json']['before_files']) | set(expected_receiver) | {
         'prototype-pipeline/validate-intent.json','prototype-transport/authority-intent.json','prototype-transport/authority.json'}
+    if claimed:
+        allowed |= {'prototype-pipeline/validate-preclaim-continuation.json','prototype-pipeline/validate-preclaim-attempt.json'}
+        allowed |= set(documents['prototype-pipeline/validate-preclaim-continuation.json']['before_files'])
     publication_path = 'prototype-result-publications/epoch-000006-dsc-identity-000001/publication.json'
     if publication_path in documents:
         publication, latest = documents[publication_path], documents['prototype-result.json']
@@ -3213,7 +3296,8 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
         'request_sha256':expected['request_sha256'],'fox_tree_sha256':hashed(value['tree']),
         'source_sha256':expected['technical_source_sha256'],
         'execution_target_sha256':readback['technical'].get('execution_target_sha256'),
-        'receiver_manifest_raw_sha256':manifest_pin['sha256']}, 'PRECLAIM_TECHNICAL_READ_UNCONFIRMED')
+        'receiver_manifest_raw_sha256':manifest_pin['sha256'],
+        **({'claimed_snapshot':readback['technical'].get('claimed_snapshot')} if claimed else {})}, 'PRECLAIM_TECHNICAL_READ_UNCONFIRMED')
     _need(_sha(readback['technical']['execution_target_sha256']), 'PRECLAIM_TECHNICAL_TARGET_UNCONFIRMED')
     stopped = expected['runtime_state'] == 'stopped'
     _need(readback['producer'] == {'fox_worker':'stopped' if stopped else 'terminal_idle',
@@ -3222,13 +3306,19 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
           and all(type(readback['producer'][key]) is int for key in ('receiver_servers','receiver_operations','unknown_producers')),
           'PRECLAIM_PRODUCER_NOT_TERMINAL')
     barrier = readback['serialization_barrier']
+    if claimed:
+        _need(hashed(barrier.get('result')) == hashed({'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate',
+            'job_id':run['id'],'maintenance_only':True,'source_review_authorized':False}),
+            'CLAIMED_VALIDATION_READ_ONLY_BARRIER_REQUIRED')
     _need(type(barrier) is dict and set(barrier) == {'kind','observed_at_utc','binding','result'}
           and barrier['kind'] == ('historical_before_stop' if stopped else 'current_serialized_read')
           and set(barrier['binding']) == {'pair_sha256','fox_tree_sha256','receiver_tree_sha256'}
           and _sha(barrier['binding']['pair_sha256'])
           and barrier['binding']['fox_tree_sha256'] == hashed(value['tree'])
           and barrier['binding']['receiver_tree_sha256'] == hashed(receiver)
-          and barrier['result'] == {'method':'GET','stage':'validate','job_id':run['id'],'status':404}
+          and barrier['result'] == ({'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate',
+              'job_id':run['id'],'maintenance_only':True,'source_review_authorized':False} if claimed else
+              {'method':'GET','stage':'validate','job_id':run['id'],'status':404})
           and _time(barrier['observed_at_utc']) <= clock + 5, 'PRECLAIM_SERIALIZATION_BARRIER_UNCONFIRMED')
     if stopped:
         _need(expected['mode'] == 'transition' and type(readback['stopped_writer']) is dict
@@ -3239,7 +3329,10 @@ def validate_preclaim_pair(database, db, run, readback, expected, *, now=None):
         _need(readback['stopped_writer'] is None and expected['stopped_writer_sha256'] is None
               and barrier['binding']['pair_sha256'] == expected['pair_sha256']
               and -5 <= clock - _time(barrier['observed_at_utc']) <= 30, 'PRECLAIM_CURRENT_BARRIER_EXPIRED')
-    if expected['mode'] == 'startup':
+    if claimed:
+        _need(hashed(readback['gateway_witness']) == hashed(claimed_validation_observation(readback, readback['technical'])),
+              'CLAIMED_VALIDATION_MAINTENANCE_WITNESS_REQUIRED')
+    elif expected['mode'] == 'startup':
         witness = readback['gateway_witness']
         _need(type(witness) is dict and set(witness) == {'schema_version','scope','job_id','project_id',
               'request_sha256','source_binding','source_authority','manifest_sha256','rendered_zip_sha256',
@@ -3291,11 +3384,25 @@ def preclaim_technical_read(database, job_id, target, source_sha256):
             _need(authorize_prototype_request(value['job'], value['request']) == value['request'],
                   'PRECLAIM_TECHNICAL_READ_FAILED')
             validate_publication(value['job'], technical_record(value['job'] / 'prototype-pipeline'))
+            claimed_snapshot = None
+            if 'prototype-pipeline/validate-preclaim-continuation.json' in value['documents']:
+                from . import prototype_preclaim_continuation as continuation
+                from forms2apex import native_blueprint
+                continuation.validate_record(value['job'], value['snapshot'],
+                    (value['job']/'source-snapshot.json').read_bytes(), db)
+                request = value['request']
+                _need(digest(native_blueprint.deterministic_prototype_zip(request['rendering_spec'])) ==
+                      request['rendered_zip_sha256'], 'CLAIMED_VALIDATION_RENDERED_ZIP_CHANGED')
+                claimed_snapshot = {'schema_version':1,'job_id':request['job_id'],'project_id':request['project_id'],
+                    'source_binding':request['source_binding'],'plan_sha256':request['plan_sha256'],
+                    'rendering_spec_sha256':hashed(request['rendering_spec']),'source_authority':request['source_authority'],
+                    'draft_zip_sha256':request['rendered_zip_sha256'],'template':native_blueprint.context()}
         _need(preclaim_tree(value['job']) == value['tree'] and db.total_changes == 0,
               'PRECLAIM_TECHNICAL_READ_CHANGED_DATA')
         return {'status':'PURE_TECHNICAL_READ_ONLY_MATCH','request_sha256':hashed(value['request']),
                 'fox_tree_sha256':hashed(value['tree']),'source_sha256':source_sha256,
-                'execution_target_sha256':hashed(execution_target(target))}
+                'execution_target_sha256':hashed(execution_target(target)),
+                **({'claimed_snapshot':claimed_snapshot} if claimed_snapshot is not None else {})}
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
@@ -4477,7 +4584,8 @@ class VerificationRecovery:
             _need(admission['blocks_admission'] is True and admission['retry_eligible'] is False and run is not None,
                   'PRECLAIM_ORDINARY_ADMISSION_SEPARATE')
             checked = validate_preclaim_pair(self.database, db, dict(run), paired_readback, expected_pair, now=now)
-            return {'admission':admission,'preservation_allowed':True,'preservation_state':'preclaim_validate_history',
+            return {'admission':admission,'preservation_allowed':True,'preservation_state':
+                    'claimed_validation_history' if paired_readback['scope'] == CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history',
                     'preserved':checked}
         preserved = (admission['blocks_admission'] is True and run is not None
             and terminal_closed_provider_preservation(self.database, db, dict(run)))

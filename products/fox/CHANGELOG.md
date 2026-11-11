@@ -4,6 +4,31 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.4] - 2026-11-11
+
+### Preserve stopped validation history during upgrades
+
+- Add a distinct maintenance-only check for a stopped validation request whose
+  claim is retained but whose validation has not completed. Preserve original
+  continuation/event/attempt, request, snapshot and generated ZIP bindings.
+- Use paired read-only collection and actual retained transition provenance
+  during upgrade and startup. The existing unclaimed path remains separate.
+- Keep ordinary admission blocked and retry unavailable for unresolved work.
+  Preservation is not model execution, validation, import or business acceptance.
+
+Verification: all 16 focused Linux tests passed, including the complete synthetic
+claimed-history path, rejection matrix, real SQLite selection/consent changes,
+record/attempt mutations and final paired-tree preservation. Startup provenance
+uses modeled external observations. All five measured code/test files retained
+their exact hashes; one new synthetic import-time database was accounted for.
+
+The separate Windows fast batch had 212 passes, three failures caused by absent
+legacy profile fixtures and one skip; it is not claimed as an entirely passing
+suite. Windows historical-fixture diagnostics ended in a native interpreter
+failure, so the complete focused proof was performed on Linux. Original failed
+evidence remains retained. No installed upgrade, live validation, import/export
+or business acceptance is claimed, and no consumed attempt may be replayed.
+
 ## [0.21.3] - 2026-11-11
 
 ### Retain export files in writable storage
