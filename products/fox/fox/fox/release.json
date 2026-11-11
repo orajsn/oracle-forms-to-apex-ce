@@ -1,11 +1,11 @@
 {
-  "version": "0.22.4",
+  "version": "0.22.5",
   "released_on": "2026-11-12",
-  "title": "Wait for actual native form save results",
+  "title": "Wait for native report refresh completion",
   "changes": [
-    "Wait for the exact destination application and page after Create or Save instead of reading an already-idle previous page.",
-    "Keep invalid-input submissions blocked through confirmed Cancel navigation while allowing previously retained synthetic records.",
-    "Preserve single-attempt write intents, target and expiry checks, source evidence and separate business acceptance."
+    "Wait for the exact native Interactive Report refresh after Filter or Reset before checking its data.",
+    "Bind completion to the current application, page and unique initialized report without issuing extra refresh requests.",
+    "Preserve native save waits, invalid-input fences, retained rows and separate technical and human acceptance states."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

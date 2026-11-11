@@ -135,7 +135,40 @@ export async function sourceNavigationUrl(page,block,packet) {
   return candidates[0];
 }
 
-export async function resetNativeReport(page,{act,settled,onPhase=()=>{}}) {
+export async function waitForNativeReportRefresh(page,{applicationId,pageId,action,timeout=45000}) {
+  check(Number.isSafeInteger(applicationId)&&applicationId>0&&Number.isSafeInteger(pageId)&&pageId>0
+    &&typeof action==='function'&&Number.isInteger(timeout)&&timeout>=1&&timeout<=45000,'Invalid report refresh boundary');
+  const expected={app:String(applicationId),page:String(pageId)};
+  // Acknowledge observer installation BEFORE the single native Apply action.
+  const regionId=await page.evaluate(({app,page})=>{
+    if(document.querySelector('input[name="p_flow_id"]')?.value!==app
+      ||document.querySelector('input[name="p_flow_step_id"]')?.value!==page
+      ||!globalThis.apex?.region?.isRegion||!apex.jQuery||globalThis.__foxNativeIrWait)throw Error('Exact report refresh target required');
+    const regions=[...document.querySelectorAll('[id]')].filter(element=>apex.region.isRegion(element.id)
+      &&apex.region(element.id)?.type==='InteractiveReport');
+    if(regions.length!==1)throw Error('Unique native Interactive Report required');
+    const node=regions[0],state={id:node.id,done:false};globalThis.__foxNativeIrWait=state;
+    apex.jQuery(document).on('apexafterrefresh.foxNativeIrWait',event=>{
+      if(event.target===node&&document.getElementById(node.id)===node
+        &&document.querySelector('input[name="p_flow_id"]')?.value===app
+        &&document.querySelector('input[name="p_flow_step_id"]')?.value===page)state.done=true;
+    });
+    return node.id;
+  },expected);
+  try{
+    const refreshed=page.waitForFunction(({app,page,id})=>globalThis.__foxNativeIrWait?.id===id
+      &&globalThis.__foxNativeIrWait.done===true
+      &&document.querySelector('input[name="p_flow_id"]')?.value===app
+      &&document.querySelector('input[name="p_flow_step_id"]')?.value===page,
+      {...expected,id:regionId},{timeout});
+    await Promise.all([refreshed,action()]);
+  }finally{
+    await page.evaluate(()=>{globalThis.apex?.jQuery(document).off('.foxNativeIrWait');delete globalThis.__foxNativeIrWait;}).catch(()=>{});
+  }
+}
+
+export async function resetNativeReport(page,{act,settled,refresh,onPhase=()=>{}}) {
+  check(typeof refresh==='function','Native report reset refresh boundary required');
   async function control(role,name){
     const locator=page.getByRole(role,{name,exact:true});
     await locator.waitFor({state:'visible'});
@@ -147,7 +180,7 @@ export async function resetNativeReport(page,{act,settled,onPhase=()=>{}}) {
   // Reset entry hidden even though the Report menu item is visible.
   onPhase('RESET_REPORT_SUBMENU');const report=await control('menuitem','Report');await act(()=>report.click());
   onPhase('RESET_MENUITEM');const reset=await control('menuitem','Reset');await act(()=>reset.click());
-  onPhase('RESET_CONFIRMATION');const apply=await control('button','Apply');await act(()=>apply.click());
+  onPhase('RESET_CONFIRMATION');const apply=await control('button','Apply');await refresh(()=>act(()=>apply.click()));
   await apply.waitFor({state:'hidden'});onPhase('RESET_SETTLE');await settled();
 }
 
@@ -249,12 +282,20 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       await act(()=>selector.selectOption(column));
       const operator=await nativeFilterControl(dialog,'Operator');await act(()=>operator.selectOption({label:'='}));
       const expression=await nativeFilterControl(dialog,'Expression');await act(()=>expression.fill(value));
-      await act(()=>dialog.getByRole('button',{name:'Apply',exact:true}).click());await dialog.waitFor({state:'hidden'});await settled();
+      try{
+        await waitForNativeReportRefresh(page,{applicationId:packet.binding.application_id,pageId:2*block.sequence-1,
+          action:()=>act(()=>dialog.getByRole('button',{name:'Apply',exact:true}).click())});
+      }catch(error){
+        durable(path.join(dispatch,'filter-failure.json'),{scope:'fox-prototype-filter-failure-v1',
+          phase:'FILTER_APPLY_REFRESH',error_code:'IR_FILTER_APPLY_OR_REFRESH_FAILED'});throw error;
+      }
+      await dialog.waitFor({state:'hidden'});await settled();
       await identity(2*block.sequence-1);
     }
-    async function reset(){
+    async function reset(block){
       let phase='RESET_ACTIONS';
-      try{await resetNativeReport(page,{act,settled,onPhase:value=>{phase=value;}});}
+      try{await resetNativeReport(page,{act,settled,onPhase:value=>{phase=value;},
+        refresh:action=>waitForNativeReportRefresh(page,{applicationId:packet.binding.application_id,pageId:2*block.sequence-1,action})});}
       catch(error){
         durable(path.join(dispatch,'reset-failure.json'),{scope:'fox-prototype-reset-failure-v1',
           phase,error_code:'RESET_UI_STEP_FAILED'});
@@ -289,7 +330,7 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       }
       await filter(block,'FOX_ROW_ID','999999999999999999999999',{checkColumns:true});
       check(await page.locator('.a-IRR-noDataMsg').isVisible(),'Negative report search did not produce no data');
-      pageRow.checks.report_columns=true;pageRow.checks.search=true;await reset();
+      pageRow.checks.report_columns=true;pageRow.checks.search=true;await reset(block);
       if(block.native_component==='report'){pageRow.passed=true;progress();continue;}
       const formPage=2*block.sequence,editable=block.fields.filter(field=>field.in_edit_form);
       const markerField=editable.find(field=>field.data_type==='VARCHAR2'&&field.length>=16);
@@ -318,7 +359,7 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
           await assertAdditionalRequiredInputRejected(page,`P${formPage}_${required.name}`,
             ()=>act(()=>page.getByRole('button',{name:'Create',exact:true}).click()),guard);
           // Any failure leaves the no-POST fence active through browser close.
-          await closeRejectedNewRecord(page,{applicationId:packet.binding.application_id,formPage,identity,account,act,settled,reset,
+          await closeRejectedNewRecord(page,{applicationId:packet.binding.application_id,formPage,identity,account,act,settled,reset:()=>reset(block),
             clearFence:()=>{guard();invalidRequiredProbe=false;}});
           detail.checks.additional_required_input_validation='PASSED';progress();
           await act(()=>page.getByRole('button',{name:'Create Record',exact:true}).click());
@@ -342,10 +383,10 @@ export async function run(packet,accounts,chromium,{output='/results',dispatch='
       await act(()=>fillNativeQaValue(page.locator(`[name="P${formPage}_${markerField.name}"]`),
         {name:markerField.name,data_type:'VARCHAR2',max_length:markerField.length},updatedMarker));
       await submit(block,'Save Changes',key,values);ledger.updated=true;ledger.marker=updatedMarker;progress();
-      await reset();check(await open(updatedMarker)===key,'Update changed row identity');
+      await reset(block);check(await open(updatedMarker)===key,'Update changed row identity');
       for(const field of editable)check(await page.locator(`[name="P${formPage}_${field.name}"]`).inputValue()===values[field.name],'Fresh update reread differs');
       detail.checks.update=true;detail.checks.synthetic_records_accounted=true;detail.passed=true;pageRow.passed=true;progress();
-      await act(()=>page.getByRole('button',{name:'Cancel',exact:true}).click());await settled();await identity(formPage-1);await reset();
+      await act(()=>page.getByRole('button',{name:'Cancel',exact:true}).click());await settled();await identity(formPage-1);await reset(block);
     }
     guard();check(report.pages.every(row=>row.passed),'Runtime page checks incomplete');
     report.passed=report.business_pages_tested=true;

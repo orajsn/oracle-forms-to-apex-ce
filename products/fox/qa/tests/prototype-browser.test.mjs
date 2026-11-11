@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {allowedRequest,validatePacket,assertUnexpired,assertAdditionalRequiredInputRejected,sourceNavigationUrl,resetNativeReport,
-  submitAndWaitForPage,closeRejectedNewRecord,run,ORIGIN} from '../run-prototype.mjs';
+  submitAndWaitForPage,closeRejectedNewRecord,waitForNativeReportRefresh,run,ORIGIN} from '../run-prototype.mjs';
 import {sha256,canonicalQaPlan} from '../lib/contracts.mjs';
 
 const packet=()=>{
@@ -215,7 +215,7 @@ function resetPage({badName=null,badCount=0}={}){
     };
   }};
   return {page,clicks,waits,phases,options:{act:async action=>{guards++;return action();},
-    settled:async()=>{settled++;},onPhase:phase=>phases.push(phase)},observed:()=>({settled,guards})};
+    settled:async()=>{settled++;},refresh:async action=>action(),onPhase:phase=>phases.push(phase)},observed:()=>({settled,guards})};
 }
 
 test('native report reset clicks Report and waits for visible unique Reset before confirmation',async()=>{
@@ -358,4 +358,65 @@ test('failed Cancel destination wait never releases the negative no-POST fence',
   await assert.rejects(closeRejectedNewRecord(page,{applicationId:12345,formPage:2,identity:async()=>{},account:async()=>{},
     act:async action=>action(),settled:async()=>{},clearFence:()=>{fence=false;},reset:async()=>{resets++;}}),/SYNTHETIC_CANCEL_TIMEOUT/);
   assert.equal(fence,true);assert.equal(resets,0);
+});
+
+async function reportRefreshCase({target='root',app='12345',pageId='1',regions=1,replaced=false,revoke=false}={}){
+  const saved={document:globalThis.document,apex:globalThis.apex};
+  const node={id:'IR_ONE'},other={id:'IR_OTHER'};let handler,actions=0,cleanup=0;
+  const state={app,pageId};
+  globalThis.document={querySelector:selector=>({value:selector.includes('p_flow_id')?state.app:state.pageId}),
+    querySelectorAll:()=>regions===1?[node]:[node,other],getElementById:()=>replaced?{id:node.id}:node};
+  const apex={region:id=>({type:'InteractiveReport',refresh:()=>{throw Error('No programmatic refresh is permitted');}}),
+    jQuery:()=>({on:(name,callback)=>{assert.equal(name,'apexafterrefresh.foxNativeIrWait');handler=callback;},
+      off:()=>{cleanup++;}})};
+  apex.region.isRegion=()=>true;globalThis.apex=apex;
+  const page={evaluate:async(fn,args)=>fn(args),waitForFunction:(predicate,args,{timeout})=>new Promise((resolve,reject)=>{
+    const done=()=>{clearInterval(poll);clearTimeout(timer);};
+    const poll=setInterval(()=>{try{if(predicate(args)){done();resolve();}}catch(error){done();reject(error);}},1);
+    const timer=setTimeout(()=>{done();reject(Error('SYNTHETIC_IR_REFRESH_TIMEOUT'));},timeout);
+  })};
+  const options={applicationId:12345,pageId:1,timeout:100,action:async()=>{
+    assert.equal(typeof handler,'function','Observer must be acknowledged before Apply');
+    if(revoke)throw Error('SYNTHETIC_REFRESH_GUARD_REVOKED');
+    actions++;
+    setTimeout(()=>{
+      if(target==='wrong-app')state.app='999';
+      if(target==='wrong-page')state.pageId='3';
+      handler({type:'apexafterrefresh',target:target==='other'?other:target==='child'?{id:'IR_CHILD'}:node});
+    },3);
+  }};
+  return {page,options,observed:()=>({actions,cleanup,statePresent:!!globalThis.__foxNativeIrWait}),
+    restore:()=>{globalThis.document=saved.document;globalThis.apex=saved.apex;delete globalThis.__foxNativeIrWait;}};
+}
+
+test('IR Apply waits for the exact initialized region refresh, never cached idle state or another region',async()=>{
+  const value=await reportRefreshCase();
+  try{await waitForNativeReportRefresh(value.page,value.options);
+    assert.deepEqual(value.observed(),{actions:1,cleanup:1,statePresent:false});
+  }finally{value.restore();}
+});
+
+test('IR refresh rejects wrong target child app page or replaced DOM node and cleans up without retry',async()=>{
+  for(const shape of [{target:'other'},{target:'child'},{target:'wrong-app'},{target:'wrong-page'},{replaced:true}]){
+    const value=await reportRefreshCase(shape);
+    try{await assert.rejects(waitForNativeReportRefresh(value.page,value.options),/SYNTHETIC_IR_REFRESH_TIMEOUT/);
+      assert.deepEqual(value.observed(),{actions:1,cleanup:1,statePresent:false});
+    }finally{value.restore();}
+  }
+});
+
+test('IR refresh refuses wrong initial app/page and multiple regions before any Apply',async()=>{
+  for(const shape of [{app:'999'},{pageId:'3'},{regions:2}]){
+    const value=await reportRefreshCase(shape);
+    try{await assert.rejects(waitForNativeReportRefresh(value.page,value.options),/report refresh target|Unique native/);
+      assert.equal(value.observed().actions,0);
+    }finally{value.restore();}
+  }
+});
+
+test('IR refresh preserves an action fence failure and removes its observer',async()=>{
+  const value=await reportRefreshCase({revoke:true});
+  try{await assert.rejects(waitForNativeReportRefresh(value.page,value.options),/SYNTHETIC_REFRESH_GUARD_REVOKED/);
+    assert.deepEqual(value.observed(),{actions:0,cleanup:1,statePresent:false});
+  }finally{value.restore();}
 });

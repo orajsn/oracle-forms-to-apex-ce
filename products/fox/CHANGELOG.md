@@ -8,6 +8,25 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.5] - 2026-11-12
+
+### Observe the actual report refresh before checking data
+
+- Arm a bounded native Interactive Report refresh observer before Filter or
+  Reset Apply. Accept completion only from the exact initialized report element
+  on the expected app/page; clean up the observer afterward.
+- Keep the existing single action, request boundaries, save waits and invalid-
+  input fences. Issue no extra refresh request and retain only static failure
+  codes if the filter action or refresh cannot be confirmed.
+
+Verification:a fresh lead run passed all30 Node tests, and62 adapter tests passed
+without skips. An earlier29-pass/1-failure synthetic short-timer run is retained
+rather than counted as a pass. An actual
+read-only APEX diagnostic observed one row immediately after Filter Apply, then
+zero rows only after the matching refresh event. The old already-idle check was
+too early. This verifies the cause and bounded source correction, not a complete
+runtime rerun or hosted conversion. Business acceptance remains separate.
+
 ## [0.22.4] - 2026-11-12
 
 ### Wait for native saves and keep retained test records
