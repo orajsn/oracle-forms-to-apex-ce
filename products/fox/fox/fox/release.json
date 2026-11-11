@@ -1,11 +1,11 @@
 {
-  "version": "0.21.4",
+  "version": "0.21.5",
   "released_on": "2026-11-11",
-  "title": "Preserve stopped validation history during upgrades",
+  "title": "Back up larger retained development histories",
   "changes": [
-    "Recognize an exact stopped validation claim for read-only maintenance preservation without treating it as completed validation.",
-    "Bind paired source and receiver files, continuation history and original transition provenance during upgrade and startup checks.",
-    "Keep ordinary admission and retry permissions unchanged; preservation does not run models, import applications or grant business acceptance."
+    "Raise the bounded upgrade snapshot capacity to 25,000 entries and 160 MiB so retained development history can be preserved.",
+    "Keep the 64 MiB per-file and 8 MiB manifest limits, integrity checks, safe paths and isolated restore requirements unchanged.",
+    "Require a fresh capacity check before deployment; this change does not delete history, add cloud resources or complete a conversion."
   ],
   "limitations": [
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",

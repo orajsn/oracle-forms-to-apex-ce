@@ -4,6 +4,30 @@ FOX software versions use `fox-v<major>.<minor>.<patch>` Git tags, separate from
 the CE repository's tags. A source release is not proof of deployment or a
 successful conversion. See [release policy](docs/release-policy.md).
 
+## [0.21.5] - 2026-11-11
+
+### Back up larger retained development histories
+
+- Increase the bounded upgrade snapshot capacity from 20,000 to 25,000 entries
+  and from 128 MiB to 160 MiB. This accommodates retained development history
+  without deleting previous evidence or adding infrastructure.
+- Keep the 64 MiB member limit and 8 MiB manifest limit unchanged, together with
+  archive integrity, unsafe-path, link, SQLite and isolated-restore checks.
+- Continue to reject snapshots above the new limits. Every deployment still
+  requires its own fresh capacity measurement and successful backup/restore.
+
+Verification: all 33 snapshot tests passed on Linux. Across normal and isolated
+rootless Linux runs, 57 of 60 hosted-snapshot scenarios passed; three opt-in
+Podman launcher scenarios were not run. Coverage includes exact-capacity and
+overflow rejection, streaming archive membership, private ownership, links,
+SQLite/WAL preservation, and actual synthetic capture/isolated restore. Windows
+checks passed with POSIX-only skips. An initial wrong-checkout namespace run was
+preserved and excluded; the corrected run verified the exact source path/hash.
+
+These are local tests, not proof of a successful live upgrade, APEX conversion,
+downloaded-package import or business acceptance. Existing frozen releases and
+historical evidence remain unchanged.
+
 ## [0.21.4] - 2026-11-11
 
 ### Preserve stopped validation history during upgrades

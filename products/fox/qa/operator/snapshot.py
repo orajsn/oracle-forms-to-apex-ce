@@ -33,9 +33,9 @@ import time
 
 ROLES = frozenset(("fox-data", "converter-jobs", "protected-config", "operator-state"))
 SQLITE_MEMBERS = frozenset(("fox.sqlite3", "fox.sqlite3-wal", "fox.sqlite3-shm", "fox.sqlite3-journal"))
-MAX_ENTRIES = 20000
+MAX_ENTRIES = 25000
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
-MAX_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_TOTAL_BYTES = 160 * 1024 * 1024
 MAX_ARCHIVE_BYTES = MAX_TOTAL_BYTES + MAX_ENTRIES * 4096
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 MAX_ROWS = 200000
