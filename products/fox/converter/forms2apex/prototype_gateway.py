@@ -547,28 +547,52 @@ class PrototypeGateway:
         return result.stdout
 
     def _observe(self, root, spec):
-        """Exact bounded dictionary metadata, without the old 20-column gate."""
+        """Observe all tables in one guarded session, with exact per-row binding."""
         renderer = blueprint_profiles.select(spec)
-        for block in spec["blocks"]:
-            if block["classification"] != "database":
-                continue
+        normalized = renderer.validate_prototype_spec(spec)
+        blocks = [block for block in normalized["blocks"] if block["classification"] == "database"]
+        if not blocks:
+            return
+        commands, observations = [], []
+        for block in blocks:
             table = block["table_name"]  # Derived and strict-validated, never uploaded SQL.
-            output = self._sql(root, [
-                "select 'FOX_NATIVE_BEGIN=1' from dual;",
-                f"select 'FOX_NATIVE_TABLE_COUNT='||count(*) from user_tables where table_name='{table}';",
-                "select 'FOX_NATIVE_COLUMN='||column_name||'|'||data_type||'|'||nullable||'|'||"
+            # Bind EVERY result row, not just delimiters: even identical table
+            # shapes must not permit another block's metadata to be adopted.
+            prefix = f"FOX_SCHEMA_METADATA={block['source_block_id']}|{table}|"
+            commands.extend([
+                f"select '{prefix}FOX_NATIVE_BEGIN=1' from dual;",
+                f"select '{prefix}FOX_NATIVE_TABLE_COUNT='||to_char(count(*),'TM9') from user_tables where table_name='{table}';",
+                f"select '{prefix}FOX_NATIVE_COLUMN='||column_name||'|'||data_type||'|'||nullable||'|'||"
                 "to_char(nvl(char_length,0),'TM9')||'|'||identity_column from user_tab_columns "
                 f"where table_name='{table}' order by column_id;",
-                f"select 'FOX_NATIVE_PK_COUNT='||count(*) from user_constraints where table_name='{table}' and constraint_type='P';",
-                "select 'FOX_NATIVE_PK='||cc.column_name||'|'||to_char(cc.position,'TM9')||'|'||c.status||'|'||c.validated "
+                f"select '{prefix}FOX_NATIVE_PK_COUNT='||to_char(count(*),'TM9') from user_constraints where table_name='{table}' and constraint_type='P';",
+                f"select '{prefix}FOX_NATIVE_PK='||cc.column_name||'|'||to_char(cc.position,'TM9')||'|'||c.status||'|'||c.validated "
                 "from user_constraints c join user_cons_columns cc on cc.constraint_name=c.constraint_name "
                 f"and cc.table_name=c.table_name where c.table_name='{table}' and c.constraint_type='P' order by cc.position;",
-                f"select 'FOX_NATIVE_ENABLED_TRIGGER_COUNT='||count(*) from user_triggers where table_name='{table}' and status='ENABLED';",
-                "select 'FOX_NATIVE_OK=1' from dual;"])
-            counts, columns, keys = native_target._parse_output(output)
+                f"select '{prefix}FOX_NATIVE_ENABLED_TRIGGER_COUNT='||to_char(count(*),'TM9') from user_triggers where table_name='{table}' and status='ENABLED';",
+                f"select '{prefix}FOX_NATIVE_OK=1' from dual;"])
             expected = [{"name": col["name"], "data_type": col["data_type"], "nullable": col["nullable"],
                          "char_length": col.get("length", 0), "identity": col["identity"]}
                         for col in renderer._columns(block)]
+            markers = ["BEGIN", "TABLE_COUNT", *(["COLUMN"] * len(expected)),
+                       "PK_COUNT", "PK", "ENABLED_TRIGGER_COUNT", "OK"]
+            observations.append((prefix, expected, markers))
+        output = self._sql(root, commands)
+        _need(isinstance(output, str) and len(output) <= len(blocks) * 100_000,
+              "PROTOTYPE_SCHEMA_METADATA_PROTOCOL_INVALID")
+        # SQLcl inserts blank lines between SELECT results. Ignore only blank
+        # lines / outer whitespace, never error text or unfamiliar markers.
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        _need(len(lines) == sum(len(markers) for _, _, markers in observations),
+              "PROTOTYPE_SCHEMA_METADATA_PROTOCOL_INVALID")
+        offset = 0
+        for prefix, expected, markers in observations:
+            rows = lines[offset:offset + len(markers)]
+            offset += len(markers)
+            _need(all(row.startswith(prefix + "FOX_NATIVE_" + marker + "=")
+                      for row, marker in zip(rows, markers)),
+                  "PROTOTYPE_SCHEMA_METADATA_PROTOCOL_INVALID")
+            counts, columns, keys = native_target._parse_output("\n".join(row[len(prefix):] for row in rows))
             _need(counts["TABLE_COUNT"] == counts["PK_COUNT"] == 1
                   and counts["ENABLED_TRIGGER_COUNT"] == 0 and columns == expected
                   and keys == [renderer.KEY], "PROTOTYPE_SCHEMA_METADATA_MISMATCH")

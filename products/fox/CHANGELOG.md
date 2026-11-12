@@ -8,6 +8,32 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.9] - 2026-11-13
+
+### Batch native schema metadata checks
+
+- Read metadata for all native prototype tables in one guarded SQLcl session,
+  reducing repeated connection startup without caching target observations.
+- Bind every output row to its validated source block and derived table. Retain
+  exact column order/type/nullability/length/identity, primary-key and trigger
+  checks. Reject missing, duplicated, reordered, cross-table or unexpected output.
+- Preserve the saved target, SQLcl exit/stderr checks, source authority,
+  freshness, stage semantics and no-replay rules. Control-only plans issue no SQL.
+
+Verification: 529 selected local tests passed with no skips, including 62 new
+batching cases and the 37 existing gateway cases. Independent source review
+found no material issue. A separate live read-only seven-table comparison passed
+the same metadata checks: seven SQLcl sessions took 33.96 seconds; one batched
+session took 6.43 seconds. This is one lab observation, not a general performance
+guarantee or an end-to-end conversion benchmark. No service or target data was
+changed by that comparison.
+
+Known verification limit: 20 existing preclaim fixture setup errors were also
+reproduced against the previous HEAD; those fixtures reference an absent legacy
+module alias. They are not counted as passes. Larger-target latency within the
+single 120-second batch budget remains unmeasured. Publication does not imply
+deployment, completed runtime/export acceptance or business equivalence.
+
 ## [0.22.8] - 2026-11-12
 
 ### Recognize validated jobs consistently during startup

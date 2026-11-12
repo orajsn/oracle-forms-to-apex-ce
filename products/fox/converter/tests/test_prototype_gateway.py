@@ -53,15 +53,19 @@ def _case(tmp_path_factory, profile="v1"):
             assert renderer.render_prototype_schema(value) in commands
             output = "FOX_PROTO_CREATED=1\n"
         else:
-            block = next(block for block in value["blocks"]
-                         if block["table_name"] and block["table_name"] in text)
-            rows = ["FOX_NATIVE_BEGIN=1", "FOX_NATIVE_TABLE_COUNT=1"]
-            for col in renderer._columns(block):
-                rows.append("FOX_NATIVE_COLUMN=" + "|".join([col["name"], col["data_type"],
-                    "Y" if col["nullable"] else "N", str(col.get("length", 0)), "YES" if col["identity"] else "NO"]))
-            rows += ["FOX_NATIVE_PK_COUNT=1", "FOX_NATIVE_PK=FOX_ROW_ID|1|ENABLED|VALIDATED",
-                     "FOX_NATIVE_ENABLED_TRIGGER_COUNT=0", "FOX_NATIVE_OK=1"]
-            output = "\n".join(rows)
+            output_rows = []
+            for block in value["blocks"]:
+                if not block["table_name"] or block["table_name"] not in text:
+                    continue
+                prefix = f"FOX_SCHEMA_METADATA={block['source_block_id']}|{block['table_name']}|"
+                rows = ["FOX_NATIVE_BEGIN=1", "FOX_NATIVE_TABLE_COUNT=1"]
+                for col in renderer._columns(block):
+                    rows.append("FOX_NATIVE_COLUMN=" + "|".join([col["name"], col["data_type"],
+                        "Y" if col["nullable"] else "N", str(col.get("length", 0)), "YES" if col["identity"] else "NO"]))
+                rows += ["FOX_NATIVE_PK_COUNT=1", "FOX_NATIVE_PK=FOX_ROW_ID|1|ENABLED|VALIDATED",
+                         "FOX_NATIVE_ENABLED_TRIGGER_COUNT=0", "FOX_NATIVE_OK=1"]
+                output_rows.extend(prefix + row for row in rows)
+            output = "\n\n".join(output_rows) + "\n\n"
         return SimpleNamespace(returncode=0, stdout=output, stderr="")
     def imported(sql, connection, workspace, job_id, archive, log, **kwargs):
         assert archive.is_file() and archive.suffix == ".zip"
