@@ -24,6 +24,9 @@ the new pair and verify its actual connectivity. It then replaces the verifier
 unit, observes a genuine first idle claim and releases HTTPS. The normal verifier
 may keep polling inside its bounded batch; an idle claim is not relabelled as a
 completed batch. Any already-completed session's normal seal is still checked.
+The observer waits up to three minutes for that first recorded claim, covering
+the measured cold-start delay without restarting the service or inventing a
+claim when the bound expires.
 
 Original journals and failures are exported and retained unchanged. A closed
 precheck is not a successful session or permission to retry its claim. The
@@ -36,3 +39,31 @@ automatic rollback or replay. If a response is lost, use `status` to inspect the
 original process and exact phase records. Do not call apply again: an existing
 attempt is preserved, and an unresolved phase needs explicit reconciliation.
 The old containers must not be restarted on new state merely to recover a URL.
+
+## Explicit prototype-history preservation
+
+The optional `preclaim_preservation` reference binds a reviewed baseline to one
+known stopped history. It is not a request to run that history again.
+
+- `fox-reviewed-preclaim-terminal-baseline-v1` preserves an unclaimed validation.
+- `fox-reviewed-claimed-validation-terminal-baseline-v1` preserves the original
+  consumed validation request before a validation result exists.
+- `fox-reviewed-schema-prewrite-terminal-baseline-v1` preserves a successful
+  retained validation followed by a terminal `prepare_schema` request that did
+  not enter schema writing. This narrow variant requires the existing consumed
+  validation-maintenance claim/handoff history; it is not a generic failed-job
+  classifier.
+
+The schema-before-write variant uses a separate protected reader purpose and
+packet map. It reconstructs the schema request from the original candidate and
+matching validation receipt, checks the log and recovery history, and rejects
+schema SQL, write intents, later-stage artifacts or any unknown files. Both
+trees, current owner/source, measured technical reconstruction, actual operator
+lease, producer state, fresh readback and stopped-writer checks remain required.
+The terminal handler must be the exact declared stage on the pinned old pair.
+
+Successful preservation means only that the transition can retain that failed
+history honestly. Ordinary admission stays blocked, retry remains unavailable,
+and no run is closed, accepted or relabelled successful. Audit-session closure
+and any subsequent conversion continuation retain their own separate gates.
+Never replace an old baseline's hashes merely to make a different failure fit.

@@ -126,7 +126,9 @@ def test_old_namespace_never_imports_new_prototype_client(case,monkeypatch):
     assert case.context.preclaim_profile(case.fox,case.pin,case.baseline)['envelope']==case.envelope
 
 
-def test_full_stopped_preclaim_path_never_executes_server_or_rebuilds_target(case,monkeypatch):
+@pytest.mark.parametrize('stage',['validate','prepare_schema'])
+def test_full_stopped_preclaim_path_never_executes_server_or_rebuilds_target(case,monkeypatch,stage):
+    schema=stage=='prepare_schema'
     context=case.context
     profile_observation=context.preclaim_profile(case.fox,case.pin,case.baseline)
     case.fox['State'].update(Running=False,Pid=0,Status='exited')
@@ -135,6 +137,8 @@ def test_full_stopped_preclaim_path_never_executes_server_or_rebuilds_target(cas
     barrier={'kind':'current_serialized_read','observed_at_utc':datetime.now(timezone.utc).isoformat(),
         'binding':{'pair_sha256':'a'*64,'fox_tree_sha256':h(tree),'receiver_tree_sha256':h(tree)},
         'result':{'method':'GET','stage':'validate','job_id':request['job_id'],'status':404}}
+    if schema:barrier['result']={'method':'READ_ONLY_PAIRED_TREE','stage':'schema_prewrite',
+        'job_id':request['job_id'],'maintenance_only':True,'source_review_authorized':False}
     converter=deepcopy(case.fox);converter.update(Id='5'*64,Image='sha256:'+'6'*64,Name='forms2apex-mcp')
     core=deepcopy(case.fox);core.update(Id='7'*64,Name='oracle-applied-ai-label');core['State'].update(Running=True,Pid=20)
     for item in (case.fox,converter,core):
@@ -147,6 +151,9 @@ def test_full_stopped_preclaim_path_never_executes_server_or_rebuilds_target(cas
         'fox_tree_sha256':h(tree),'receiver_tree_sha256':h(tree),'manifest_sha256':'c'*64,
         'original_handler':{'method':'POST','stage':'validate','status':409,'container_id':converter['Id'],
                             'completed_at_utc':'2026-11-02T00:00:00Z'}}
+    if schema:
+        baseline['scope']='fox-reviewed-schema-prewrite-terminal-baseline-v1'
+        baseline['original_handler']['stage']=stage
     baseline_path=Path('/home/opc/private/baseline.json');old_read=context.A.read
     context.A.read=lambda path,**kw:M.cb(baseline) if path==baseline_path else old_read(path,**kw)
     context.p.update(preclaim_preservation={'path':baseline_path.as_posix(),'sha256':M.sha(M.cb(baseline))},recovery={})
@@ -164,15 +171,22 @@ def test_full_stopped_preclaim_path_never_executes_server_or_rebuilds_target(cas
     def command(argv,**kw):
         assert argv==['/usr/bin/podman','ps','-aq','--no-trunc'];return ('\n'.join(items)+'\n').encode()
     context.A.command=command
-    reader=SimpleNamespace(PRECLAIM_MAINTENANCE_SCOPE='scope',preclaim_collector_source=lambda:'collector',
+    def collector_source(**kwargs):
+        assert kwargs==({'stage':'prepare_schema'} if schema else {})
+        return 'collector'
+    reader=SimpleNamespace(PRECLAIM_MAINTENANCE_SCOPE='scope',SCHEMA_PREWRITE_MAINTENANCE_SCOPE='schema-scope',
+        preclaim_collector_source=collector_source,
+        schema_prewrite_observation=lambda *_:{'maintenance_only':True,'source_review_authorized':False},
         classification_contract=lambda:SimpleNamespace(timestamp=lambda _:0,
             classify_row=lambda row,_:'LIVE' if row['running'] else 'STOPPED_NON_LIVE'))
     monkeypatch.setattr(M,'load',lambda *a:reader)
     def collect(argv,**kwargs):
         assert argv[:2]==['/usr/bin/podman','unshare'],'Stopped path attempted exec'
         return SimpleNamespace(returncode=0,stderr=b'',stdout=M.cb({'fox_tree':tree,'receiver_tree':tree,
-            'receiver_manifest':{'manifest_sha256':'c'*64},'receiver_manifest_raw_sha256':'0'*64}))
+            'receiver_manifest':{'manifest_sha256':'c'*64},'receiver_manifest_raw_sha256':'0'*64,
+            **({'receiver_claims':{},'receiver_schema_prewrite':{}} if schema else {})}))
     monkeypatch.setattr(M.subprocess,'run',collect)
-    result=context.preclaim_read(stopped=True,new=False,lease=SimpleNamespace(require_active=lambda *a:None))
+    result=context.preclaim_read(stopped=True,new=False,lease=SimpleNamespace(require_active=lambda *a:None),stage=stage)
     assert result[request['job_id']]['readback']['producer']['receiver_servers']==0 and guards==[True]
     assert result[request['job_id']]['readback']['serialization_barrier']['kind']=='historical_before_stop'
+    assert result[request['job_id']]['readback']['scope']==('schema-scope' if schema else 'scope')

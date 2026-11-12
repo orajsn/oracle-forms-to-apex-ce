@@ -8,6 +8,37 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.7] - 2026-11-12
+
+### Preserve a recognized pre-schema stop without treating it as success
+
+- Extend the existing paired maintenance reader/controller with an explicit
+  schema-before-write history variant. It binds the original candidate and
+  successful validation to the consumed validation-repair events and exact
+  schema request/intent. Unknown files, schema SQL, write intents and later
+  stages remain rejected.
+- Keep the purpose separate from ordinary admission and the earlier validation
+  variants. Preservation does not close a run, grant retry, execute a stage,
+  rewrite a failure, or record technical/business acceptance.
+- Wait up to 180 seconds for a genuine first idle claim, covering the measured
+  cold-start delay. Claim hashes, startup bounds, attention refusal and normal
+  completed-session seals are unchanged; no verifier restart is attempted.
+
+Verification: both new production-shaped reader cases and the existing claimed
+validation matrix passed. The old unclaimed acceptance body passed through a
+static historical-fixture wrapper; the earlier combined run's dynamic-fixture
+setup error and collector-harness failure remain recorded, not counted as passes.
+The final combined controller suite passed 157 tests with 12 platform skips,
+including the explicit-purpose/stopped-pair tests and 19 clock/journal cases
+executing the AST-extracted idle observer. Earlier overlapping suite counts are
+not additive.
+
+A separate read-only candidate namespace successfully reconstructed the actual
+retained schema-before-write history. It installed nothing and granted no
+transition preservation, closure or retry authority. Live paired transition,
+the separate idle audit, conversion continuation, import/runtime/export and
+human acceptance remain unproven by this source release.
+
 ## [0.22.6] - 2026-11-12
 
 ### Keep target checks fresh and show recorded conversion progress

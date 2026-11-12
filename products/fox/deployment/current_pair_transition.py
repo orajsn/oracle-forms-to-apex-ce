@@ -26,6 +26,11 @@ sys.dont_write_bytecode=True
 SCOPE='fox-current-pair-transition-v1'
 SCOPE_V2='fox-current-pair-transition-v2'
 SHA=re.compile(r'[a-f0-9]{64}\Z')
+PRESERVATION_STAGES={
+    'fox-reviewed-preclaim-terminal-baseline-v1':'validate',
+    'fox-reviewed-claimed-validation-terminal-baseline-v1':'validate',
+    'fox-reviewed-schema-prewrite-terminal-baseline-v1':'prepare_schema',
+}
 PARENT=Path('/home/opc/.local/share/fox-project-transitions')
 UNIT=Path('/home/opc/.config/systemd/user/fox-product-verifier.service')
 REFS=('old_installation','new_installation','old_unit','new_unit','helper','support','readiness','recovery','snapshot')
@@ -57,6 +62,14 @@ def document(raw):
     try:return json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:(_ for _ in ()).throw(ValueError()))
     except TransitionError:raise
     except Exception:raise TransitionError('INVALID_JSON_DOCUMENT') from None
+
+
+def preservation_stage(baseline):
+    """Explicit reviewed history kind; never infer operation/retry authority."""
+    need(type(baseline)is dict and type(baseline.get('scope'))is str
+         and baseline['scope'] in PRESERVATION_STAGES,
+         'PRECLAIM_REVIEWED_BASELINE_INVALID')
+    return PRESERVATION_STAGES[baseline['scope']]
 
 
 def absolute(value):
@@ -143,11 +156,18 @@ store=m.VerificationRecovery(pathlib.Path(p['data'])/'fox.sqlite3',enabled=True)
 with store._db(False) as db:
  db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
  ids=store._job_ids(db)
- paired=p.get('paired_preclaim',{})
- assert type(paired)is dict and set(paired)<=set(ids)
- protected={job:store._protected_read_status(db,job,purpose='maintenance_preclaim_preservation',
-  paired_readback=paired[job]['readback'],expected_pair=paired[job]['expected']) if job in paired else
-  store._protected_read_status(db,job,purpose='maintenance_preservation') for job in sorted(ids)}
+ paired=p.get('paired_preclaim',{});schema=p.get('paired_schema_prewrite',{})
+ assert type(paired)is dict and type(schema)is dict and not set(paired)&set(schema)
+ assert set(paired)|set(schema)<=set(ids)
+ def status(job):
+  if job in schema:
+   return store._protected_read_status(db,job,purpose='maintenance_schema_prewrite_preservation',
+    paired_readback=schema[job]['readback'],expected_pair=schema[job]['expected'])
+  if job in paired:
+   return store._protected_read_status(db,job,purpose='maintenance_preclaim_preservation',
+    paired_readback=paired[job]['readback'],expected_pair=paired[job]['expected'])
+  return store._protected_read_status(db,job,purpose='maintenance_preservation')
+ protected={job:status(job) for job in sorted(ids)}
  eligibility={job:value['admission'] for job,value in protected.items()}
  preservation={}
  assert len(ids)<=10000
@@ -155,7 +175,13 @@ with store._db(False) as db:
   if value['preservation_allowed']:
    run=dict(db.execute('SELECT * FROM runs WHERE id=?',(job,)).fetchone())
    assert value['admission']['blocks_admission'] is True and value['admission']['retry_eligible'] is False
-   if job in paired:
+   if job in schema:
+    state='schema_prewrite_history'
+    assert value['preservation_state']==state
+    preserved=m.validate_preclaim_pair(store.database,db,run,schema[job]['readback'],schema[job]['expected'],stage='prepare_schema')
+    assert value['preserved']==preserved
+    preservation[job]={'state':state,'preserved':preserved}
+   elif job in paired:
     state='claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
     assert value['preservation_state']==state
     preserved=m.validate_preclaim_pair(store.database,db,run,paired[job]['readback'],paired[job]['expected'])
@@ -233,7 +259,7 @@ elif p['mode']=='readiness':
  result=ready.run(A,plan,admission.manifest,{'fox':d['fox'],'converter':d['forms2apex-mcp']})
  assert result['status']=='READ_ONLY_CONNECTIVITY_CONFIRMED'
 elif p['mode']=='idle':
- journal=verifier.PrivateJournal(admission.release);deadline=time.monotonic()+60;result=None
+ journal=verifier.PrivateJournal(admission.release);deadline=time.monotonic()+180;result=None
  while time.monotonic()<deadline:
   if journal.root.exists():
    for directory in sorted(journal.root.glob('session-*')):
@@ -287,8 +313,14 @@ class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
   exec(compile(sources[m.__name__],m.__file__,'exec'),m.__dict__)
 sys.meta_path.insert(0,Finder());sys.dont_write_bytecode=True
 from fox import verification_recovery as r
-value=r.preclaim_technical_read(pathlib.Path('/data/fox.sqlite3'),p['job_id'],p['target'],p['source_sha256'])
-print(json.dumps({'technical':value,'request':r.preclaim_request(pathlib.Path('/data/jobs')/p['job_id'])},sort_keys=True))
+stage=p.get('stage','validate');assert stage in ('validate','prepare_schema')
+if stage=='prepare_schema':
+ value=r.preclaim_technical_read(pathlib.Path('/data/fox.sqlite3'),p['job_id'],p['target'],p['source_sha256'],stage=stage)
+ request=r.schema_prewrite_request(pathlib.Path('/data/jobs')/p['job_id'])
+else:
+ value=r.preclaim_technical_read(pathlib.Path('/data/fox.sqlite3'),p['job_id'],p['target'],p['source_sha256'])
+ request=r.preclaim_request(pathlib.Path('/data/jobs')/p['job_id'])
+print(json.dumps({'technical':value,'request':request},sort_keys=True))
 '''
 
 PRECLAIM_BARRIER=r'''
@@ -456,8 +488,9 @@ class Transition:
         return document(cb({'observation':'retained_before_stop' if stopped else 'mounted_live',
                             'binding':binding,'envelope':envelope}))
 
-    def preclaim_read(self,*,stopped,new,lease):
+    def preclaim_read(self,*,stopped,new,lease,stage='validate'):
         from datetime import datetime,timedelta,timezone
+        need(stage in ('validate','prepare_schema'),'PRECLAIM_PRESERVATION_STAGE_INVALID')
         ref=self.p.get('preclaim_preservation')
         if ref is None:return {}
         need(lease is not None,'PRECLAIM_ACTUAL_LEASE_REQUIRED')
@@ -468,15 +501,14 @@ class Transition:
             'request_sha256','source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256',
             'manifest_sha256','original_handler'},'PRECLAIM_REVIEWED_BASELINE_INVALID')
         need(type(baseline['schema_version'])is int and baseline['schema_version']==1
-            and baseline['scope'] in ('fox-reviewed-preclaim-terminal-baseline-v1',
-                'fox-reviewed-claimed-validation-terminal-baseline-v1')
+            and preservation_stage(baseline)==stage
             and type(baseline['job_id'])is str and re.fullmatch('fox-[a-f0-9]{20}',baseline['job_id'])
             and all(type(baseline[k])is str and SHA.fullmatch(baseline[k]) for k in ('request_sha256',
                 'source_binding','target_profile_sha256','fox_tree_sha256','receiver_tree_sha256','manifest_sha256')),
             'PRECLAIM_REVIEWED_BASELINE_INVALID')
         terminal=baseline['original_handler']
         need(type(terminal)is dict and set(terminal)=={'method','stage','status','container_id','completed_at_utc'}
-            and terminal['method']=='POST' and terminal['stage']=='validate' and terminal['status']==409
+            and terminal['method']=='POST' and terminal['stage']==stage and terminal['status']==409
             and terminal['container_id']==self.old_pins['forms2apex-mcp']['id'],
             'PRECLAIM_ORIGINAL_HANDLER_NOT_TERMINAL')
         reader=load('fox._paired_maintenance',self.p['recovery'])
@@ -484,8 +516,11 @@ class Transition:
         prefix=['/usr/bin/podman','unshare',self.cfg['python']['path'],'-I','-B','-c']
         params={'fox_data':self.snapshot['role_paths']['fox-data'],
                 'receiver_jobs':self.snapshot['role_paths']['converter-jobs'],'job_id':baseline['job_id']}
+        schema_prewrite=stage=='prepare_schema'
+        if schema_prewrite:params['stage']=stage
         def collect():
-            result=subprocess.run(prefix+[reader.preclaim_collector_source()],input=cb(params),capture_output=True,timeout=120)
+            program=reader.preclaim_collector_source(stage=stage) if schema_prewrite else reader.preclaim_collector_source()
+            result=subprocess.run(prefix+[program],input=cb(params),capture_output=True,timeout=120)
             need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=2_000_000,
                  'PRECLAIM_PAIRED_TREE_READ_FAILED')
             return document(result.stdout)
@@ -516,8 +551,9 @@ class Transition:
                 need(len(rows)==2 and rows[1].strip()=='1','PRECLAIM_RECEIVER_PROCESS_UNCERTAIN')
             return items
         first_pins=current_pair();first=collect()
-        claimed=baseline['scope']=='fox-reviewed-claimed-validation-terminal-baseline-v1'
+        claimed=schema_prewrite or baseline['scope']=='fox-reviewed-claimed-validation-terminal-baseline-v1'
         need(claimed == ('receiver_claims' in first),'CLAIMED_VALIDATION_BASELINE_SCOPE_CHANGED')
+        need(schema_prewrite==('receiver_schema_prewrite' in first),'SCHEMA_PREWRITE_BASELINE_SCOPE_CHANGED')
         # NEW candidate modules run only in a separate fresh child. Never patch
         # the serving old namespace, source files, model records or intent.
         retained_profile=(getattr(self,'_preclaim_live_proof',{}).get('profile') if stopped else None)
@@ -534,12 +570,13 @@ class Transition:
         else:
             proof_packet={'sources':self._preclaim_sources(),'job_id':baseline['job_id'],'target':target,
                           'source_sha256':self.new_i['layout']['inventory']['sha256']}
+            if schema_prewrite:proof_packet['stage']=stage
             run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_TECHNICAL],
                 input=cb(proof_packet),capture_output=True,timeout=240)
             need(run.returncode==0 and not run.stderr.strip() and 0<len(run.stdout)<=2_000_000,'PRECLAIM_PURE_TECHNICAL_READ_FAILED')
             proof=document(run.stdout)
             if claimed:
-                barrier_result={'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate',
+                barrier_result={'method':'READ_ONLY_PAIRED_TREE','stage':'schema_prewrite' if schema_prewrite else 'claimed_validate',
                     'job_id':baseline['job_id'],'maintenance_only':True,'source_review_authorized':False}
             else:
                 run=subprocess.run(['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python','-I','-B','-c',PRECLAIM_BARRIER],
@@ -573,15 +610,16 @@ class Transition:
             'runtime_state':'stopped' if stopped else 'running',
             'stopped_writer_sha256':model_hash(stopped_writer) if stopped else None}
         technical={**proof['technical'],'receiver_manifest_raw_sha256':second['receiver_manifest_raw_sha256']}
-        readback={'schema_version':1,'scope':reader.CLAIMED_VALIDATION_MAINTENANCE_SCOPE if claimed else reader.PRECLAIM_MAINTENANCE_SCOPE,'observed_at_utc':observed.isoformat(),
+        readback={'schema_version':1,'scope':reader.SCHEMA_PREWRITE_MAINTENANCE_SCOPE if schema_prewrite else reader.CLAIMED_VALIDATION_MAINTENANCE_SCOPE if claimed else reader.PRECLAIM_MAINTENANCE_SCOPE,'observed_at_utc':observed.isoformat(),
             'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),'binding':expected,
             **{k:second[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
             **({'receiver_claims':second['receiver_claims']} if claimed else {}),
+            **({'receiver_schema_prewrite':second['receiver_schema_prewrite']} if schema_prewrite else {}),
             'technical':technical,
             'producer':{'fox_worker':'stopped' if stopped else 'terminal_idle','receiver_servers':0 if stopped else 1,
                 'receiver_operations':0,'unknown_producers':0,'original_terminal_sha256':ref['sha256']},
             'serialization_barrier':barrier,
-            'gateway_witness':reader.claimed_validation_observation(second,technical) if claimed else None,
+            'gateway_witness':reader.schema_prewrite_observation(second,technical) if schema_prewrite else reader.claimed_validation_observation(second,technical) if claimed else None,
             'stopped_writer':stopped_writer}
         return {baseline['job_id']:{'readback':readback,'expected':expected}}
 
@@ -590,8 +628,11 @@ class Transition:
         packet={'source':base64.b64encode(A.read(absolute(self.p['recovery']['path']))).decode(),'sha256':self.p['recovery']['sha256'],
             'paths':[str(root/'fox'),str(root/'converter'),str(root)] if stopped else ['/app'],'data':'/home/opc/fox/data' if stopped else '/data'}
         if 'preclaim_preservation' in self.p:
-            packet['paired_preclaim']=self.preclaim_read(stopped=stopped,new=new,
-                lease=lease if lease is not None else getattr(self,'_maintenance_lease',None))
+            baseline=document(A.read(absolute(self.p['preclaim_preservation']['path']),private=True))
+            stage=preservation_stage(baseline)
+            paired=self.preclaim_read(stopped=stopped,new=new,
+                lease=lease if lease is not None else getattr(self,'_maintenance_lease',None),stage=stage)
+            packet['paired_schema_prewrite' if stage=='prepare_schema' else 'paired_preclaim']=paired
         cid=self.pins['fox']['id'] if new else self.old_pins['fox']['id']
         argv=['/usr/bin/podman','unshare',self.old.provider.configuration['python']['path']] if stopped else ['/usr/bin/podman','exec','-i',cid,'/usr/local/bin/python']
         r=subprocess.run(argv+['-I','-B','-c',BACKEND],input=cb(packet),capture_output=True,timeout=120)

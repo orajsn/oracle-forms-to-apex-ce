@@ -1,11 +1,11 @@
 {
-  "version": "0.22.6",
+  "version": "0.22.7",
   "released_on": "2026-11-12",
-  "title": "Fresh target checks and recorded conversion progress",
+  "title": "Preserve stopped conversion history during upgrades",
   "changes": [
-    "Collect genuinely new target observations at each protected boundary without extending their expiry or replaying uncertain operations.",
-    "Show source-bound recorded progress for mapping, validation, demo tables, import, page tests and export through an authenticated read-only view.",
-    "Distinguish unavailable or stale progress from recorded work; progress never grants execution, download or acceptance authority."
+    "Extend guarded upgrade preservation for one recognized pre-schema failure history; ordinary generation and retry remain blocked.",
+    "Bind the original source, successful validation, consumed repair events and unchanged paired files without rewriting their outcomes.",
+    "Wait up to three minutes for a genuine first verifier idle claim without restarting it or inventing batch completion."
   ],
   "limitations": [
     "Advisory progress is not technical verification or business acceptance. Unavailable progress is not success; failed claims still require reconciliation, not automatic retry.",
@@ -14,7 +14,7 @@
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
-    "Saved-proof continuation is limited to recognized sealed failures before database stages and requires operator-prepared evidence. It is not a generic retry or automatic corrective loop.",
+    "Upgrade preservation does not close a failed run or idle audit, or authorize schema preparation, retry, import or acceptance. Those remain separate gates.",
     "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
