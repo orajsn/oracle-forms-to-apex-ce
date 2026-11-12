@@ -114,6 +114,27 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         except (ValueError, OSError, KeyError, TypeError, ImportError, OpafError):
             raise HTTPException(503, 'The prototype workflow is not configured. Your source files remain saved.') from None
 
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/progress')
+    def prototype_run_progress(pid: str, rid: str, request: Request):
+        from .prototype_progress import NotPrototypeRun, prototype_progress
+        import re
+        p = project(request, pid)  # Owner/authentication precedes every job read.
+        if not re.fullmatch(r'fox-[a-f0-9]{20}', rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        with db() as c:
+            c.execute('PRAGMA query_only=ON')
+            c.execute('BEGIN')
+            run = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+            locked = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+            if not run or not locked or locked['owner'] != p['owner']:
+                raise HTTPException(404, 'Prototype run not found.')
+            try:
+                value = prototype_progress(root, dict(run), p['owner'])
+            except NotPrototypeRun:
+                raise HTTPException(404, 'Prototype run not found.') from None
+        return Response(json.dumps(value), media_type='application/json',
+                        headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+
     def generated_prototype(pid: str, rid: str, request: Request, *, metadata_only=False):
         from .prototype_download import configured_download_client, retained_export_request
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot

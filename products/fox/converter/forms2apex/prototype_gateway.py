@@ -523,11 +523,11 @@ class PrototypeGateway:
             self.settings, root.parent, job_id=request["job_id"], action=action,
             source_manifest_sha256=request["source_binding"])
         def check():
-            self._authorize(request)
+            # Verify this actual observation locally after the caller's current
+            # authorization and immutable-artifact checks. Never refresh its time.
             runtime_preflight.verify_action_preflight(value, profile, job_id=request["job_id"],
                 action=action, source_manifest_sha256=request["source_binding"],
                 now=datetime.now(timezone.utc))
-        check()
         return check
 
     def _saved_connection(self):
@@ -651,9 +651,11 @@ class PrototypeGateway:
             else:
                 self._saved_connection()
                 action = "prepare-schema" if stage == "prepare_schema" else ("import" if stage == "import" else "release")
-                fresh = self.preflight(request, action, root)
-                _need(callable(fresh), "PROTOTYPE_FRESH_TARGET_AUTHORITY_REQUIRED")
                 def check():
+                    # Each protected boundary gets new target measurements; a
+                    # prior guard's proof can expire during lengthy review checks.
+                    fresh = self.preflight(request, action, root)
+                    _need(callable(fresh), "PROTOTYPE_FRESH_TARGET_AUTHORITY_REQUIRED")
                     unchanged()
                     fresh()
                 check()

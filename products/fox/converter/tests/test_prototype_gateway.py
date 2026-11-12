@@ -290,7 +290,8 @@ def test_default_target_preflight_transports_do_not_reuse_old_profile_gate(case,
     advance(case, "validate")
     case.adapter.preflight = case.adapter._target_preflight
     assert advance(case, "prepare_schema")["ready_for_import"] is True
-    assert observations == ["imds", "tooling", "database", "oci", "ords"]
+    # Entry and both pre-DDL guards each measure a genuinely current target.
+    assert observations == ["imds", "tooling", "database", "oci", "ords"] * 3
 
 
 def test_nonzero_sqlcl_code_cannot_be_called_passed(case):

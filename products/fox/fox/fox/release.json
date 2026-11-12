@@ -1,13 +1,14 @@
 {
-  "version": "0.22.5",
+  "version": "0.22.6",
   "released_on": "2026-11-12",
-  "title": "Wait for native report refresh completion",
+  "title": "Fresh target checks and recorded conversion progress",
   "changes": [
-    "Wait for the exact native Interactive Report refresh after Filter or Reset before checking its data.",
-    "Bind completion to the current application, page and unique initialized report without issuing extra refresh requests.",
-    "Preserve native save waits, invalid-input fences, retained rows and separate technical and human acceptance states."
+    "Collect genuinely new target observations at each protected boundary without extending their expiry or replaying uncertain operations.",
+    "Show source-bound recorded progress for mapping, validation, demo tables, import, page tests and export through an authenticated read-only view.",
+    "Distinguish unavailable or stale progress from recorded work; progress never grants execution, download or acceptance authority."
   ],
   "limitations": [
+    "Advisory progress is not technical verification or business acceptance. Unavailable progress is not success; failed claims still require reconciliation, not automatic retry.",
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",

@@ -8,6 +8,44 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.6] - 2026-11-12
+
+### Keep target checks fresh and show recorded conversion progress
+
+- Collect new, real target observations at each protected operation boundary,
+  then check current authorization, snapshot and prior receipts before verifying
+  that observation. Keep the 300-second expiry, absence checks and exclusive
+  write intents; do not refresh an old timestamp or retry an uncertain action.
+- Add an authenticated, source-bound, read-only progress endpoint and compact
+  six-stage UI. Distinguish requested work, matching local records, attention,
+  unavailable metadata and stale responses. Historical rejection reports do
+  not override a currently processing run.
+- Progress is advisory, not proof of completed conversion, technical
+  verification, download eligibility or human business acceptance.
+- Make the offline release gate use the public metadata validator, including
+  list and text limits, so malformed bundled notes cannot pass that gate and
+  then prevent UI startup.
+
+Verification: 153 Windows freshness/gateway/preflight tests passed. The focused
+backend set passed 59 tests with one native-file-symlink skip; actual Windows
+junction rejection passed. A Linux combined run passed 173 tests with only the
+Windows-junction case skipped, covering real POSIX symlinks. Desktop/mobile
+browser checks with simulated responses and TypeScript checks passed. A separate
+read-only check of the candidate reader against retained real-job metadata
+correctly distinguished recorded validation from a schema-stage failure; it
+installed nothing and made no database changes.
+
+The canonical built UI also passed an actual authenticated local HTTP/browser
+check against the real FastAPI progress route and SQLite store, using synthetic
+metadata with the conversion worker disabled. Refresh was GET-only and the
+390-pixel view had no horizontal overflow. That test caught an overlong release
+note list before publication; the manifest was corrected and seven release
+schema/API consistency tests now pass.
+
+This is source/test evidence. Deployment and a successful live schema/import/
+runtime/export sequence remain separate. An already claimed failed stage is
+not made retryable by this change; its original outcome must be reconciled.
+
 ## [0.22.5] - 2026-11-12
 
 ### Observe the actual report refresh before checking data

@@ -1,0 +1,8 @@
+.fox-workbench .fw-progress{border:1px solid var(--fw-border);border-radius:8px;padding:14px 16px;margin:16px 0;min-width:0}
+.fox-workbench .fw-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.fox-workbench .fw-progress-heading h3{margin:0}
+.fox-workbench .fw-progress-stages{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px;margin:14px 0;padding:0}
+.fox-workbench .fw-progress-stages li{background:var(--fw-soft);border-radius:6px;padding:8px 10px;min-width:0}
+.fox-workbench .fw-progress-stages span,.fox-workbench .fw-progress-stages strong{display:block}
+.fox-workbench .fw-progress-stages strong{font-size:12px;color:var(--fw-muted)}
+.fox-workbench .fw-progress p:last-child{margin-bottom:0}

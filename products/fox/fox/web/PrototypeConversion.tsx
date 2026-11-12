@@ -2,6 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import type {SourceBinding} from './projectConversion';
 import type {WorkbenchActionResult} from './ProjectWorkbench';
 import type {ProjectRun} from './projectConversion';
+import PrototypeProgress from './PrototypeProgress';
 
 type Chunk={id:string;sha256:string;bytes:number;label?:string};
 type Assessment={source_hash:string;source_binding:string;selected_source_set_id:string;target_profile_sha256:string|null;conversion_configured:boolean;source_count:number;code_unit_count:number;chunks:Chunk[];scope_notice:string};
@@ -264,6 +265,7 @@ export default function PrototypeConversion({projectId,source,busy,unknownOutcom
  const UnitsContainer=collapseCorrectionUnits?'details':'div';
  const confirmations=<fieldset className="fw-confirmations"><legend>Confirm before processing</legend>{['I reviewed and redacted credentials, production records and restricted personal information.','I have permission to use the configured external AI processing route for these sources and selected code units.','I understand this is a synthetic-storage prototype; omitted or unsupported behavior needs remediation and human review.'].map((label,i)=><label className="fw-check" key={label}><input type="checkbox" checked={consents[i]} disabled={busy||unknownOutcome||continuationLoading||epochLoading} onChange={e=>setConsents(consents.map((v,j)=>j===i?e.target.checked:v))}/>{label}</label>)}</fieldset>;
  return <section className="fw-surface" aria-label="Native APEX prototype"><h2>Generate native APEX prototype</h2><p>This separate prototype uses synthetic storage. Missing dependencies and unsupported behavior remain for remediation. It is not a complete conversion, technical verification or business acceptance.</p>
+  {activeRun&&source.selected_source_set_id&&source.project_id===projectId&&activeRun.project_id===projectId&&activeRun.source_hash===source.source_hash&&/^fox-[a-f0-9]{20}$/.test(activeRun.id)&&<PrototypeProgress key={JSON.stringify([projectId,activeRun.id,source.source_hash,source.selected_source_set_id,activeRun.state])} projectId={projectId} runId={activeRun.id} sourceHash={source.source_hash} state={activeRun.state}/>}
   {preclaimSubmitting===JSON.stringify([binding,activeRun?.id])&&<p role="status">Confirming the saved validation request. The safety checks can take several minutes; please keep this project open.</p>}
   {recoveryEligible&&<div className="fw-notice">
    <h3>{preclaim?'Continue validation of saved draft':correction?'Review saved mapping':epoch?.epoch_number===6?'Review saved mapping and continue':epoch?.epoch_number===5?'Continue remaining sections':epoch?.epoch_number===4?'Continue with reviewed structure':epoch?.epoch_number===3?'Continue with reviewed analysis':'Repair saved mapping'}</h3>

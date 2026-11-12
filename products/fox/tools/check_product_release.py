@@ -1,6 +1,7 @@
 """Offline consistency check; no import of FOX, credentials or installed state."""
 import argparse
 from datetime import date
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -10,7 +11,12 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def check(root=ROOT):
     root=Path(root)
-    info=json.loads((root/'fox/fox/release.json').read_text(encoding='utf-8'))
+    # Reuse the stdlib-only public metadata contract without importing FOX's
+    # package/app or executing code from a caller-selected metadata directory.
+    spec=importlib.util.spec_from_file_location('_product_release_metadata',ROOT/'fox/fox/release_info.py')
+    metadata=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(metadata)
+    info=metadata.validate_release((root/'fox/fox/release.json').read_bytes())
     version=info.get('version');released=info.get('released_on')
     if type(version) is not str or not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)',version):
         raise ValueError('Invalid product version.')

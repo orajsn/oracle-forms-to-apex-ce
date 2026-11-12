@@ -41,3 +41,23 @@ def test_product_package_lock_and_changelog_are_consistent():
     m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
     result=m.check(root)
     assert result['version']==r.public_release()['version'] and result['deployment_verified'] is False
+
+
+@pytest.mark.parametrize('mutation',[
+    lambda d:d.update(limitations=['Synthetic limitation']*13),
+    lambda d:d.update(changes=['Synthetic change']*13),
+    lambda d:d.update(title='Bad\nrelease title'),
+    lambda d:d.update(limitations=['x'*401]),
+])
+def test_offline_release_gate_rejects_ui_invalid_metadata(tmp_path,mutation):
+    import importlib.util
+    root=Path(__file__).resolve().parents[2]
+    spec=importlib.util.spec_from_file_location('product_release_schema_check',root/'tools/check_product_release.py')
+    checker=importlib.util.module_from_spec(spec);spec.loader.exec_module(checker)
+    candidate=tmp_path/'candidate';manifest=candidate/'fox/fox/release.json'
+    manifest.parent.mkdir(parents=True)
+    value=deepcopy(r.public_release());mutation(value)
+    manifest.write_text(json.dumps(value),encoding='utf-8')
+    # Reject the metadata itself, before package/changelog consistency checks.
+    with pytest.raises(ValueError,match='Invalid release metadata'):
+        checker.check(candidate)
