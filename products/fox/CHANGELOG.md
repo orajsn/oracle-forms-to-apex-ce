@@ -8,6 +8,31 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.8] - 2026-11-12
+
+### Recognize validated jobs consistently during startup
+
+- Fix the startup history reader's validation-only assumption for a conversion
+  that has passed validation and stopped before schema writes. Upgrade inspection
+  already supported this history; startup admission must verify the same stage.
+- Derive the stage from saved history, then use the existing stage-specific
+  lineage, successful receipt, original terminal outcome, paired-file witness
+  and recheck contracts. Preserve the earlier validation-only paths.
+- Keep this recognition limited to startup preservation. It neither makes the
+  stopped conversion retryable nor grants ordinary admission, schema execution,
+  import, technical verification or business acceptance.
+
+Verification: 67 Linux tests passed with no skips, covering the actual emitted
+startup reader against a synthetic saved history, pure technical reconstruction,
+paired host checks, SQLite preservation and existing claimed-validation/default
+paths. Service and Oracle boundaries in these tests are modelled. An earlier
+Windows fixture run was interrupted and is not counted as a pass; a separate
+broader run retained three legacy manifest/profile-availability failures.
+
+This is a source correction for an observed startup failure, not proof of a
+successful deployment or end-to-end Forms conversion. Live activation and
+schema/import/runtime/export acceptance remain separate.
+
 ## [0.22.7] - 2026-11-12
 
 ### Preserve a recognized pre-schema stop without treating it as success

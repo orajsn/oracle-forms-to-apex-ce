@@ -34,14 +34,17 @@ db.execute('PRAGMA query_only=ON');db.execute('BEGIN');result={}
 for row in db.execute("SELECT * FROM runs WHERE state='ATTENTION' AND artifact IS NULL"):
  job=pathlib.Path('/data/jobs')/row['id']
  if not (job/'prototype-pipeline/candidate-format-continuation.json').exists() or not (job/'prototype-pipeline/validate-intent.json').exists():continue
- value=r.preclaim_fox_lineage('/data/fox.sqlite3',db,dict(row))
+ # Stage comes only from saved history, then the stage-specific lineage reader
+ # proves the completed validation and exact terminal schema-before-write state.
+ stage='prepare_schema' if (job/'prototype-pipeline/prepare_schema-intent.json').exists() else 'validate'
+ value=r.preclaim_fox_lineage('/data/fox.sqlite3',db,dict(row),stage=stage)
  target=load_prototype_profile(pathlib.Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE']))
  assert target['target_profile_sha256']==value['snapshot']['prototype']['target_profile_sha256']
  # Only after maintenance-specific stopped-owner/source/proof checks. This
  # constructs the trusted existing client; it grants no ordinary admission.
  claimed='prototype-pipeline/validate-preclaim-continuation.json' in value['documents']
  if claimed:
-  technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'])
+  technical=r.preclaim_technical_read('/data/fox.sqlite3',row['id'],target['target_profile'],p['image_sha256'],stage=stage)
   witness=None
  else:
   client=configured_download_client(target['target_profile_sha256'])
@@ -55,7 +58,8 @@ for row in db.execute("SELECT * FROM runs WHERE state='ATTENTION' AND artifact I
   assert adapter._get(adapter.path+'/stages/validate') is None
  assert r.preclaim_tree(job)==value['tree']
  result[row['id']]={'technical':technical,'request':value['request'],'witness':witness,
-   'target_profile_sha256':target['target_profile_sha256'],**({'claimed_validation':True} if claimed else {})}
+   'target_profile_sha256':target['target_profile_sha256'],**({'claimed_validation':True} if claimed else {}),
+   **({'stage':stage,'collector':r.preclaim_collector_source(stage=stage)} if stage=='prepare_schema' else {})}
 assert db.total_changes==0
 print(json.dumps({'jobs':result,'collector':r.preclaim_collector_source()},sort_keys=True))
 '''
@@ -167,7 +171,11 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
         waiting, busy = [], []
         for job_id in sorted(ids):
             paired = paired_preclaim.get(job_id)
-            protected = (store._protected_read_status(db, job_id, purpose='maintenance_preclaim_preservation',
+            schema = paired is not None and (root/'jobs'/job_id/'prototype-pipeline/prepare_schema-intent.json').exists()
+            if schema:
+                _need(for_startup is True, 'RETIREMENT_REMOTE_SCHEMA_STARTUP_ONLY')
+            protected = (store._protected_read_status(db, job_id, purpose=(
+                'maintenance_schema_prewrite_preservation' if schema else 'maintenance_preclaim_preservation'),
                 paired_readback=paired['readback'],expected_pair=paired['expected']) if paired is not None else
                 store._protected_read_status(db, job_id, purpose='maintenance_preservation'))
             value = protected['admission']
@@ -177,13 +185,13 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
             if protected['preservation_allowed']:
                 if paired is not None:
                     run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
-                    state = ('claimed_validation_history' if paired['readback']['scope'] ==
+                    state = ('schema_prewrite_history' if schema else 'claimed_validation_history' if paired['readback']['scope'] ==
                         recovery_module.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history')
                     _need(value['blocks_admission'] is True and value['retry_eligible'] is False
                         and protected['preservation_state'] == state and run is not None,
                         'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
                     checked = recovery_module.validate_preclaim_pair(root/'fox.sqlite3',db,dict(run),
-                        paired['readback'],paired['expected'])
+                        paired['readback'],paired['expected'],**({'stage':'prepare_schema'} if schema else {}))
                     _need(checked == protected['preserved'],'RETIREMENT_REMOTE_PRECLAIM_UNCONFIRMED')
                     preservation[job_id] = {'state':state,'preserved':checked}
                     eligibility[job_id] = value
@@ -425,13 +433,15 @@ def _host_preclaim_collect(code,packet):
     return json.loads(response.stdout)
 
 
-def _host_claimed_provenance(v, infrastructure):
+def _host_claimed_provenance(v, infrastructure, *, stage='validate'):
     """Read only the current release's retained transition, never historical code.
 
     The digest below correlates the actual outer HeldOperatorLock; it does not
     replace RetirementArchive.require_admission_under_lock's before/after checks.
     """
     import os, stat
+    guard(stage in ('validate','prepare_schema'))
+    schema = stage == 'prepare_schema'
     h=lambda raw:hashlib.sha256(raw).hexdigest()
     captures={}
     def unique(rows):
@@ -474,10 +484,11 @@ def _host_claimed_provenance(v, infrastructure):
     guard(set(baseline)=={'schema_version','scope','job_id','request_sha256','source_binding',
         'target_profile_sha256','fox_tree_sha256','receiver_tree_sha256','manifest_sha256','original_handler'}
         and type(baseline['schema_version'])is int and baseline['schema_version']==1
-        and baseline['scope']=='fox-reviewed-claimed-validation-terminal-baseline-v1')
+        and baseline['scope']==('fox-reviewed-schema-prewrite-terminal-baseline-v1' if schema else
+            'fox-reviewed-claimed-validation-terminal-baseline-v1'))
     terminal=baseline['original_handler'];pin=old_admission['infrastructure']['forms2apex-mcp']
     guard(set(terminal)=={'method','stage','status','container_id','completed_at_utc'}
-        and terminal['method']=='POST' and terminal['stage']=='validate' and type(terminal['status'])is int
+        and terminal['method']=='POST' and terminal['stage']==stage and type(terminal['status'])is int
         and terminal['status']==409 and terminal['container_id']==pin['id'])
     when=datetime.fromisoformat(terminal['completed_at_utc'].replace('Z','+00:00'))
     guard(when.tzinfo is not None and when<=datetime.now(timezone.utc))
@@ -564,15 +575,20 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
         for name,item in pins.items()}
     h=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()).hexdigest()
     paired,captures={},{}
-    provenance=(_host_claimed_provenance(v,infrastructure)
-        if any(entry.get('claimed_validation') is True for entry in value['jobs'].values()) else None)
     for job,entry in value['jobs'].items():
         guard(re.fullmatch('fox-[a-f0-9]{20}',job))
+        stage=entry.get('stage','validate');guard(stage in ('validate','prepare_schema'))
+        schema=stage=='prepare_schema'
+        collector=entry['collector'] if schema else value['collector']
+        guard(type(collector)is str and 0<len(collector)<=100000)
         packet={'fox_data':'/home/opc/fox/data','receiver_jobs':str(receiver_root),'job_id':job}
-        first=_host_preclaim_collect(value['collector'],packet)
+        if schema:packet['stage']=stage
+        first=_host_preclaim_collect(collector,packet)
         guard(h(first['fox_tree'])==entry['technical']['fox_tree_sha256'])
         claimed=entry.get('claimed_validation') is True
-        guard(claimed==('receiver_claims' in first))
+        guard(claimed==('receiver_claims' in first) and schema==('receiver_schema_prewrite' in first)
+            and (not schema or claimed))
+        provenance=(_host_claimed_provenance(v,infrastructure,**({'stage':stage} if schema else {})) if claimed else None)
         witness=entry['witness'];observed=datetime.now(timezone.utc)
         if claimed:
             baseline=provenance['baseline']
@@ -583,7 +599,8 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
                 and baseline['receiver_tree_sha256']==h(first['receiver_tree'])
                 and baseline['manifest_sha256']==first['receiver_manifest']['manifest_sha256']
                 and provenance['execution_target_sha256']==entry['technical']['execution_target_sha256'])
-            fields={'schema_version':1,'scope':'fox-claimed-validation-maintenance-witness-v1',
+            fields={'schema_version':1,'scope':('fox-schema-prewrite-maintenance-witness-v1' if schema else
+                'fox-claimed-validation-maintenance-witness-v1'),
                 'fox_tree_sha256':h(first['fox_tree']),'receiver_tree_sha256':h(first['receiver_tree']),
                 'request_sha256':entry['technical']['request_sha256'],
                 'execution_target_sha256':entry['technical']['execution_target_sha256'],
@@ -597,21 +614,23 @@ def _host_preclaim(v,fox,infrastructure,startup_source):
             'original_terminal_sha256':terminal_pin,'technical_source_sha256':v['manifest']['images']['fox'][7:],
             'mode':'startup','runtime_state':'running','stopped_writer_sha256':None}
         paired[job]={'expected':expected,'readback':{'schema_version':1,'scope':
+            'fox-paired-schema-prewrite-maintenance-read-v1' if schema else
             'fox-paired-claimed-validation-maintenance-read-v1' if claimed else 'fox-paired-preclaim-maintenance-read-v1',
             'observed_at_utc':observed.isoformat(),'expires_at_utc':(observed+timedelta(seconds=30)).isoformat(),
             'binding':expected,**{k:first[k] for k in ('fox_tree','receiver_tree','receiver_manifest')},
             **({'receiver_claims':first['receiver_claims']} if claimed else {}),
+            **({'receiver_schema_prewrite':first['receiver_schema_prewrite']} if schema else {}),
             'technical':{**entry['technical'],'receiver_manifest_raw_sha256':first['receiver_manifest_raw_sha256']},
             'producer':{'fox_worker':'terminal_idle','receiver_servers':1,'receiver_operations':0,'unknown_producers':0,
                 'original_terminal_sha256':terminal_pin},
             'serialization_barrier':{'kind':'current_serialized_read','observed_at_utc':observed.isoformat(),
                 'binding':{'pair_sha256':h(pair),'fox_tree_sha256':h(first['fox_tree']),
                     'receiver_tree_sha256':h(first['receiver_tree'])},
-                'result':({'method':'READ_ONLY_PAIRED_TREE','stage':'claimed_validate','job_id':job,
+                'result':({'method':'READ_ONLY_PAIRED_TREE','stage':'schema_prewrite' if schema else 'claimed_validate','job_id':job,
                     'maintenance_only':True,'source_review_authorized':False} if claimed else
                     {'method':'GET','stage':'validate','job_id':job,'status':404})},
             'gateway_witness':witness,'stopped_writer':None}}
-        captures[job]=(value['collector'],packet,first,provenance if claimed else None,v)
+        captures[job]=(collector,packet,first,provenance if claimed else None,v)
     _host_preclaim_health()
     return paired,captures,pair
 
@@ -621,7 +640,9 @@ def _host_preclaim_recheck(captures,infrastructure,pair):
     _host_preclaim_health()
     for code,packet,first,provenance,v in captures.values():
         guard(_host_preclaim_collect(code,packet)==first)
-        if provenance is not None:guard(_host_claimed_provenance(v,infrastructure)==provenance)
+        if provenance is not None:
+            guard(_host_claimed_provenance(v,infrastructure,
+                **({'stage':'prepare_schema'} if packet.get('stage')=='prepare_schema' else {}))==provenance)
     for name,expected in pair.items():
         response=subprocess.run(['podman','inspect',infrastructure[name]['id']],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
         guard(response.returncode==0 and not response.stderr.strip());item=json.loads(response.stdout)[0]

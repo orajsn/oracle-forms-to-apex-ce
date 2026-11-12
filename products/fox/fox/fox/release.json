@@ -1,11 +1,11 @@
 {
-  "version": "0.22.7",
+  "version": "0.22.8",
   "released_on": "2026-11-12",
-  "title": "Preserve stopped conversion history during upgrades",
+  "title": "Recognize validated jobs during startup",
   "changes": [
-    "Extend guarded upgrade preservation for one recognized pre-schema failure history; ordinary generation and retry remain blocked.",
-    "Bind the original source, successful validation, consumed repair events and unchanged paired files without rewriting their outcomes.",
-    "Wait up to three minutes for a genuine first verifier idle claim without restarting it or inventing batch completion."
+    "Recognize a validated conversion stopped before schema writes in the startup history reader, not only in upgrade inspection.",
+    "Carry the saved stage through existing source, validation, terminal-outcome and paired-file checks; preserve the earlier validation-only path.",
+    "Keep ordinary conversion admission and retry blocked until separately reconciled; startup preservation does not generate or import an application."
   ],
   "limitations": [
     "Advisory progress is not technical verification or business acceptance. Unavailable progress is not success; failed claims still require reconciliation, not automatic retry.",
