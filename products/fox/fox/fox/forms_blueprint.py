@@ -342,6 +342,32 @@ def validate_blueprint(packet: dict, blueprint: dict) -> dict:
         _fail()
 
 
+def _fact_index_carrier(objects, evidence, allowed):
+    """Encode ONLY known whitelist triples; unsupported graphs pass through.
+
+    A private list carrier tags the strict three-string-tuple codec. The original
+    tuple carrier retains deepcopy behavior for nonplain shapes/mutable aliases.
+    Tuple/string identity is immutable-data detail, never a permission binding.
+    """
+    ids = list(objects)
+    if (type(objects) is not dict or any(type(key) is not str for key in objects)
+            or type(evidence) is not dict or type(allowed) is not dict or evidence is allowed
+            or any(type(key) is not str or type(value) is not str for key, value in evidence.items())):
+        return ids, evidence, allowed
+    encoded, owners = {}, set()
+    for owner, triples in allowed.items():
+        if type(owner) is not str or type(triples) is not list or id(triples) in owners:
+            return ids, evidence, allowed
+        owners.add(id(triples))
+        rows = []
+        for triple in triples:
+            if type(triple) is not tuple or len(triple) != 3 or any(type(value) is not str for value in triple):
+                return ids, evidence, allowed
+            rows.append(list(triple))
+        encoded[owner] = rows
+    return [ids, evidence, encoded]
+
+
 def source_fact_index(packet):
     """Validate fresh packet facts and expose the SAME exact evidence whitelist.
 
@@ -355,9 +381,12 @@ def source_fact_index(packet):
     def compute():
         objects, evidence, allowed = _source_fact_index_uncached(packet)
         # Never put borrowed mutable source rows in the cache.
-        return list(objects), evidence, allowed
-    ids, evidence, allowed = cached_read(root, 'active_focus', {
-        'purpose': 'fox-full-source-fact-index-v1', 'packet': packet}, compute)
+        return _fact_index_carrier(objects, evidence, allowed)
+    carrier = cached_read(root, 'active_focus', {
+        'purpose': 'fox-full-source-fact-index-v2', 'packet': packet}, compute)
+    ids, evidence, allowed = carrier
+    if type(carrier) is list:
+        allowed = {owner: [tuple(row) for row in triples] for owner, triples in allowed.items()}
     # The full logical packet is the key and was validated on the miss. Rebind
     # only the object reference map; original row identity/order is preserved.
     rows = {row['id']: row for entry in packet['sources'] for row in entry['facts']['objects']}

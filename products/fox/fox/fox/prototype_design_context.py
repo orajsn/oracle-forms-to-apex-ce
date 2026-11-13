@@ -258,6 +258,29 @@ def validate_prefix_context(packet, full_plan, candidates, proof_refs, *, expect
 
 
 def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed, *, materialize_rows=True):
+    """Reuse summary-only structural data within this existing fenced operation.
+
+    Bind every actual argument, including row materialization. Caller-pinned
+    references still do not attest provenance, owner consent or review approval.
+    Unsupported inputs keep the original body and its potentially failing checks.
+    """
+    from .prototype_read_scope import current_read_root, optional_context_prefix
+    root = current_read_root()
+    if root is None or materialize_rows is not False:
+        return _prefix_uncached(packet, plan, candidates, refs, target, proposals, unreviewed,
+                                materialize_rows=materialize_rows)
+    inputs = [packet, plan, candidates, refs, target, proposals, unreviewed, materialize_rows]
+    if not _index_cache_eligible(inputs):
+        return _prefix_uncached(*inputs[:7], materialize_rows=materialize_rows)
+    try:
+        identity = canonical_hash({'purpose': 'summary-design-context-prefix-v1', 'inputs': inputs})
+    except (ValueError, TypeError, RecursionError, OverflowError, UnicodeError):
+        return _prefix_uncached(*inputs[:7], materialize_rows=materialize_rows)
+    return optional_context_prefix(root, identity,
+        lambda: _prefix_uncached(*inputs[:7], materialize_rows=materialize_rows))
+
+
+def _prefix_uncached(packet, plan, candidates, refs, target, proposals, unreviewed, *, materialize_rows=True):
     # Only omit copies for bounded plain acyclic JSON. Nonplain/generic inputs
     # keep the original full path, including any observable deepcopy failure.
     if materialize_rows is False:
@@ -414,6 +437,28 @@ def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed, *, ma
 
 
 def build_review_context(packet, full_plan, candidates, proof_refs, *, expected_target_sha256, focus_id):
+    """Reuse the final bounded focused context, not discarded full-prefix rows.
+
+    All actual inputs remain bound. This is unreviewed structural data only;
+    original source, historical provenance and current consent stay caller duties.
+    """
+    from .prototype_read_scope import current_read_root, optional_context_prefix
+    root = current_read_root()
+    if root is None:
+        return _build_review_context_uncached(packet, full_plan, candidates, proof_refs,
+            expected_target_sha256=expected_target_sha256, focus_id=focus_id)
+    inputs = [packet, full_plan, candidates, proof_refs, expected_target_sha256, focus_id]
+    if not _index_cache_eligible(inputs):
+        return _build_review_context_uncached(*inputs[:4], expected_target_sha256=inputs[4], focus_id=inputs[5])
+    try:
+        identity = canonical_hash({'purpose': 'focused-design-review-context-v1', 'inputs': inputs})
+    except (ValueError, TypeError, RecursionError, OverflowError, UnicodeError):
+        return _build_review_context_uncached(*inputs[:4], expected_target_sha256=inputs[4], focus_id=inputs[5])
+    return optional_context_prefix(root, identity,
+        lambda: _build_review_context_uncached(*inputs[:4], expected_target_sha256=inputs[4], focus_id=inputs[5]))
+
+
+def _build_review_context_uncached(packet, full_plan, candidates, proof_refs, *, expected_target_sha256, focus_id):
     """Context DATA for the last unreviewed candidate, not a reviewer decision.
 
     All PRIOR references must already have had their actual historical review/

@@ -4703,6 +4703,12 @@ class VerificationRecovery:
 
     def _protected_read_status(self, db, job_id, *, purpose, paired_readback=None, expected_pair=None, now=None):
         """Explicit protected-reader purpose; ordinary admission stays unchanged."""
+        # This maintenance branch intentionally precedes semantic historical
+        # eligibility. It preserves unresolved bytes, never closes/adopts them.
+        if purpose == 'maintenance_inert_startup_preservation':
+            _need(self.enabled is True, 'INERT_ENABLED_ADMISSION_REQUIRED')
+            from .paused_stage_preservation import validate_pair
+            return validate_pair(self.database, db, job_id, paired_readback, expected_pair, now=now)
         _need(purpose in ('maintenance_preservation','maintenance_preclaim_preservation',
               'maintenance_schema_prewrite_preservation'), 'RECOVERY_PROTECTED_PURPOSE_INVALID')
         admission = self._eligibility(db, job_id)

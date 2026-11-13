@@ -8,6 +8,43 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.14] - 2026-11-13
+
+### Reuse source checks and preserve paused conversions
+
+- Reuse structural summaries and final focused review-context data within an
+  existing read scope. Avoid storing discarded full-prefix rows. Keep current
+  permission, source authenticity and reviewer-provenance checks separate.
+- Detach strict JSON trees efficiently, with the original copy behavior for
+  unsupported types and mutable aliases. Encode only known evidence-whitelist
+  triples in the private cache, restoring the unchanged public tuple API and
+  current source-row identity. Logical byte budgets remain unchanged.
+- Empty runtime polls keep deadlines and retained-input checks without repeatedly
+  rebuilding full authorization. Authorization remains mandatory before dispatch,
+  before result reads and before return; worker/browser gates are unchanged.
+  Producer-only transient revocation is no longer latched during an empty poll;
+  this is not an immediate-cancellation feature. Slow checks cannot renew a deadline.
+- Add explicit startup-only preservation for unresolved jobs. Keep ATTENTION,
+  blocked admission, no retry and all evidence unchanged. Require exact storage,
+  identity, process and journal checks, including overlapping mounts and other
+  pending verifier sessions. The audited configuration-only observer may select
+  its provider in a fresh interpreter; no execution or credential retrieval is
+  permitted. Preserving an old runtime binding does not make it dispatch-ready.
+
+Verification: focused suites passed 304 context checks, 301 copy checks,
+393 evidence-index checks, 212 runtime/worker/browser/release checks and
+177 startup/transition checks; these suites overlap. Independent reviews passed.
+Startup testing has one skip and one deselected expensive fixture. Three separate
+legacy fixture setups require an absent operator profile and remain unverified.
+Host/process transports and browser commands in these suites are modelled.
+
+A preceding exact-family, read-only comparison reduced the retained case's four
+technical checks from about 104s to 38s while preserving its state and all files.
+The final evidence-index comparison could not connect by SSH and has no real-case
+result. Local codec parity and clone counts are not a runtime-deadline guarantee.
+No installed-flow success, new import, runtime pass, SQL export, business acceptance
+or deployment is claimed by this source release.
+
 ## [0.22.13] - 2026-11-13
 
 ### Avoid rebuilding unchanged conversion evidence

@@ -190,3 +190,112 @@ def test_global_cache_capacity_fails_closed_not_eligibility_fallback(case,monkey
     monkeypatch.setattr(scope,limit,0 if limit=='MAX_CACHED_VALUES' else 1)
     with scope.readonly_proof_scope(root),pytest.raises(OpafError):blueprint.source_fact_index(packet)
     assert packet==before and scope.current_read_root() is None
+
+
+def test_v2_known_triplets_fast_clone_exact_public_types_order_identity_and_logical_bytes(case,calls,monkeypatch,record_property):
+    root,packet,*_=case
+    objects,evidence,allowed=blueprint._source_fact_index_uncached(packet);calls.clear()
+    before=deepcopy((packet,evidence,allowed))
+    old=(list(objects),evidence,allowed)
+    carrier=blueprint._fact_index_carrier(objects,evidence,allowed)
+    assert type(carrier)is list and encode(carrier)==encode(old)
+    assert scope._json_tree_copy_bytes(old)is None
+    assert type(scope._json_tree_copy_bytes(carrier))is bytes
+    original_copy,original_loads=scope.deepcopy,scope.json.loads
+    copies={'deepcopy':0,'loads':0}
+    def copied(value):copies['deepcopy']+=1;return original_copy(value)
+    def loaded(*a,**kw):copies['loads']+=1;return original_loads(*a,**kw)
+    monkeypatch.setattr(scope,'deepcopy',copied);monkeypatch.setattr(scope.json,'loads',loaded)
+    with scope.readonly_proof_scope(root):
+        results=[blueprint.source_fact_index(packet)for _ in range(4)]
+        for public in results:
+            assert type(public)is tuple and encode(public)==encode((objects,evidence,allowed))
+            assert_refs(packet,public)
+            assert list(public[1])==list(evidence) and list(public[2])==list(allowed)
+            assert all(type(row)is tuple and len(row)==3 and all(type(v)is str for v in row)
+                for rows in public[2].values()for row in rows)
+        assert scope._state.get()['bytes']==len(encode(old))
+        assert next(iter(scope._state.get()['cache'].values()))[0]is True
+        owner=next(iter(allowed));results[0][2][owner].append(('mutated','not source evidence','unknown'))
+        assert results[1][2][owner]==allowed[owner] and results[0][2][owner]is not results[1][2][owner]
+    assert len(calls)==1 and copies=={'deepcopy':0,'loads':4}
+    assert (packet,evidence,allowed)==before
+    record_property('authored_fact_carrier_fast_counts',json.dumps({'objects':len(objects),
+        'triples':sum(map(len,allowed.values())),'logical_serialized_bytes':len(encode(old)),
+        'public_sha256':canonical_hash((objects,evidence,allowed)),'copies':copies},sort_keys=True))
+
+
+def test_v1_purpose_cannot_supply_a_stale_value_to_v2_carrier(case,calls):
+    root,packet,*_=case
+    with scope.readonly_proof_scope(root):
+        scope.cached_read(root,'active_focus',{'purpose':'fox-full-source-fact-index-v1','packet':packet},
+            lambda:(['authored-stale-id'],{},{}))
+        public=blueprint.source_fact_index(packet)
+        assert_refs(packet,public)
+        keys=scope._state.get()['cache']
+        assert len(keys)==2
+        assert ('active_focus',canonical_hash({'purpose':'fox-full-source-fact-index-v2','packet':packet}))in keys
+    assert len(calls)==1
+
+
+@pytest.mark.parametrize('change',['allowed-subclass','owner-list-subclass','triple-subclass','triple-list',
+    'short-triple','nonstring-part','owner-subclass','evidence-subclass','evidence-value-subclass',
+    'shared-owner-list','crossalias','same-empty-dict','partial'])
+def test_codec_unsupported_shapes_and_mutable_aliases_preserve_tuple_passthrough(case,monkeypatch,change):
+    class CustomDict(dict):pass
+    class CustomList(list):pass
+    class CustomTuple(tuple):pass
+    class CustomStr(str):pass
+    root,packet,*_=case
+    objects,_,_=blueprint._source_fact_index_uncached(packet)
+    names=list(objects);first,second=names[:2]
+    evidence={first:first};allowed={first:[('kind','"value"',first)]}
+    if change=='allowed-subclass':allowed=CustomDict(allowed)
+    elif change=='owner-list-subclass':allowed[first]=CustomList(allowed[first])
+    elif change=='triple-subclass':allowed[first][0]=CustomTuple(allowed[first][0])
+    elif change=='triple-list':allowed[first][0]=list(allowed[first][0])
+    elif change=='short-triple':allowed[first][0]=('kind','value')
+    elif change=='nonstring-part':allowed[first][0]=('kind',False,first)
+    elif change=='owner-subclass':allowed={CustomStr(first):allowed[first]}
+    elif change=='evidence-subclass':evidence=CustomDict(evidence)
+    elif change=='evidence-value-subclass':evidence[first]=CustomStr(first)
+    elif change=='shared-owner-list':allowed[second]=allowed[first]
+    elif change=='crossalias':evidence[first]=allowed[first]
+    elif change=='same-empty-dict':evidence=allowed={}
+    else:allowed[second]=[['unsupported','shape',second]]
+    before=deepcopy((evidence,allowed))
+    carrier=blueprint._fact_index_carrier(objects,evidence,allowed)
+    assert type(carrier)is tuple and carrier[1]is evidence and carrier[2]is allowed
+    assert encode(carrier)==encode((list(objects),evidence,allowed))
+    assert (evidence,allowed)==before
+    monkeypatch.setattr(blueprint,'_source_fact_index_uncached',lambda packet:(objects,evidence,allowed))
+    with scope.readonly_proof_scope(root):
+        public=blueprint.source_fact_index(packet);again=blueprint.source_fact_index(packet)
+        assert_refs(packet,public)
+        assert type(public[1])is type(evidence) and type(public[2])is type(allowed)
+        assert encode(public)==encode((objects,evidence,allowed))
+        assert next(iter(scope._state.get()['cache'].values()))[0]is False
+        if change=='shared-owner-list':assert public[2][first]is public[2][second]
+        elif change=='crossalias':assert public[1][first]is public[2][first]
+        elif change=='same-empty-dict':assert public[1]is public[2]
+        elif allowed:
+            owner=next(iter(allowed))
+            assert type(public[2][owner])is type(allowed[owner])
+            assert type(public[2][owner][0])is type(allowed[owner][0])
+            assert all(type(a)is type(b)for a,b in zip(public[2][owner][0],allowed[owner][0]))
+        assert public[2]is not again[2]
+
+
+def test_public_source_fact_whitelist_decisions_unchanged_by_known_codec(case):
+    root,packet,*_=case
+    gold=blueprint._source_fact_index_uncached(packet)
+    owner=next(iter(gold[2]));kind,value,ref=gold[2][owner][0]
+    claim={'source_object_id':owner,'kind':kind,'value':json.loads(value),'reason':'Authored exact source fact',
+        'status':'source_fact','evidence_refs':[ref]}
+    assert blueprint.validate_claim_evidence(claim,*gold)is None
+    with scope.readonly_proof_scope(root):
+        index=blueprint.source_fact_index(packet)
+        assert blueprint.validate_claim_evidence(claim,*index)is None
+        altered={**claim,'value':'not the retained source fact'}
+        with pytest.raises(ValueError):blueprint.validate_claim_evidence(altered,*index)
+        assert_refs(packet,index)

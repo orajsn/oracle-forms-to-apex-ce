@@ -1,11 +1,12 @@
 {
-  "version": "0.22.13",
+  "version": "0.22.14",
   "released_on": "2026-11-13",
-  "title": "Avoid rebuilding unchanged conversion evidence",
+  "title": "Reuse source checks and preserve paused conversions",
   "changes": [
-    "Reuse identical complete historical proofs and pure screen projections within an existing read-only check.",
-    "Keep fresh installed-module checks, source and file bindings, independent result copies and all current permission checks.",
-    "Bound optional caches separately and recompute when full; no persistent cache, automatic retry or new execution permission."
+    "Reuse structural summaries and focused review-context data without caching current permissions or reviewer approval.",
+    "Reduce detached-copy overhead while preserving public evidence types, order, aliases and byte budgets.",
+    "Keep runtime polling bounded and retain fresh authorization before execution and result acceptance.",
+    "Allow guarded startup to preserve unresolved jobs as blocked and inert, without closing or replaying them."
   ],
   "limitations": [
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
@@ -14,7 +15,7 @@
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
-    "Upgrade preservation does not close a failed run or idle audit, or authorize schema preparation, retry, import or acceptance. Those remain separate gates.",
+    "Inert startup preservation grants no retry, execution, closure or acceptance. Actual host compatibility and coherent deployment remain separate gates.",
     "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",

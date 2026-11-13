@@ -301,21 +301,32 @@ class PrototypeRuntimeBridge:
         self.timeout_seconds, self.poll_seconds = timeout_seconds, poll_seconds
 
     def __call__(self, request, *, root, imported, trace, artifact_binding, freshness_check):
+        deadline = time.monotonic() + self.timeout_seconds
         packet = deepcopy(packet_for(request, imported, trace, artifact_binding, timeout_seconds=self.timeout_seconds))
         job = request["job_id"]
         expected_root = self.io.jobs_root / job / "prototype-converter"
         need(Path(root).absolute() == expected_root, "PROTOTYPE_BRIDGE_EXACT_JOB_REQUIRED")
         freshness_check()
         check_retained(self.io, packet)
+        def remaining():
+            utc_remaining = remaining_seconds(packet)
+            monotonic_remaining = deadline - time.monotonic()
+            need(monotonic_remaining > 0, "PROTOTYPE_BRIDGE_TIMEOUT_UNKNOWN_NO_REPLAY")
+            return min(utc_remaining, monotonic_remaining)
         # Identical redispatch is forbidden too, even following a timeout/crash.
         raw = canonical(packet)
         need(len(raw) <= MAX_JSON, "PROTOTYPE_BRIDGE_JSON_SIZE_INVALID")
+        remaining()  # A slow prepublication check never renews this attempt.
         self.io.create(job, REQUEST, raw)
-        deadline = time.monotonic() + self.timeout_seconds
         while True:
-            remaining_seconds(packet)
-            freshness_check()
+            remaining()
+            check_retained(self.io, packet)
             if self.io.exists(job, RESULT):
+                # Empty polls neither execute work nor release result data.
+                # Current authority is mandatory before reading a result and
+                # again before returning it; worker execution gates are separate.
+                freshness_check()
+                remaining()
                 check_retained(self.io, packet)
                 result = object_bytes(self.io.read(job, RESULT, MAX_JSON))
                 expected = {"schema_version": 1, "scope": "fox-prototype-runtime-result-v1",
@@ -328,7 +339,6 @@ class PrototypeRuntimeBridge:
                 check_artifacts(receipt)
                 validate_runtime_receipt(expected_root, request, imported, artifact_binding, receipt)
                 freshness_check()
+                remaining()
                 return receipt
-            remaining = deadline - time.monotonic()
-            need(remaining > 0, "PROTOTYPE_BRIDGE_TIMEOUT_UNKNOWN_NO_REPLAY")
-            time.sleep(min(self.poll_seconds, remaining))
+            time.sleep(min(self.poll_seconds, remaining()))

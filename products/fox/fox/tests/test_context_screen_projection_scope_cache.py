@@ -372,6 +372,6 @@ def test_synthetic_actual_full_projection_counts_and_bounded_timing(case, calls,
         assert len(set(hashes)) == 1
     assert results['uncached']['result_sha256'] == results['cached']['result_sha256']
     assert results['uncached']['counts']['project'] == 8 and results['cached']['counts']['project'] == 1
-    assert results['uncached']['counts']['plan'] == results['cached']['counts']['plan'] * 8
-    assert results['uncached']['counts']['prefix'] == results['cached']['counts']['prefix'] * 8
+    # Prefix construction now has independent scoped reuse. Inner plan/prefix
+    # counts remain diagnostic, not invariants of this projection boundary.
     record_property('authored_pure_projection_not_live_timing', json.dumps(results, sort_keys=True))

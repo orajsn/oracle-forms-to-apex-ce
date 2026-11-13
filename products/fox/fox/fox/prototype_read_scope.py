@@ -10,6 +10,7 @@ from copy import deepcopy
 import asyncio
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import stat
@@ -36,6 +37,14 @@ MAX_CONTAINER_PROOF_BYTES = 8 * 1024 * 1024
 MAX_SCREEN_PROJECTIONS = 128
 MAX_SCREEN_PROJECTION_VALUE_BYTES = 4 * 1024 * 1024
 MAX_SCREEN_PROJECTION_BYTES = 8 * 1024 * 1024
+# Pure prefix summaries and final focused contexts share this optional budget.
+MAX_CONTEXT_PREFIXES = 128
+MAX_CONTEXT_PREFIX_VALUE_BYTES = 4 * 1024 * 1024
+MAX_CONTEXT_PREFIX_BYTES = 8 * 1024 * 1024
+# Eligibility limits only: unsupported values retain the original deepcopy path.
+_JSON_COPY_MAX_DEPTH = 64
+_JSON_COPY_MAX_NODES = 600_000
+_JSON_COPY_MAX_INT_BITS = 2048  # <=617 decimal digits, below Python's minimum640.
 _state = ContextVar('fox_readonly_technical_scope', default=None)
 
 
@@ -180,6 +189,7 @@ def readonly_proof_scope(root):
         'document_builds': {}, 'document_build_bytes': 0,
         'container_proofs': {}, 'container_proof_bytes': 0,
         'screen_projections': {}, 'screen_projection_bytes': 0,
+        'context_prefixes': {}, 'context_prefix_bytes': 0,
         'fenced_root_files': frozenset(root_files), 'fenced_job_files': frozenset(job_files)})
     try:
         yield
@@ -230,6 +240,54 @@ def baseline_read_root(base, names):
     return root if set(names) <= covered else None
 
 
+def _json_tree_copy_bytes(value):
+    """Insertion-order bytes ONLY for bounded strict, alias-free JSON trees.
+
+    Exact types preserve booleans/numbers; global container IDs reject shared
+    mutable aliases as well as cycles. Tuples/subclasses/custom hooks fall back.
+    Immutable leaf identity is not part of this JSON-data contract.
+    """
+    if type(value) not in (dict, list):
+        return None
+    seen, remaining = set(), _JSON_COPY_MAX_NODES
+    def visit(node, depth):
+        nonlocal remaining
+        remaining -= 1
+        if remaining < 0 or depth > _JSON_COPY_MAX_DEPTH:
+            return False
+        kind = type(node)
+        if kind is dict or kind is list:
+            ref = id(node)
+            if ref in seen:
+                return False
+            seen.add(ref)
+            if kind is dict:
+                for key, child in node.items():
+                    if type(key) is not str or not visit(child, depth + 1):
+                        return False
+            else:
+                for child in node:
+                    if not visit(child, depth + 1):
+                        return False
+            return True
+        if kind is int:
+            return node.bit_length() <= _JSON_COPY_MAX_INT_BITS
+        return node is None or kind in (str, bool) or kind is float and math.isfinite(node)
+    try:
+        if not visit(value, 0):
+            return None
+        # Never sort here: detached dicts must retain original insertion order.
+        return json.dumps(value, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8')
+    except (ValueError, TypeError, RecursionError, OverflowError, UnicodeError):
+        return None  # Only decline this copy optimization; original copy still runs.
+
+
+def _copy_cached_value(entry):
+    fast, value = entry
+    return json.loads(value) if fast else deepcopy(value)
+
+
 def cached_read(root, kind, identity, compute):
     current = _state.get()
     if current is None:
@@ -247,9 +305,12 @@ def cached_read(root, kind, identity, compute):
                               allow_nan=False).encode('utf-8'))
         if size > MAX_CACHED_VALUE_BYTES or current['bytes'] + size > MAX_CACHE_BYTES:
             _fail()
-        current['cache'][key] = deepcopy(value)
+        raw = _json_tree_copy_bytes(value)
+        # Private tagged representation prevents collisions with arbitrary values
+        # returned by custom __deepcopy__ implementations on the fallback path.
+        current['cache'][key] = (True, raw) if raw is not None else (False, deepcopy(value))
         current['bytes'] += size
-    return deepcopy(current['cache'][key])
+    return _copy_cached_value(current['cache'][key])
 
 
 def optional_document_build(root, identity, compute):
@@ -338,6 +399,34 @@ def optional_screen_projection(root, identity, compute):
     projections[identity] = deepcopy(value)
     current['screen_projection_bytes'] += size
     return deepcopy(projections[identity])
+
+
+def optional_context_prefix(root, identity, compute):
+    """Pure prefix summaries/focused contexts, never provenance or consent.
+
+    Capacity declines storage, not validation. This store cannot exhaust any
+    mandatory/document/container/screen store or suppress the enclosing fences.
+    """
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current['root'] != Path(root).absolute() or current['owner'] != _owner():
+        _fail()
+    if type(identity) is not str or not re.fullmatch('[a-f0-9]{64}', identity):
+        _fail()
+    prefixes = current['context_prefixes']
+    if identity in prefixes:
+        return deepcopy(prefixes[identity])
+    if len(prefixes) >= MAX_CONTEXT_PREFIXES:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_CONTEXT_PREFIX_VALUE_BYTES or current['context_prefix_bytes'] + size > MAX_CONTEXT_PREFIX_BYTES:
+        return value
+    prefixes[identity] = deepcopy(value)
+    current['context_prefix_bytes'] += size
+    return deepcopy(prefixes[identity])
 
 
 def forbid_execution():

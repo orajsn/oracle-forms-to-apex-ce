@@ -27,6 +27,7 @@ SCOPE='fox-current-pair-transition-v1'
 SCOPE_V2='fox-current-pair-transition-v2'
 SHA=re.compile(r'[a-f0-9]{64}\Z')
 PRESERVATION_STAGES={
+    'fox-inert-startup-baseline-v1':'inert',
     'fox-reviewed-preclaim-terminal-baseline-v1':'validate',
     'fox-reviewed-claimed-validation-terminal-baseline-v1':'validate',
     'fox-reviewed-schema-prewrite-terminal-baseline-v1':'prepare_schema',
@@ -152,6 +153,12 @@ import hashlib
 assert hashlib.sha256(raw).hexdigest()==p['sha256']
 m=types.ModuleType('fox._transition_recovery');m.__package__='fox';sys.modules[m.__name__]=m
 exec(compile(raw,'<measured-transition-reader>','exec'),m.__dict__)
+if 'inert_source' in p:
+ core_raw=base64.b64decode(p['inert_source']['bytes'],validate=True)
+ assert hashlib.sha256(core_raw).hexdigest()==p['inert_source']['sha256']
+ core=types.ModuleType('fox.paused_stage_preservation');core.__package__='fox'
+ sys.modules[core.__name__]=core
+ exec(compile(core_raw,'<measured-inert-reader>','exec'),core.__dict__)
 store=m.VerificationRecovery(pathlib.Path(p['data'])/'fox.sqlite3',enabled=True)
 with store._db(False) as db:
  db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
@@ -164,7 +171,9 @@ with store._db(False) as db:
    return store._protected_read_status(db,job,purpose='maintenance_schema_prewrite_preservation',
     paired_readback=schema[job]['readback'],expected_pair=schema[job]['expected'])
   if job in paired:
-   return store._protected_read_status(db,job,purpose='maintenance_preclaim_preservation',
+   inert=paired[job]['readback'].get('scope')=='fox-inert-startup-paired-read-v1'
+   if inert:assert paired[job]['expected']['identity']['release_sha256']==p['inert_release']
+   return store._protected_read_status(db,job,purpose='maintenance_inert_startup_preservation' if inert else 'maintenance_preclaim_preservation',
     paired_readback=paired[job]['readback'],expected_pair=paired[job]['expected'])
   return store._protected_read_status(db,job,purpose='maintenance_preservation')
  protected={job:status(job) for job in sorted(ids)}
@@ -182,9 +191,13 @@ with store._db(False) as db:
     assert value['preserved']==preserved
     preservation[job]={'state':state,'preserved':preserved}
    elif job in paired:
-    state='claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
+    inert=paired[job]['readback'].get('scope')=='fox-inert-startup-paired-read-v1'
+    state='inert_unresolved_history' if inert else 'claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
     assert value['preservation_state']==state
-    preserved=m.validate_preclaim_pair(store.database,db,run,paired[job]['readback'],paired[job]['expected'])
+    if inert:
+     from fox.paused_stage_preservation import validate_pair
+     preserved=validate_pair(store.database,db,job,paired[job]['readback'],paired[job]['expected'])['preserved']
+    else:preserved=m.validate_preclaim_pair(store.database,db,run,paired[job]['readback'],paired[job]['expected'])
     assert value['preserved']==preserved
     preservation[job]={'state':state,'preserved':preserved}
    else:
@@ -312,6 +325,14 @@ class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
   if m.__name__ in ('fox','forms2apex','fox_source_contract'):m.__path__=[]
   exec(compile(sources[m.__name__],m.__file__,'exec'),m.__dict__)
 sys.meta_path.insert(0,Finder());sys.dont_write_bytecode=True
+if p.get('inert') is True:
+ import sqlite3
+ from fox.paused_stage_preservation import observe_fox
+ database=pathlib.Path(p.get('data','/data'))/'fox.sqlite3'
+ db=sqlite3.connect(database.as_uri()+'?mode=ro',uri=True);db.row_factory=sqlite3.Row
+ db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
+ value=observe_fox(database,db);assert value==observe_fox(database,db)
+ print(json.dumps(value,sort_keys=True));raise SystemExit(0)
 from fox import verification_recovery as r
 stage=p.get('stage','validate');assert stage in ('validate','prepare_schema')
 if stage=='prepare_schema':
@@ -490,6 +511,7 @@ class Transition:
 
     def preclaim_read(self,*,stopped,new,lease,stage='validate'):
         from datetime import datetime,timedelta,timezone
+        if stage=='inert':return self.inert_read(stopped=stopped,new=new,lease=lease)
         need(stage in ('validate','prepare_schema'),'PRECLAIM_PRESERVATION_STAGE_INVALID')
         ref=self.p.get('preclaim_preservation')
         if ref is None:return {}
@@ -623,6 +645,81 @@ class Transition:
             'stopped_writer':stopped_writer}
         return {baseline['job_id']:{'readback':readback,'expected':expected}}
 
+    def inert_read(self,*,stopped,new,lease):
+        """Startup preservation inspection only; actual shared metadata collector."""
+        need(lease is not None,'INERT_ACTUAL_LEASE_REQUIRED')
+        journal=self.service.product.PrivateJournal(self.old.release)
+        lease.require_active(self.old.release,journal.root)
+        baseline=document(self.A.read(absolute(self.p['preclaim_preservation']['path']),private=True))
+        need(sha(cb(baseline))==self.p['preclaim_preservation']['sha256'] and preservation_stage(baseline)=='inert',
+             'INERT_EXPLICIT_BASELINE_REQUIRED')
+        inventory=document(self.A.read(absolute(self.new_i['layout']['inventory']['path']),private=True))
+        root=absolute(self.new_i['layout']['release_root'])
+        ref={'path':str(root/'qa/operator/paused_stage_host.py'),
+             'sha256':inventory['files']['qa/operator/paused_stage_host.py']}
+        H=load('current_inert_host',ref)
+        inert=load('fox.paused_stage_preservation',{'path':str(root/'fox/fox/paused_stage_preservation.py'),
+                    'sha256':inventory['files']['fox/fox/paused_stage_preservation.py']})
+        inert.validate_baseline(baseline)
+        pins=self.pins if new else self.old_pins
+        fox=self.A.inspect_container(pins['fox']['id'])
+        env=self.A.environment(fox)
+        release=self.R if new else self.old.release
+        need(env.get('FOX_VERIFICATION_ENABLED')=='1' and env.get('FOX_VERIFIER_RELEASE_SHA256')==release,
+             'INERT_ENABLED_ADMISSION_REQUIRED')
+        focused={'target_profile_sha256':next(iter(baseline['jobs'].values()))['target_profile_sha256']}
+        retained=getattr(self,'_inert_live_profile',None) if stopped else None
+        profile=self.preclaim_profile(fox,pins['fox'],focused,stopped=stopped,retained=retained)
+        selected=self.new_i if new else self.old.document
+        selected_inventory=document(self.A.read(absolute(selected['layout']['inventory']['path']),private=True))
+        provider_path=absolute(selected['layout']['release_root'])/'deployment/target-profile.jsn-project-v2.json'
+        provider_raw=self.A.read(provider_path,private=False)
+        need(sha(provider_raw)==selected_inventory['files']['deployment/target-profile.jsn-project-v2.json'],
+             'INERT_INSTALLED_PROVIDER_PROFILE_CHANGED')
+        provider=document(provider_raw)
+        need(self.A.prototype_execution_target(profile['envelope']['target_profile'])==
+             self.A.prototype_execution_target(provider),'INERT_CURRENT_PROVIDER_PROFILE_CHANGED')
+        converter=self.A.inspect_container(pins['forms2apex-mcp']['id'])
+        need(self.A.mount_map(converter).get('/run/fox-target/profile.json')==
+             (str(provider_path),False),'INERT_MOUNTED_PROVIDER_PROFILE_CHANGED')
+        def observation():
+            self.scope()
+            payload={'sources':self._preclaim_sources(),'inert':True,
+                     'data':self.snapshot['role_paths']['fox-data'] if stopped else '/data'}
+            args=(['/usr/bin/podman','unshare',self.cfg['python']['path']] if stopped else
+                  ['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python'])
+            result=subprocess.run(args+['-I','-B','-c',PRECLAIM_TECHNICAL],input=cb(payload),capture_output=True,timeout=120)
+            need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=2_000_000,
+                 'INERT_FOX_MEASUREMENT_UNCONFIRMED')
+            return document(result.stdout)
+        packet={'receiver_jobs':baseline['runtime']['receiver_jobs'],'jobs':sorted(baseline['jobs'])}
+        def receiver():
+            result=subprocess.run(['/usr/bin/podman','unshare',self.cfg['python']['path'],'-I','-B','-c',inert.receiver_collector_source()],
+                input=cb(packet),capture_output=True,timeout=120)
+            need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=2_000_000,
+                 'INERT_RECEIVER_MEASUREMENT_UNCONFIRMED')
+            return document(result.stdout)
+        first=observation();received=receiver()
+        pair={name:{'id':pin['id'],'image':pin['image'],
+              'configuration_sha256':self.M.configuration_signature(self.A,self.A.inspect_container(pin['id']))}
+              for name,pin in pins.items()}
+        stopped_writer=self.S._host_guard(self.snapshot) if stopped else None
+        identity={'pair_sha256':H.hashed(pair),'lease_sha256':H.hashed({'transition':self.digest,'release':self.old.release}),
+            'release_sha256':release,'source_sha256':inventory['files']['fox/fox/paused_stage_preservation.py'],
+            'profile_sha256':H.hashed(provider),'runtime_state':'stopped' if stopped else 'running',
+            'stopped_writer_sha256':H.hashed(stopped_writer) if stopped else None,
+            'admission':{'enabled':True,'release_sha256':release}}
+        storage={'fox_data':self.snapshot['role_paths']['fox-data'],
+                 'receiver_jobs':self.snapshot['role_paths']['converter-jobs']}
+        result=H.paired(baseline,first,received,identity,pins,storage=storage,stopped=stopped,
+                        verifier=H.verifier_binding(self.p))
+        need(first==observation() and received==receiver(),'INERT_DATA_CHANGED_DURING_READ')
+        need(profile==self.preclaim_profile(self.A.inspect_container(pins['fox']['id']),pins['fox'],focused,
+             stopped=stopped,retained=retained),'INERT_PROFILE_CHANGED_DURING_READ')
+        lease.require_active(self.old.release,journal.root)
+        if not stopped:self._inert_live_profile=profile
+        return result
+
     def data(self,*,stopped=False,new=False,lease=None):
         A=self.A;root=Path(self.old.document['layout']['release_root'])
         packet={'source':base64.b64encode(A.read(absolute(self.p['recovery']['path']))).decode(),'sha256':self.p['recovery']['sha256'],
@@ -633,6 +730,13 @@ class Transition:
             paired=self.preclaim_read(stopped=stopped,new=new,
                 lease=lease if lease is not None else getattr(self,'_maintenance_lease',None),stage=stage)
             packet['paired_schema_prewrite' if stage=='prepare_schema' else 'paired_preclaim']=paired
+            if stage=='inert':
+                inventory=document(A.read(absolute(self.new_i['layout']['inventory']['path']),private=True))
+                path=absolute(self.new_i['layout']['release_root'])/'fox/fox/paused_stage_preservation.py'
+                raw=A.read(path);expected=inventory['files']['fox/fox/paused_stage_preservation.py']
+                need(sha(raw)==expected,'INERT_READER_SOURCE_CHANGED')
+                packet['inert_source']={'sha256':expected,'bytes':base64.b64encode(raw).decode()}
+                packet['inert_release']=self.R if new else self.old.release
         cid=self.pins['fox']['id'] if new else self.old_pins['fox']['id']
         argv=['/usr/bin/podman','unshare',self.old.provider.configuration['python']['path']] if stopped else ['/usr/bin/podman','exec','-i',cid,'/usr/local/bin/python']
         r=subprocess.run(argv+['-I','-B','-c',BACKEND],input=cb(packet),capture_output=True,timeout=120)
