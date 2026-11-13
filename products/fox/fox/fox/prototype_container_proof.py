@@ -10,7 +10,7 @@ import hashlib
 from pathlib import Path
 import re
 
-from . import prototype_design_context as context
+from . import prototype_design_context_v1 as context
 from .forms_design_review import _canonical, validate_design_review
 from .opaf import OpafError, canonical_hash
 from .prototype_clause_proof import (_safe_stat, _check_names, _json, _same,

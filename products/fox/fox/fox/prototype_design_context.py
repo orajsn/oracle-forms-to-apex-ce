@@ -11,7 +11,7 @@ import hashlib
 import re
 
 from . import forms_design_review as review
-from .forms_blueprint import _bounded_json, source_fact_index
+from .forms_blueprint import _bounded_json, _index_cache_eligible, source_fact_index
 from .forms_focus import MAX_PLAN_BYTES, MAX_REQUESTS, PLAN_SCOPE
 from .forms_understanding_packet import _canonical as packet_bytes
 from .opaf import canonical_hash
@@ -252,12 +252,16 @@ def validate_prefix_context(packet, full_plan, candidates, proof_refs, *, expect
     """
     try:
         return _prefix(packet, full_plan, candidates, proof_refs, expected_target_sha256,
-                       container_proposals, unreviewed_focus_id)[0]
+                       container_proposals, unreviewed_focus_id, materialize_rows=False)[0]
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError, OverflowError, UnicodeError, StopIteration):
         _fail()
 
 
-def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed):
+def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed, *, materialize_rows=True):
+    # Only omit copies for bounded plain acyclic JSON. Nonplain/generic inputs
+    # keep the original full path, including any observable deepcopy failure.
+    if materialize_rows is False:
+        materialize_rows = not _index_cache_eligible([packet, plan, candidates, refs, target, proposals, unreviewed])
     objects, units, requests, ownership = _plan(packet, plan)
     _sha(target)
     _bounded_json(candidates)
@@ -344,8 +348,11 @@ def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed):
                 if (mapping['disposition'] == 'proposed' and ancestor['kind'] in ('Block', 'FormModule')
                         and parent_mapping['disposition'] == 'omitted'):
                     _fail()
-                ancestors.append({'source': deepcopy(ancestor), 'mapping': deepcopy(parent_mapping),
-                                  'owner_binding': deepcopy(bindings[ownership[parent]])})
+                if materialize_rows:
+                    ancestors.append({'source': deepcopy(ancestor), 'mapping': deepcopy(parent_mapping),
+                                      'owner_binding': deepcopy(bindings[ownership[parent]])})
+                else:
+                    bindings[ownership[parent]]  # Preserve the original potentially failing lookup.
                 parent = ancestor['parent_id']
             screen_context = None
             unit_coverage = []
@@ -361,10 +368,14 @@ def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed):
                 if source['kind'] == 'Item':
                     if source['block_id'] != owner_id or mappings[owner_id]['disposition'] != 'proposed':
                         _fail()
-                screen_context = {'declaration': deepcopy(screen), 'source_block': deepcopy(owner),
-                                  'owner_mapping': deepcopy(mappings[owner_id]),
-                                  'owner_binding': deepcopy(bindings[screen_focus]),
-                                  'borrowed_from_prior_focus': screen_focus != ref}
+                if materialize_rows:
+                    screen_context = {'declaration': deepcopy(screen), 'source_block': deepcopy(owner),
+                                      'owner_mapping': deepcopy(mappings[owner_id]),
+                                      'owner_binding': deepcopy(bindings[screen_focus]),
+                                      'borrowed_from_prior_focus': screen_focus != ref}
+                else:
+                    mappings[owner_id]
+                    bindings[screen_focus]
                 if source['kind'] in ('Trigger', 'ProgramUnit'):
                     required = [unit for unit in units.values() if unit['owner_id'] == source['id']]
                     if not required:
@@ -378,11 +389,19 @@ def _prefix(packet, plan, candidates, refs, target, proposals, unreviewed):
                         actions = [row for row in bp['actions'] if any(claim['id'] in row['claim_ids'] for claim in claims)]
                         if not claims or not actions:
                             _fail()
-                        unit_coverage.append({'unit': deepcopy(unit), 'selected_chunk_sha256': supplied[unit['id']]['sha256'],
-                                              'claim_ids': [row['id'] for row in claims], 'action_ids': [row['id'] for row in actions]})
-            rows.append({'focus_id': ref, 'source': deepcopy(source), 'mapping': deepcopy(mapping),
-                         'owner_binding': deepcopy(bindings[ref]), 'ancestors': ancestors,
-                         'screen_context': screen_context, 'unit_coverage': unit_coverage})
+                        if materialize_rows:
+                            unit_coverage.append({'unit': deepcopy(unit), 'selected_chunk_sha256': supplied[unit['id']]['sha256'],
+                                                  'claim_ids': [row['id'] for row in claims], 'action_ids': [row['id'] for row in actions]})
+                        else:
+                            supplied[unit['id']]['sha256']
+                            [row['id'] for row in claims]
+                            [row['id'] for row in actions]
+            if materialize_rows:
+                rows.append({'focus_id': ref, 'source': deepcopy(source), 'mapping': deepcopy(mapping),
+                             'owner_binding': deepcopy(bindings[ref]), 'ancestors': ancestors,
+                             'screen_context': screen_context, 'unit_coverage': unit_coverage})
+            else:
+                bindings[ref]
     summary = {'schema_version': 1, 'scope': PREFIX_SCOPE, 'source_binding': packet['source_binding'],
                'focus_plan_sha256': canonical_hash(plan), 'target_profile_sha256': target,
                'focus_ids': ids, 'candidate_sha256': [canonical_hash(row) for row in candidates],

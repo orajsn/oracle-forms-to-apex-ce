@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from fox import prototype_design_context as context, prototype_container_proof as proof
+from fox import prototype_design_context_v1 as context, prototype_container_proof as proof
 from fox.forms_focus import build_focus_plan
 from fox.forms_understanding_packet import local_packet
 from fox.forms_design_review import validate_design_review

@@ -8,6 +8,34 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.12] - 2026-11-13
+
+### Preserve historical reviews during engine updates
+
+- Ship the exact trusted v1 context validator separately for historical review
+  evidence. Keep its original byte hash and every archive/manifest check; never
+  execute archived source or change an old proof to accept new validator bytes.
+- Let current summary-only validation omit detailed rows it does not return.
+  Preserve all validation branches and potentially failing lookups. Default full
+  context and nonplain/oversized fallback behavior remain unchanged.
+- Keep the historical reader in the FOX and host source projections. The
+  converter's separate structural-only QA contract is unchanged.
+
+Verification: 110 focused and 208 neighboring summary checks passed; a separate
+105-case compatibility suite passed, including archive/JSON-reader parity,
+tamper rejection and isolated package-projection imports. Two representative
+pre-existing fixture cases still fail setup and are not counted as passes. No
+complete production archive build or deployment is claimed by these checks.
+
+The initial isolated one-module comparison correctly rejected historical proof
+because the validator bytes differed. The corrected current-plus-frozen-v1 family
+passed all four technical checks on the retained case without changing its files
+or ATTENTION state. These isolated checks took approximately 103s versus 104s
+previously: no material real-case speed improvement is claimed. A small synthetic
+summary-only measurement reduced deepcopy calls from 9,872 to 48, but does not
+establish end-to-end performance. Publication is not runtime/export acceptance,
+browser-dispatch authority or business acceptance.
+
 ## [0.22.11] - 2026-11-13
 
 ### Reuse identical source analysis within checks

@@ -12,7 +12,7 @@ import pytest
 
 from fox import prototype_container_epoch as container, prototype_mapping_epochs as epochs
 from fox import prototype_clause_epoch as clause, prototype_job, prototype_authority, worker
-from fox import prototype_design_context as context, prototype_container_proof as proof
+from fox import prototype_design_context_v1 as context, prototype_container_proof as proof
 from fox.forms_design_review import validate_design_review
 from fox.opaf import canonical_hash, OpafError
 from fox.prototype_transport import build_authority_bundle
