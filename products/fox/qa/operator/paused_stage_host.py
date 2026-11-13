@@ -1,7 +1,9 @@
 """Read-only host metadata for an explicit inert-startup baseline.
 
-Never import a runtime factory or open a credential file. This collector must
-run under the existing maintenance lease and current installation/host guards.
+The peer probe may use only the audited configuration-only constructor in a
+fresh pinned interpreter. No execution-authority or credential-content call is
+permitted. This collector must run under the existing maintenance lease and
+current installation/host guards.
 It fails closed if effective units, process attribution or roots are unavailable.
 """
 from __future__ import annotations
