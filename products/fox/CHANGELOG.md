@@ -8,6 +8,34 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.11] - 2026-11-13
+
+### Reuse identical source analysis within checks
+
+- Reuse pure Forms document analysis only within an existing fenced read scope,
+  keyed by exact ordered filenames, byte lengths and source-byte hashes. Outside
+  a scope, or for ineligible inputs, retain the original uncached behavior.
+- Return independent copies so one caller cannot change a later result. Keep
+  selection, processing permission, owner, profile and review checks separate.
+- Use a small optional store: four entries, 4 MiB serialized per value and
+  8 MiB serialized total. Capacity misses compute without storing. Required
+  proof-cache budgets and file/context fences remain unchanged. These caps do
+  not describe total Python process memory or temporary allocations.
+
+Verification: 34 focused tests passed. The broader regression run completed with
+259 passes and seven setup errors; all seven errors were reproduced with both
+unchanged baseline modules in isolated memory. Those test bodies remain
+unverified and are not counted as passes. Independent source review found no
+blocking regression. Parser, credential rejection and mandatory fence behavior
+remain unchanged.
+
+A synthetic 11,712-byte, 80-block source repeated eight times produced identical
+output with eight builds reduced to one; measured wall time was 0.117s versus
+0.049s. This small pure-function comparison is not a live authority, conversion
+or customer performance guarantee. The change adds no model call, persistent
+cache, automatic retry or permission grant. Publication does not imply deployment
+or completed end-to-end acceptance.
+
 ## [0.22.10] - 2026-11-13
 
 ### Allow conversion stages time to finish

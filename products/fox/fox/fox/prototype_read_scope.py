@@ -23,6 +23,11 @@ MAX_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_CACHED_VALUES = 512
 MAX_CACHED_VALUE_BYTES = 20_000_000
 MAX_CACHE_BYTES = 64 * 1024 * 1024
+# Optional pure document material never spends mandatory proof-cache capacity.
+# These are canonical serialized-value caps, not Python process RSS limits.
+MAX_DOCUMENT_BUILDS = 4
+MAX_DOCUMENT_BUILD_VALUE_BYTES = 4 * 1024 * 1024
+MAX_DOCUMENT_BUILD_BYTES = 8 * 1024 * 1024
 _state = ContextVar('fox_readonly_technical_scope', default=None)
 
 
@@ -164,6 +169,7 @@ def readonly_proof_scope(root):
             if key in before:
                 job_files.update(prefix + name for name in before[key] if not name.endswith('/'))
     token = _state.set({'root': root, 'owner': _owner(), 'cache': {}, 'bytes': 0,
+        'document_builds': {}, 'document_build_bytes': 0,
         'fenced_root_files': frozenset(root_files), 'fenced_job_files': frozenset(job_files)})
     try:
         yield
@@ -234,6 +240,38 @@ def cached_read(root, kind, identity, compute):
         current['cache'][key] = deepcopy(value)
         current['bytes'] += size
     return deepcopy(current['cache'][key])
+
+
+def optional_document_build(root, identity, compute):
+    """Pure exact-byte document derivation, only in this fenced read operation.
+
+    Capacity alone declines storage; context/fence/compute errors never fall
+    through. This independent optional store cannot exhaust mandatory entries.
+    """
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current['root'] != Path(root).absolute() or current['owner'] != _owner():
+        _fail()
+    if (type(identity) is not tuple or not 1 <= len(identity) <= 4
+            or any(type(row) is not tuple or len(row) != 3 or type(row[0]) is not str
+                   or len(row[0]) > 180 or type(row[1]) is not int or row[1] <= 0
+                   or type(row[2]) is not str or not re.fullmatch('[a-f0-9]{64}', row[2])
+                   for row in identity)):
+        _fail()
+    builds = current['document_builds']
+    if identity in builds:
+        return deepcopy(builds[identity])
+    if len(builds) >= MAX_DOCUMENT_BUILDS:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_DOCUMENT_BUILD_VALUE_BYTES or current['document_build_bytes'] + size > MAX_DOCUMENT_BUILD_BYTES:
+        return value
+    builds[identity] = deepcopy(value)
+    current['document_build_bytes'] += size
+    return deepcopy(builds[identity])
 
 
 def forbid_execution():

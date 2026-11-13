@@ -1,14 +1,14 @@
 {
-  "version": "0.22.10",
+  "version": "0.22.11",
   "released_on": "2026-11-13",
-  "title": "Allow conversion stages time to finish",
+  "title": "Reuse identical source analysis within checks",
   "changes": [
-    "Give validation, schema preparation, import, runtime checking and export their own trusted socket wait allowances.",
-    "Use matching waits when reading a retained stage result; leave unrelated request routes unchanged.",
-    "Preserve validation, authority checks and no-replay behavior: a lost response still requires reconciliation."
+    "Reuse identical Forms document analysis within one existing fenced read check, keyed by exact names and source-byte hashes.",
+    "Return independent copies and keep the optional analysis cache separate from required proof-cache capacity.",
+    "Keep current permissions, source changes, review checks and execution boundaries fresh; reuse never grants processing approval."
   ],
   "limitations": [
-    "Stage waits are socket allowances, not completion deadlines or proof of recovery. Advisory progress is not technical verification or business acceptance; unknown outcomes and failed claims require reconciliation, not automatic retry.",
+    "Cached analysis lasts for one fenced check and never grants permission. Stage waits are not completion deadlines or proof of recovery. Advisory progress is not technical verification or business acceptance; unknown outcomes require reconciliation, not automatic retry.",
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",

@@ -28,6 +28,24 @@ def _hash(raw: bytes) -> str:
 
 
 def _build(documents: list[tuple[str, bytes]]) -> tuple[dict, list[dict]]:
+    from .prototype_read_scope import current_read_root, optional_document_build
+    root = current_read_root()
+    if root is None or type(documents) is not list or not 1 <= len(documents) <= MAX_FILES:
+        return _build_uncached(documents)
+    # Copy the container; every accepted key component is a plain immutable
+    # value. Subclasses/malformed inputs retain the original uncached behavior.
+    snapshot = list(documents)
+    if any(type(row) is not tuple or len(row) != 2 or type(row[0]) is not str
+           or len(row[0]) > 180 or type(row[1]) is not bytes
+           or not 0 < len(row[1]) <= forms_facts.MAX_FILE_BYTES for row in snapshot):
+        return _build_uncached(documents)
+    if sum(len(raw) for _, raw in snapshot) > MAX_TOTAL_SOURCE_BYTES:
+        return _build_uncached(documents)
+    identity = tuple((name, len(raw), _hash(raw)) for name, raw in snapshot)
+    return optional_document_build(root, identity, lambda: _build_uncached(snapshot))
+
+
+def _build_uncached(documents: list[tuple[str, bytes]]) -> tuple[dict, list[dict]]:
     if not isinstance(documents, list) or not 1 <= len(documents) <= MAX_FILES:
         raise ValueError("Supply between 1 and 4 Forms XML documents.")
     names, digests, validated = set(), set(), []
