@@ -28,6 +28,14 @@ MAX_CACHE_BYTES = 64 * 1024 * 1024
 MAX_DOCUMENT_BUILDS = 4
 MAX_DOCUMENT_BUILD_VALUE_BYTES = 4 * 1024 * 1024
 MAX_DOCUMENT_BUILD_BYTES = 8 * 1024 * 1024
+# Complete retained-container proofs have a separate optional serialized budget.
+MAX_CONTAINER_PROOFS = 4
+MAX_CONTAINER_PROOF_VALUE_BYTES = 4 * 1024 * 1024
+MAX_CONTAINER_PROOF_BYTES = 8 * 1024 * 1024
+# Pure context-screen projection data cannot spend any other cache's budget.
+MAX_SCREEN_PROJECTIONS = 128
+MAX_SCREEN_PROJECTION_VALUE_BYTES = 4 * 1024 * 1024
+MAX_SCREEN_PROJECTION_BYTES = 8 * 1024 * 1024
 _state = ContextVar('fox_readonly_technical_scope', default=None)
 
 
@@ -170,6 +178,8 @@ def readonly_proof_scope(root):
                 job_files.update(prefix + name for name in before[key] if not name.endswith('/'))
     token = _state.set({'root': root, 'owner': _owner(), 'cache': {}, 'bytes': 0,
         'document_builds': {}, 'document_build_bytes': 0,
+        'container_proofs': {}, 'container_proof_bytes': 0,
+        'screen_projections': {}, 'screen_projection_bytes': 0,
         'fenced_root_files': frozenset(root_files), 'fenced_job_files': frozenset(job_files)})
     try:
         yield
@@ -272,6 +282,62 @@ def optional_document_build(root, identity, compute):
     builds[identity] = deepcopy(value)
     current['document_build_bytes'] += size
     return deepcopy(builds[identity])
+
+
+def optional_container_proof(root, identity, compute):
+    """Pure complete proof only; no authority, DB, event or consent results.
+
+    Identity is an exact-input digest prepared after fresh module/member guards.
+    Capacity declines storage, never validation or the enclosing exit fences.
+    """
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current['root'] != Path(root).absolute() or current['owner'] != _owner():
+        _fail()
+    if type(identity) is not str or not re.fullmatch('[a-f0-9]{64}', identity):
+        _fail()
+    proofs = current['container_proofs']
+    if identity in proofs:
+        return deepcopy(proofs[identity])
+    if len(proofs) >= MAX_CONTAINER_PROOFS:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_CONTAINER_PROOF_VALUE_BYTES or current['container_proof_bytes'] + size > MAX_CONTAINER_PROOF_BYTES:
+        return value
+    proofs[identity] = deepcopy(value)
+    current['container_proof_bytes'] += size
+    return deepcopy(proofs[identity])
+
+
+def optional_screen_projection(root, identity, compute):
+    """Bounded pure candidate/receipt data; not a cached permission or review.
+
+    Only capacity declines storage. Context, computation and enclosing file-fence
+    failures still propagate. Copies protect both first and subsequent results.
+    """
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current['root'] != Path(root).absolute() or current['owner'] != _owner():
+        _fail()
+    if type(identity) is not str or not re.fullmatch('[a-f0-9]{64}', identity):
+        _fail()
+    projections = current['screen_projections']
+    if identity in projections:
+        return deepcopy(projections[identity])
+    if len(projections) >= MAX_SCREEN_PROJECTIONS:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_SCREEN_PROJECTION_VALUE_BYTES or current['screen_projection_bytes'] + size > MAX_SCREEN_PROJECTION_BYTES:
+        return value
+    projections[identity] = deepcopy(value)
+    current['screen_projection_bytes'] += size
+    return deepcopy(projections[identity])
 
 
 def forbid_execution():

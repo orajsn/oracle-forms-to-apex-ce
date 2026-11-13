@@ -7,6 +7,7 @@ from copy import deepcopy
 import hashlib
 import math
 from pathlib import Path
+import re
 import sqlite3
 
 from . import prototype_mapping_epochs as epochs, prototype_clause_epoch as clause
@@ -126,6 +127,71 @@ def _historical(root, packet, plan, target, predecessor):
 
 
 def _proof(root, packet, plan, target, predecessor, descriptor, members):
+    """Reuse a complete technical result only inside this exact fenced operation.
+
+    Pipeline files (including historical role/normalization/source sidecars) are
+    entry/exit fenced. The two installed module files are outside that fence:
+    their original exact-byte/manifest checks therefore run on EVERY hit.
+    No caller authority, current owner, DB/event or processing check is cached.
+    """
+    from . import prototype_read_scope as scope
+    current = scope.current_read_root()
+    if current is None:
+        return _proof_uncached(root, packet, plan, target, predecessor, descriptor, members)
+    if current != Path(root).absolute():
+        scope._fail()
+    from .forms_blueprint import _index_cache_eligible
+    inputs = [packet, plan, target, predecessor, descriptor]
+    # Only ordinary bounded inputs can form keys. Unsupported inputs retain the
+    # old validation, including its original errors, rather than being rejected
+    # or canonically colliding with a previously checked plain value.
+    if (root.name != 'prototype-pipeline' or not _index_cache_eligible(inputs)
+            or type(plan) is not dict or type(plan.get('requests')) is not list
+            or len(plan['requests']) < 8
+            or any(type(row) is not dict or type(row.get('focus_id')) is not str
+                   or not re.fullmatch('focus-[a-f0-9]{24}', row['focus_id']) for row in plan['requests'])
+            or type(members) is not dict or set(members) != JSON_FILES
+            or any(type(body) is not bytes or not 0 < len(body) <= MAX_FILE_BYTES for body in members.values())
+            or sum(map(len, members.values())) > MAX_TOTAL_BYTES):
+        return _proof_uncached(root, packet, plan, target, predecessor, descriptor, members)
+    # Retain potentially failing existence/directory checks, even on hits.
+    active = root / PREFIX
+    if active.exists():
+        allowed = {request['focus_id'] for request in plan['requests'][7:]}
+        for path in active.iterdir():
+            if path.name.startswith('focus-') and path.name not in allowed:
+                _fail()
+    for request in plan['requests'][8:]:
+        path = root / clause.PREFIX / request['focus_id']
+        if path.exists() or path.is_symlink():
+            _fail()
+    from . import prototype_container_proof as proof, prototype_clause_proof as clause_proof
+    # Preserve the public receiver's error normalization for its original guard.
+    try:
+        checked_members, manifest = proof._guard_members(members,
+            descriptor['context_module_sha256'], descriptor['original_manifest'])
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError,
+            OverflowError, UnicodeError, OpafError):
+        proof._fail()
+    # Read CURRENT descriptor bytes, never an earlier successful module pin.
+    clause_descriptor = epochs.read(root / clause.PREFIX / 'clause-proof-descriptor.json', 65_536)
+    if not _index_cache_eligible(clause_descriptor):
+        return _proof_uncached(root, packet, plan, target, predecessor, descriptor, members)
+    try:
+        clause_proof._manifest(clause_descriptor['original_manifest'])
+        clause_proof._guard_installed_module(clause_descriptor['original_manifest'])
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError,
+            OverflowError, UnicodeError, OpafError):
+        clause_proof._fail()
+    identity = canonical_hash({'purpose': 'complete-retained-container-proof-v1',
+        'inputs': inputs, 'manifest': manifest, 'clause_descriptor': clause_descriptor,
+        'members': {name: {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()}
+                    for name, body in checked_members.items()}})
+    return scope.optional_container_proof(root, identity,
+        lambda: _proof_uncached(root, packet, plan, target, predecessor, descriptor, members))
+
+
+def _proof_uncached(root, packet, plan, target, predecessor, descriptor, members):
     active = root / PREFIX
     if active.exists():
         allowed = {request['focus_id'] for request in plan['requests'][7:]}

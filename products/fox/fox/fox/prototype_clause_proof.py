@@ -240,6 +240,15 @@ def validate_clause_proof_members(members, *, approved_manifest, assembler_sha25
         _fail()
 
 
+def _guard_installed_module(manifest):
+    """Exact original installed-byte/manifest check; never an approval grant."""
+    installed = Path(assembler.__file__).read_bytes()
+    if (hashlib.sha256(installed).hexdigest() != ASSEMBLER_SHA256
+            or manifest['prototype_clause_analysis.py'] != {
+                'sha256': ASSEMBLER_SHA256, 'bytes': len(installed)}):
+        _fail()
+
+
 def _validate_members(raw, manifest, assembler_sha256, packet, focus, original,
                       original_target, analysis_role, identity):
     _manifest(manifest)
@@ -250,11 +259,7 @@ def _validate_members(raw, manifest, assembler_sha256, packet, focus, original,
         if (type(body) is not bytes or len(body) != manifest[name]['bytes']
                 or hashlib.sha256(body).hexdigest() != manifest[name]['sha256']):
             _fail()
-    installed = Path(assembler.__file__).read_bytes()
-    if (hashlib.sha256(installed).hexdigest() != ASSEMBLER_SHA256
-            or manifest['prototype_clause_analysis.py'] != {
-                'sha256': ASSEMBLER_SHA256, 'bytes': len(installed)}):
-        _fail()
+    _guard_installed_module(manifest)
     for value in (manifest, packet, focus, original, original_target, analysis_role, identity):
         _canonical(value, MAX_FILE_BYTES)
     if (type(identity) is not dict or set(identity) != {'job_id', 'source_hash'}

@@ -8,6 +8,42 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.13] - 2026-11-13
+
+### Avoid rebuilding unchanged conversion evidence
+
+- Reuse complete retained-container proofs only within the existing fenced read
+  operation, keyed by actual inputs and member bytes. Both installed validator
+  byte/manifest guards still run on every hit. No current permission, owner,
+  database state or target observation is cached.
+- Reuse pure context-screen projections with all source structures and independent
+  binding inputs in the key. Return independent copies and preserve original
+  validation, error normalization and out-of-scope behavior.
+- Keep independent optional stores: four complete proofs and 128 projections,
+  each limited to 4 MiB serialized per value and 8 MiB serialized in total.
+  Capacity misses recompute normally; mandatory proof budgets and enclosing file
+  fences are unchanged. These are serialized-value caps, not process-memory caps.
+
+Verification: the final selected regression run passed 126 tests, including all
+75 projection acceptance checks and release metadata checks. All 52 complete-proof
+acceptance checks passed in a separate short-path run after the first run hit
+Windows' path limit. Six older plan-scope tests still fail fixture setup and their
+bodies remain unverified; the selected suite is not all green. Earlier neighboring
+runs passed 271 complete-proof and 324 projection-related cases; suites overlap.
+Independent reviews covered both stores and the final projection entry limit.
+
+The isolated exact-family comparison passed all four technical checks on the
+retained real job without changing its state or files. Measured check time fell
+from approximately 104s to 65s; projection calls required 18 full computations
+and 61 cache hits, using 127,237 serialized bytes. The earlier four-entry candidate
+only produced four hits and took approximately 95s. Diagnostic counters add
+unquantified overhead; these are individual read-only measurements, not complete
+conversion timings or a performance guarantee. No installed code was replaced.
+
+This source release does not resolve the earlier runtime error, establish the
+whole runtime deadline, deploy a new service, export an application or record
+business acceptance. No automatic replay or new execution permission is added.
+
 ## [0.22.12] - 2026-11-13
 
 ### Preserve historical reviews during engine updates

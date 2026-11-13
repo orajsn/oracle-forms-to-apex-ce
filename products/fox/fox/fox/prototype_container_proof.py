@@ -161,9 +161,8 @@ def _old_invocation(invocation, role):
     # validator; these metadata fields are not a new execution attestation.
 
 
-def _validate(members, module_sha, *, approved_manifest, packet, full_plan, historical_views,
-              rejected_candidate, rejected_review, rejected_invocation, original_target,
-              identity, module_id, original_files):
+def _guard_members(members, module_sha, approved_manifest):
+    """Exact original byte prelude, also mandatory on operation-local cache hits."""
     _manifest(approved_manifest)
     if (type(members) is not dict or len(members) != len(JSON_FILES) or set(members) != JSON_FILES
             or type(module_sha) is not str or module_sha != CONTEXT_MODULE_SHA256):
@@ -178,6 +177,13 @@ def _validate(members, module_sha, *, approved_manifest, packet, full_plan, hist
     if (hashlib.sha256(installed).hexdigest() != CONTEXT_MODULE_SHA256
             or approved_manifest['prototype_design_context.py'] != {'sha256': CONTEXT_MODULE_SHA256, 'bytes': len(installed)}):
         _fail()
+    return members, approved_manifest
+
+
+def _validate(members, module_sha, *, approved_manifest, packet, full_plan, historical_views,
+              rejected_candidate, rejected_review, rejected_invocation, original_target,
+              identity, module_id, original_files):
+    members, approved_manifest = _guard_members(members, module_sha, approved_manifest)
     values = {name: _json(body) for name, body in members.items()}
     _canonical(identity, 1000)
     _canonical(original_target, MAX_FILE_BYTES)

@@ -1,11 +1,11 @@
 {
-  "version": "0.22.12",
+  "version": "0.22.13",
   "released_on": "2026-11-13",
-  "title": "Preserve historical reviews during engine updates",
+  "title": "Avoid rebuilding unchanged conversion evidence",
   "changes": [
-    "Keep historical review records bound to an exact trusted frozen validator while current validation code evolves.",
-    "Avoid constructing unused detailed rows for summary-only checks, without removing validation or changing full reports.",
-    "Preserve historical hashes, manifests and permission checks; archived source is checked but never executed."
+    "Reuse identical complete historical proofs and pure screen projections within an existing read-only check.",
+    "Keep fresh installed-module checks, source and file bindings, independent result copies and all current permission checks.",
+    "Bound optional caches separately and recompute when full; no persistent cache, automatic retry or new execution permission."
   ],
   "limitations": [
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",

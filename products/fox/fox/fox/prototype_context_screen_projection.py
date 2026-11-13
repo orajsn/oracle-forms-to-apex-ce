@@ -9,7 +9,7 @@ from copy import deepcopy
 
 from . import forms_design_review as review
 from . import prototype_design_context as context
-from .forms_blueprint import _bounded_json
+from .forms_blueprint import _bounded_json, _index_cache_eligible
 from .opaf import canonical_hash
 from .prototype_focus_projection import source_fact_gate
 
@@ -52,6 +52,27 @@ def project_context_screens(packet, full_plan, candidates, proof_refs, *,
 
 def _project(packet, plan, candidates, refs, source_pin, plan_pin, focus_pin,
              request_pin, raw_pin, target):
+    """Reuse pure projection data, never a review, provenance or current grant.
+
+    Every actual input is keyed, not merely the independently supplied hashes.
+    No scope is created here; unsupported inputs retain the exact original path.
+    The caller still checks original bytes, prior reviews and current permission.
+    """
+    from .prototype_read_scope import current_read_root, optional_screen_projection
+    root = current_read_root()
+    if root is None:
+        return _project_uncached(packet, plan, candidates, refs, source_pin, plan_pin,
+                                 focus_pin, request_pin, raw_pin, target)
+    inputs = [packet, plan, candidates, refs, source_pin, plan_pin, focus_pin,
+              request_pin, raw_pin, target]
+    if not _index_cache_eligible(inputs):
+        return _project_uncached(*inputs)
+    identity = canonical_hash({'purpose': 'complete-context-screen-projection-v1', 'inputs': inputs})
+    return optional_screen_projection(root, identity, lambda: _project_uncached(*inputs))
+
+
+def _project_uncached(packet, plan, candidates, refs, source_pin, plan_pin, focus_pin,
+                      request_pin, raw_pin, target):
     for pin in (source_pin, plan_pin, request_pin, raw_pin, target):
         context._sha(pin)
     _same(packet['source_binding'], source_pin)
