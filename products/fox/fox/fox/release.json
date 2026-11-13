@@ -1,14 +1,14 @@
 {
-  "version": "0.22.9",
+  "version": "0.22.10",
   "released_on": "2026-11-13",
-  "title": "Batch native schema metadata checks",
+  "title": "Allow conversion stages time to finish",
   "changes": [
-    "Check all native prototype tables in one guarded SQLcl session instead of starting a session for every table.",
-    "Bind each metadata row to its exact source block and table, retaining the existing column, key, identity and trigger checks.",
-    "Reject missing, duplicated, reordered, cross-bound or unexpected output; keep normal target authority, freshness and no-replay rules."
+    "Give validation, schema preparation, import, runtime checking and export their own trusted socket wait allowances.",
+    "Use matching waits when reading a retained stage result; leave unrelated request routes unchanged.",
+    "Preserve validation, authority checks and no-replay behavior: a lost response still requires reconciliation."
   ],
   "limitations": [
-    "Advisory progress is not technical verification or business acceptance. Unavailable progress is not success; failed claims still require reconciliation, not automatic retry.",
+    "Stage waits are socket allowances, not completion deadlines or proof of recovery. Advisory progress is not technical verification or business acceptance; unknown outcomes and failed claims require reconciliation, not automatic retry.",
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",

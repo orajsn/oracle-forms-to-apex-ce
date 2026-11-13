@@ -405,14 +405,22 @@ class ConverterClient:
         self.token=token
 
     def request(self,method,path,payload=None,binary=False):
-        # A saved-draft continuation can perform three 120-second authority
-        # callbacks around a 600-second SQLcl validation child. Allow those
-        # trusted budgets plus 120 seconds of transport/rendering margin.
-        # This bounds blocking socket I/O, not total wall time or queue delay.
-        # Keep unknown outcomes recover-only; this setting never permits replay.
-        validation = (method == 'POST' and type(path) is str and re.fullmatch(
-            r'/fox/prototype/jobs/fox-[a-f0-9]{20}/(?:stages/validate|continue-validation)', path))
-        conn=http.client.HTTPConnection('127.0.0.1',self._port,timeout=1080 if validation else 600)
+        # Trusted stage waits include separate SQLcl/browser children and
+        # repeated current-authority/target checks. GET may wait behind the
+        # same stage lock, so it receives the matching observation allowance.
+        # Socket I/O bounds are NOT whole-stage deadlines; target preflight
+        # has no aggregate bound. No child limit, authority TTL or retry changes.
+        timeout = 600
+        if method in ('POST', 'GET') and type(path) is str:
+            stage = re.fullmatch(r'/fox/prototype/jobs/fox-[a-f0-9]{20}/stages/'
+                                 r'(validate|prepare_schema|import|verify_runtime|export)', path)
+            if stage:
+                timeout = {'validate': 1080, 'prepare_schema': 2400, 'import': 4800,
+                           'verify_runtime': 3600, 'export': 3600}[stage[1]]
+            elif method == 'POST' and re.fullmatch(
+                    r'/fox/prototype/jobs/fox-[a-f0-9]{20}/continue-validation', path):
+                timeout = 1080
+        conn=http.client.HTTPConnection('127.0.0.1',self._port,timeout=timeout)
         try:
             conn.request(method,path,json.dumps(payload) if payload is not None else None,
                          {'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})

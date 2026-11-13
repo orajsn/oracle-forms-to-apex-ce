@@ -8,6 +8,31 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.10] - 2026-11-13
+
+### Allow conversion stages time to finish
+
+- Replace the shared ten-minute socket wait for native prototype stages with
+  trusted stage-specific allowances: validation 1080s, schema preparation 2400s,
+  import 4800s, runtime verification 3600s and export 3600s.
+- Give exact stage GET requests the same allowance as POST, because reading a
+  retained result can wait behind the executing stage's lock. Preserve the
+  existing validation-continuation wait and other request defaults.
+- Keep request bodies, endpoint restrictions, validation, authority freshness,
+  stage execution and no-replay rules unchanged. A response loss does not issue
+  another POST, poll automatically or mark a job successful.
+
+Verification: 119 targeted routing/endpoint tests and 154 neighboring protocol,
+pipeline and import-reconciliation tests passed. Independent source review found
+no material issue. External services were modelled; no live job was changed by
+these tests. The original neighboring test process completed successfully after
+its shell observer timed out; it was not restarted.
+
+These are socket wait allowances, not whole-stage deadlines or a performance
+improvement. Target preflight still has no aggregate duration bound; expensive
+runtime polling and lost-response reconciliation remain separate work. This
+source release does not establish deployment or end-to-end conversion success.
+
 ## [0.22.9] - 2026-11-13
 
 ### Batch native schema metadata checks
