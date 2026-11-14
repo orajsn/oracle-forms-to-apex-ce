@@ -41,6 +41,10 @@ MAX_SCREEN_PROJECTION_BYTES = 8 * 1024 * 1024
 MAX_CONTEXT_PREFIXES = 128
 MAX_CONTEXT_PREFIX_VALUE_BYTES = 4 * 1024 * 1024
 MAX_CONTEXT_PREFIX_BYTES = 8 * 1024 * 1024
+# Final DSC technical views cannot spend any other optional/mandatory budget.
+MAX_DSC_VIEWS = 128
+MAX_DSC_VIEW_VALUE_BYTES = 4 * 1024 * 1024
+MAX_DSC_VIEW_BYTES = 8 * 1024 * 1024
 # Eligibility limits only: unsupported values retain the original deepcopy path.
 _JSON_COPY_MAX_DEPTH = 64
 _JSON_COPY_MAX_NODES = 600_000
@@ -190,6 +194,7 @@ def readonly_proof_scope(root):
         'container_proofs': {}, 'container_proof_bytes': 0,
         'screen_projections': {}, 'screen_projection_bytes': 0,
         'context_prefixes': {}, 'context_prefix_bytes': 0,
+        'dsc_views': {}, 'dsc_view_bytes': 0,
         'fenced_root_files': frozenset(root_files), 'fenced_job_files': frozenset(job_files)})
     try:
         yield
@@ -427,6 +432,30 @@ def optional_context_prefix(root, identity, compute):
     prefixes[identity] = deepcopy(value)
     current['context_prefix_bytes'] += size
     return deepcopy(prefixes[identity])
+
+
+def optional_dsc_view(root, identity, compute):
+    """Final detached technical view only; not current DB/owner/processing grants."""
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current['root'] != Path(root).absolute() or current['owner'] != _owner():
+        _fail()
+    if type(identity) is not str or not re.fullmatch('[a-f0-9]{64}', identity):
+        _fail()
+    views = current['dsc_views']
+    if identity in views:
+        return deepcopy(views[identity])
+    if len(views) >= MAX_DSC_VIEWS:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_DSC_VIEW_VALUE_BYTES or current['dsc_view_bytes'] + size > MAX_DSC_VIEW_BYTES:
+        return value
+    views[identity] = deepcopy(value)
+    current['dsc_view_bytes'] += size
+    return deepcopy(views[identity])
 
 
 def forbid_execution():

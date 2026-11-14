@@ -8,6 +8,33 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.15] - 2026-11-14
+
+### Reduce repeated checks of saved conversion reviews
+
+- Reuse final historical review views only inside the existing fenced read-only
+  operation. Bind every actual input, preview mode and freshly checked member
+  identity; return independent copies. Runtime execution never uses this cache.
+- Keep installed validator bytes, manifests, members and directory-absence checks
+  fresh on every hit. Current database, owner, consent and event checks remain
+  outside the cache, with unchanged original validation on misses.
+- Keep a separate optional store limited to 128 entries, 4 MiB serialized per
+  value and 8 MiB total. Do not consume other verification budgets. These limits
+  describe serialized data, not total process memory.
+
+Verification: 39 focused acceptance and 37 neighboring checks passed. Independent
+review confirmed the original validation bodies and existing scope logic were
+preserved. The small authored fixture was slower because fresh member checks
+remain; it is not used as evidence of a speed improvement.
+
+An isolated, read-only comparison on the retained real conversion passed all four
+technical checks in about 32.5s, versus 37.2s for the previous candidate. It stored
+38 final views (about 1.14 MB); job state and all retained files stayed unchanged.
+Diagnostic counters add unquantified overhead. This is a single measured candidate
+comparison, not installed performance, a runtime-deadline guarantee or a complete
+conversion. No new import, runtime pass, SQL export or business acceptance is
+claimed. Deployment and end-to-end verification remain separate.
+
 ## [0.22.14] - 2026-11-13
 
 ### Reuse source checks and preserve paused conversions

@@ -280,7 +280,120 @@ def inspect(job, snapshot, original, target, db):
     return proposed,before,None,checkpoint(epoch,before,proposed),epoch,supplement
 
 
+def _view_history_guards(root, plan):
+    """Fresh outside-fence module guards and potentially failing directory gates.
+
+    All historical/data/role files are inside the existing entry/exit fence.
+    Installed frozen context/assembler bytes are NOT, so their exact original
+    manifest/member/module checks must also run on every final-view cache hit.
+    """
+    from . import prototype_container_epoch as container, prototype_clause_epoch as clause
+    from . import prototype_container_proof as proof, prototype_clause_proof as clause_proof
+    from .forms_blueprint import _index_cache_eligible
+    record = epochs.read(epochs._safe_path(root, RECORD))
+    descriptor = epochs.read(epochs._safe_path(root, container.PREFIX + '/container-proof-descriptor.json'))
+    clause_descriptor = epochs.read(epochs._safe_path(root, clause.PREFIX + '/clause-proof-descriptor.json'), 65_536)
+    if not _index_cache_eligible([record, descriptor, clause_descriptor]):
+        return None
+    proposed = record.get('plan')
+    if (type(proposed) is not dict or type(proposed.get('projections')) is not list
+            or any(type(row) is not dict or type(row.get('focus_id')) is not str
+                   or not re.fullmatch('focus-[a-f0-9]{24}', row['focus_id']) for row in proposed['projections'])):
+        return None  # Preserve the original record validator's error ordering.
+    active = root / container.PREFIX
+    if active.exists():
+        allowed = {row['focus_id'] for row in plan['requests'][7:]}
+        for path in active.iterdir():
+            if path.name.startswith('focus-') and path.name not in allowed:
+                container._fail()
+    for request in plan['requests'][8:]:
+        path = root / clause.PREFIX / request['focus_id']
+        if path.exists() or path.is_symlink():
+            container._fail()
+    allowed = set(FIXED_FILES) | {row['focus_id'] + '/' + name
+        for row in proposed['projections'] for name in FOCUS_FILES}
+    directories = {row['focus_id'] for row in proposed['projections']}
+    for path in (root / PREFIX).rglob('*'):
+        relative = path.relative_to(root / PREFIX).as_posix()
+        epochs._safe_path(root / PREFIX, relative)
+        if path.is_dir():
+            if relative not in directories: _fail()
+        elif not path.is_file() or relative not in allowed:
+            _fail()
+    members = container._members(root / container.PREFIX / 'container-proof')
+    try:
+        proof._guard_members(members, descriptor['context_module_sha256'], descriptor['original_manifest'])
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError,
+            OverflowError, UnicodeError, OpafError):
+        proof._fail()
+    clause_members = clause._members(root / clause.PREFIX / 'clause-proof')
+    try:
+        manifest = clause_descriptor['original_manifest']
+        clause_proof._manifest(manifest)
+        if (type(clause_descriptor['assembler_sha256']) is not str
+                or clause_descriptor['assembler_sha256'] != clause_proof.ASSEMBLER_SHA256):
+            clause_proof._fail()
+        for name, body in clause_members.items():
+            if (type(body) is not bytes or len(body) != manifest[name]['bytes']
+                    or hashlib.sha256(body).hexdigest() != manifest[name]['sha256']):
+                clause_proof._fail()
+        clause_proof._guard_installed_module(manifest)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError,
+            OverflowError, UnicodeError, OpafError):
+        clause_proof._fail()
+    return {'record': record, 'container_descriptor': descriptor, 'clause_descriptor': clause_descriptor,
+        'actual_members': [{name: {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()}
+            for name, body in raw.items()} for raw in (members, clause_members)]}
+
+
 def active_focus(root,packet,plan,request,target,previous,epoch,*,runtime=None,preview=False):
+    """Reuse a final detached view only inside the same fenced technical read.
+
+    Runtime paths, DB/event/current-owner/processing gates and full-job/publication
+    validation remain outside this optional store. A cached retained review is
+    technical data, never a fresh processing or execution grant.
+    """
+    if runtime is not None:
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,runtime=runtime,preview=preview)
+    from . import prototype_read_scope as scope
+    current = scope.current_read_root()
+    if current is None:
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    if current != Path(root).absolute():
+        scope._fail()
+    from .forms_blueprint import _index_cache_eligible
+    from . import prototype_container_epoch as container, prototype_clause_epoch as clause
+    from .prototype_container_proof import JSON_FILES as container_names
+    from .prototype_clause_proof import JSON_FILES as clause_names
+    inputs = [packet,plan,request,target,previous,epoch,preview]
+    if (type(root) is not type(current) or root.name != 'prototype-pipeline' or type(preview) is not bool
+            or not _index_cache_eligible(inputs) or type(plan) is not dict
+            or type(plan.get('requests')) is not list or type(request) is not dict
+            or type(request.get('focus_id')) is not str or type(previous) is not list
+            or any(type(row) is not dict or type(row.get('focus_id')) is not str
+                   or not re.fullmatch('focus-[a-f0-9]{24}', row['focus_id']) for row in plan['requests'])):
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    index = next((i for i,row in enumerate(plan['requests']) if row['focus_id']==request['focus_id']), None)
+    if index is None or len(previous) != index:
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    names = [RECORD, container.PREFIX + '/container-proof-descriptor.json',
+        clause.PREFIX + '/clause-proof-descriptor.json',
+        *[container.PREFIX + '/container-proof/' + name for name in container_names],
+        *[clause.PREFIX + '/clause-proof/' + name for name in clause_names]]
+    if scope.baseline_read_root(root, names) is None:
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    guards = _view_history_guards(root, plan)
+    if guards is None:
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    try:
+        identity = canonical_hash({'purpose': 'final-readonly-dsc-active-view-v1', 'inputs': inputs, 'guards': guards})
+    except (ValueError, TypeError, RecursionError, OverflowError, UnicodeError):
+        return _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview)
+    return scope.optional_dsc_view(root, identity,
+        lambda: _active_focus_uncached(root,packet,plan,request,target,previous,epoch,preview=preview))
+
+
+def _active_focus_uncached(root,packet,plan,request,target,previous,epoch,*,runtime=None,preview=False):
     from . import prototype_context_screen_epoch as screen
     record, projections, history = validate_authorization(root,epoch,packet,plan,target)
     index = next(i for i,row in enumerate(plan['requests']) if row['focus_id']==request['focus_id'])
