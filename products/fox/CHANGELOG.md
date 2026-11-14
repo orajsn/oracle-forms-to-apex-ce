@@ -8,6 +8,23 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## Documentation updates
+
+### 2026-11-14 — Current checkpoint, model routing and historical coverage
+
+- Refresh the repository and FOX READMEs: published source 0.22.16, last verified
+  lab 0.22.8, staged-only candidate, paused development and unfinished live acceptance.
+- Document task-specific model/effort selection, bounded delegation, actual-run
+  reporting and the distinction from embedded OPAF models.
+- Require a changelog entry for every pushed FOX update, including documentation.
+- Add [32 retrospective source-update entries](docs/historical-changelog.md)
+  for commits that did not change a changelog. All 51 existing software release
+  tags already have dated entries below; preserve them unchanged.
+
+This is a documentation-only update: no software-version bump, deployment,
+conversion, test replay or new runtime acceptance claim. Historical entries are
+labelled as backfill; commit/tag dates and Git history are not rewritten.
+
 ## [0.22.16] - 2026-11-14
 
 ### Preserve paused runs at different conversion stages

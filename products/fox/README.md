@@ -9,6 +9,34 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Current checkpoint — 14 November 2026
+
+**Development preview, not a ready end-to-end migration product.**
+
+| Item | Last verified state |
+| --- | --- |
+| Published software source | [0.22.16](https://github.com/orajsn/oracle-forms-to-apex-ce/tree/fox-v0.22.16/products/fox), with versioned release notes. |
+| Hosted lab | 0.22.8. This documentation update does not poll or change the running service. |
+| New candidate | 0.22.16 built locally and staged separately; no activation. |
+| Local verification | 138 focused mixed-stage preservation tests passed, including a clean committed-source run. This is not live conversion acceptance. |
+| Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
+| Development work | Paused. Unpublished fixes are not part of the tagged release. |
+
+The latest source improves reuse of saved review checks and preservation of runs
+stopped at different stages. Read-only candidate inspection found that the startup
+collector rejects a normal schema-index file. A source audit also found that
+unrelated stopped or generated runs can block a fresh project's submission. Corrections
+and project-isolation work remain unpublished. Do not restart old imports or
+change their status to make a new project pass admission.
+
+The lab reference target is **APEX 26.1.6 with SQLcl 26.1.2.0**. This is not a
+compatibility guarantee for another database, APEX patch or customer tenancy.
+The exported package must still prove import on its declared target.
+
+Use the [current user guide](docs/fox-user-guide.md) for implemented routes and
+the [roadmap](docs/product-roadmap.md) for intended outcomes. The historical
+milestones below are dated implementation context, not the current deployment.
+
 ```text
 Project → Upload/prepare → Resolve gaps → Process → Native APEX output
                                               → Technical checks
@@ -49,8 +77,9 @@ Uploading does not invoke AI. Technical identifiers remain visible; receipts do
 not establish complete anonymization or permission to process customer code.
 
 Prototype processing is separately configured and is not activated automatically.
-Hosted deployment, the full real-file OPAF-to-APEX journey and downloadable export
-acceptance remain pending. See [prepared prototype intake](docs/prepared-prototype-intake.md).
+At the 0.8.0 milestone, hosted deployment and full-flow acceptance were pending.
+For today's distinction between source, lab deployment and remaining acceptance,
+use the checkpoint above. See [prepared prototype intake](docs/prepared-prototype-intake.md).
 
 Source **0.7.0 introduced an inactive conversion-engine preview**, not a completed
 hosted conversion release. It adds source-bound OPAF design/review contracts,
@@ -126,6 +155,9 @@ Start with [installation](docs/fox-installation-v1.md),
 `install.py` does not install these components.
 
 Developer checks are documented in [verification](docs/verification.md).
+Development model selection, thinking effort and handoffs are documented in
+[developer orchestration](docs/development-orchestration.md). Those models assist
+development; they are not FOX's embedded OPAF runtime models.
 Read the [lab-adapter boundary](docs/lab-adapter.md) before considering any
 connected deployment/operator code. Third-party distribution limits are in
 [THIRD_PARTY.md](THIRD_PARTY.md).
@@ -144,3 +176,11 @@ remains responsible for business acceptance.
 
 Repository license and trademark terms remain in the root `LICENSE.txt` and
 README. Oracle tools and third-party dependencies retain their separate terms.
+
+## Following updates
+
+Every pushed FOX update must have a changelog entry, including documentation-only
+changes. Software changes use versioned entries and immutable `fox-v…` tags;
+documentation-only entries do not relabel the application or deployed images.
+See [historical source updates](docs/historical-changelog.md) for retrospective
+entries added on 14 November 2026 using the original Git-recorded dates.

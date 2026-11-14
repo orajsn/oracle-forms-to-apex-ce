@@ -29,6 +29,26 @@ intentionally released separately.
 6. Report version, user-visible changes, verification, source link and actual
    deployment status. Keep private operational details and credentials private.
 
+## Every pushed update has a changelog
+
+For each FOX-scoped commit intended for publication, include a matching entry in
+the product or applicable component changelog. A push containing several commits
+must leave every shipped change covered; do not rely on a commit subject alone.
+An entry may group related changes, but must identify what changed and its actual
+verification/deployment status. Update the README when the current checkpoint,
+user flow, setup or compatibility changes; it is not a duplicate per-commit log.
+
+Documentation-only changes go under dated **Documentation updates** in the
+product changelog. They do not bump `release.json`, package versions or software
+tags. Do not rebuild/relabel a runtime merely to publish documentation.
+
+When backfilling history, record both the original Git-recorded date and the date
+the retrospective note was added. Link the original commit and describe only
+what its evidence supports. Commit date is not a verified push, deployment or
+acceptance date. Never amend/rebase old commits, change their timestamps, force
+push, move tags or invent old test results to make the chronology look complete.
+The [historical changelog](historical-changelog.md) follows this convention.
+
 Publishing, preparing an image, activating it and verifying a conversion are
 different facts. Do not edit a frozen image/manifest to relabel it. A deployment
 must use a newly measured coherent build with preserved state and its actual

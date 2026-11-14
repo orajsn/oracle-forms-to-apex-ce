@@ -5,6 +5,22 @@
 A portable Codex skill for assessing Oracle Forms applications and building
 evidence-led Oracle APEX proof-of-concepts.
 
+## Looking for FOX?
+
+This repository contains two related projects:
+
+| Project | Entry point | Purpose |
+| --- | --- | --- |
+| CE Workbench | This README | A Codex-assisted assessment and POC skill. |
+| FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
+
+FOX's latest published software source is **0.22.16**. Its last verified lab
+deployment is **0.22.8**; the newer candidate is staged, not activated. The full
+real-module conversion, runtime and downloadable-export acceptance is unfinished.
+See the [dated checkpoint](products/fox/README.md#current-checkpoint--14-november-2026),
+[changelog](products/fox/CHANGELOG.md), and
+[retrospective history](products/fox/docs/historical-changelog.md).
+
 The workflow inventories supplied Forms evidence, converts supported Forms
 binaries through Oracle tooling, maps Forms behavior to an APEX target design,
 and validates generated APEXlang before it can be described as importable.
