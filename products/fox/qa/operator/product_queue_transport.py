@@ -42,7 +42,8 @@ PROJECT_MODULES = ('intake.py', 'native_source.py', 'opaf.py', 'native_pipeline.
     'project_conversion.py', 'project_qa_plan.py', 'project_progress.py',
     'native_project_pipeline.py', 'source_history.py', 'project_verification.py',
     'project_verification_runtime.py')
-PROJECT_QUEUE_MODULES = ('technical_release.py', 'verification_recovery.py')
+LEGACY_PROJECT_QUEUE_MODULES = ('technical_release.py', 'verification_recovery.py')
+PROJECT_QUEUE_MODULES = (*LEGACY_PROJECT_QUEUE_MODULES, 'paused_stage_preservation.py')
 PROJECT_HASHES = ('clean_operator_code_sha256', 'qa_source_sha256',
                   'promotion_transport_sha256', 'operator_code_sha256')
 ATTENTION = frozenset({'BACKEND_OUTCOME_UNCONFIRMED', 'PROOF_UNCONFIRMED', 'INTERRUPTED_OUTCOME'})
@@ -116,7 +117,11 @@ def validate_release(manifest):
         _require(type(project) is dict and set(project) == set(PROJECT_HASHES) | {'modules', 'queue_modules'}
                  and all(_sha(project[key]) for key in PROJECT_HASHES), 'PROJECT_RELEASE_FIELDS_INVALID')
         for name, keys in (('modules', PROJECT_MODULES), ('queue_modules', PROJECT_QUEUE_MODULES)):
-            _require(type(project[name]) is dict and set(project[name]) == set(keys)
+            # Retained releases keep their original exact two-module closure.
+            # This is structural compatibility only, never current readiness.
+            allowed = ((set(LEGACY_PROJECT_QUEUE_MODULES), set(PROJECT_QUEUE_MODULES))
+                       if name == 'queue_modules' else (set(keys),))
+            _require(type(project[name]) is dict and set(project[name]) in allowed
                      and all(_sha(value) for value in project[name].values()), 'PROJECT_RELEASE_MODULES_INVALID')
         _require(all(project['modules'][key] == manifest['modules'][key]
                      for key in set(PROJECT_MODULES) & set(MODULES)), 'PROJECT_RELEASE_SHARED_MODULE_DIFFERS')
@@ -181,6 +186,9 @@ def require_ready(manifest, expected_sha):
     _require(checked['enabled'], 'VERIFIER_RELEASE_DISABLED')
     _require(checked['images']['fox'] != H_FOX_IMAGE, 'LIVE_H_QUEUE_UNAVAILABLE')
     _require(_sha(expected_sha) and release_sha256(checked) == expected_sha, 'EXACT_VERIFIER_RELEASE_REQUIRED')
+    if checked['schema_version'] in (2, 3):
+        _require(set(checked['project']['queue_modules']) == set(PROJECT_QUEUE_MODULES),
+                 'PROJECT_QUEUE_SOURCE_CLOSURE_NOT_CURRENT')
     provider = runtime_provider.hosted()
     if checked['schema_version'] == 3:
         _require(provider is not None and provider.configuration['schema_version'] == 2
@@ -391,6 +399,7 @@ def _helper_source():
     constants = {'H_FOX_IMAGE': H_FOX_IMAGE, 'SCOPE': SCOPE, 'PROJECT_SCOPE': PROJECT_SCOPE,
                  'HOSTED_SCOPE': HOSTED_SCOPE, 'HOSTED_CODE': HOSTED_CODE,
                  'PROJECT_MODULES': PROJECT_MODULES, 'PROJECT_QUEUE_MODULES': PROJECT_QUEUE_MODULES,
+                 'LEGACY_PROJECT_QUEUE_MODULES': LEGACY_PROJECT_QUEUE_MODULES,
                  'PROJECT_HASHES': PROJECT_HASHES, 'TARGET': TARGET, 'MODULES': MODULES,
                  'CODE': CODE, 'ATTENTION': ATTENTION, 'OPERATIONS': OPERATIONS,
                  'BINDING_KEYS': BINDING_KEYS, 'QUEUE_KEYS': QUEUE_KEYS}

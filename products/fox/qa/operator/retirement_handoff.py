@@ -179,7 +179,8 @@ def _destination_manifest(manifest):
          and manifest['code'].get('product_queue_transport.py') == sha(raw),
          'RETIREMENT_DESTINATION_VALIDATOR_SOURCE_CHANGED')
     constants = {'SCOPE', 'PROJECT_SCOPE', 'HOSTED_SCOPE', 'TARGET', 'MODULES', 'CODE',
-                 'HOSTED_CODE', 'PROJECT_MODULES', 'PROJECT_QUEUE_MODULES', 'PROJECT_HASHES'}
+                 'HOSTED_CODE', 'PROJECT_MODULES', 'PROJECT_QUEUE_MODULES',
+                 'LEGACY_PROJECT_QUEUE_MODULES', 'PROJECT_HASHES'}
     definitions = {'QueueTransportError', '_require', '_sha', '_profile_reference', 'validate_release'}
     nodes, selected = [], []
     for node in ast.parse(raw).body:

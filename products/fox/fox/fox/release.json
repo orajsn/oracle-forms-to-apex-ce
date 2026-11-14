@@ -1,8 +1,9 @@
 {
-  "version": "0.23.1",
+  "version": "0.23.2",
   "released_on": "2026-11-15",
-  "title": "Recognize current service launchers during guarded upgrades",
+  "title": "Register the protected startup preservation reader",
   "changes": [
+    "Bind the required startup preservation reader in new release manifests and exercise the same closed loader used on the server.",
     "Recognize only independently measured current-pair service launchers during guarded startup; native and unknown workers remain blocking.",
     "Allow a fresh project after stopped prototype history only when a current read-only converter observation establishes protocol isolation.",
     "Preserve old runs, receipts and retry restrictions; reject active, uncertain or conflicting work.",

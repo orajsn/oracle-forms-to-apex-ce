@@ -25,6 +25,29 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.23.2] - 2026-11-15
+
+### Register the protected startup preservation reader
+
+- Include the exact preservation-reader digest in new project release manifests.
+  The 0.23.1 hosted attempt exposed its omission: the isolated startup loader
+  refused `FOX_UNBOUND_DEPENDENCY` before verifier startup and HTTPS release.
+- Retain structural decoding of the explicit older two-module manifest format.
+  Older manifests do not gain current readiness, retry or execution permission.
+  New manifests require the complete three-module set; unknown modules and
+  altered or missing files remain rejected.
+- Carry the same explicit legacy constant into the archival handoff's pure
+  validator without widening its allowed imports, calls or syntax boundary.
+- Test the actual generated digest loop and closed module loader against real
+  recovery/preservation code and a read-only SQLite fixture, including the
+  previously failing branch. Also exercise the real handoff validator.
+
+Verification: 13 focused tests passed; the isolated clean-layout regression
+passed 127 tests and 48 subtests. Earlier checkout-only failures caused by an
+absent test profile are retained separately. These are local checks, not hosted
+startup or Forms-to-APEX acceptance. The failed 0.23.1 attempt and all job evidence
+remain preserved; a coherent new deployment and real-FMB proof are still required.
+
 ## [0.23.1] - 2026-11-15
 
 ### Recognize current service launchers during guarded upgrades
