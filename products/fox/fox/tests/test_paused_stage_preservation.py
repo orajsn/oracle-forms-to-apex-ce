@@ -65,6 +65,93 @@ def inert_case(tmp_path):
                            request=request,baseline=baseline,packet=packet,expected=expected,now=now,observe=observe)
 
 
+@pytest.fixture
+def mixed_inert_case(inert_case):
+    c=inert_case;c.opaque_id='fox-'+'a'*20;c.opaque_job=c.root/'jobs'/c.opaque_id
+    c.opaque_job.mkdir()
+    snapshot=json.loads((c.job/'source-snapshot.json').read_bytes())
+    snapshot['prototype']['target_profile_sha256']='9'*64  # Historical, NOT current runtime authority.
+    (c.opaque_job/'source-snapshot.json').write_text(json.dumps(snapshot))
+    (c.opaque_job/'prototype-result.json').write_text('{"unresolved":true,"accepted":false}')
+    for number in range(8):(c.opaque_job/f'retained-{number}.json').write_text('{"unknown":"preserved"}')
+    with sqlite3.connect(c.database) as db:
+        db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
+            (c.opaque_id,'project-a','b'*64,'ATTENTION',None,.25,.5,'earlier failure remains unresolved'))
+        db.execute('INSERT INTO events VALUES(?,?,?,?)',('owner-a','unknown-earlier-event',c.opaque_id,.25))
+    def refresh():
+        fox=c.observe();tree={job:inert.receiver_job_tree(c.receiver,job)for job in fox['jobs']}
+        c.baseline.update(fox,receiver=tree);c.expected['baseline_sha256']=inert.hashed(c.baseline)
+        c.packet.update(fox=fox,receiver=tree,binding=c.expected['baseline_sha256'])
+        c.packet['host']['receiver_sha256']=inert.hashed(tree)
+    c.refresh=refresh;refresh()
+    return c
+
+
+def test_mixed_runtime_and_earlier_failure_preserve_all_rows_trees_and_absence(mixed_inert_case):
+    c=mixed_inert_case;before=(c.database.read_bytes(),recovery.preclaim_tree(c.job),recovery.preclaim_tree(c.opaque_job))
+    assert len(before[2]['files'])==10 and not (c.receiver/c.opaque_id).exists()
+    assert set(c.baseline['jobs'])=={c.job_id,c.opaque_id}
+    assert c.baseline['jobs'][c.opaque_id]['boundary']==inert.OPAQUE_BOUNDARY
+    assert c.baseline['jobs'][c.opaque_id]['runtime_request_sha256']is None
+    assert c.baseline['receiver'][c.opaque_id]=={'absent':True,'parent_namespace':{
+        'device':c.receiver.stat().st_dev,'inode':c.receiver.stat().st_ino,
+        'owner':c.receiver.stat().st_uid,'mode':__import__('stat').S_IMODE(c.receiver.stat().st_mode)}}
+    assert inert.runtime_target(c.baseline['jobs'])=={'target_profile_sha256':'c'*64}
+    assert inert.runtime_target(dict(reversed(list(c.baseline['jobs'].items()))))=={'target_profile_sha256':'c'*64}
+    for job in (c.job_id,c.opaque_id):
+        with sqlite3.connect(c.database.as_uri()+'?mode=ro',uri=True)as db:
+            db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
+            value=inert.validate_pair(c.database,db,job,c.packet,c.expected,now=c.now)
+        assert value['admission']['blocks_admission']is True and value['admission']['retry_eligible']is False
+        assert value['preserved']['closure_claimed']is value['preserved']['continuation_authorized']is False
+        assert value['preserved']['boundary']==('runtime_predispatch_unresolved'if job==c.job_id else inert.OPAQUE_BOUNDARY)
+    assert before==(c.database.read_bytes(),recovery.preclaim_tree(c.job),recovery.preclaim_tree(c.opaque_job))
+    assert not(c.receiver/c.opaque_id).exists()
+
+
+@pytest.mark.parametrize('name',['verify_runtime-intent.json','verify_runtime-request.json','verify_runtime.json',
+    'export-intent.json','export.json','runtime-request.json','runtime-evidence'])
+@pytest.mark.parametrize('directory',[False,True])
+def test_opaque_cannot_hide_runtime_or_later_file_or_directory(mixed_inert_case,name,directory):
+    c=mixed_inert_case;pipeline=c.opaque_job/'prototype-pipeline';pipeline.mkdir()
+    path=pipeline/name
+    if directory:path.mkdir()
+    else:path.write_text('{"request_sha256":"invalid"}')
+    with pytest.raises((inert.PreservationError,recovery.RecoveryError)):
+        c.observe()
+
+
+@pytest.mark.parametrize('fault',['new-file','row','source','event','queued','processing','ledger','receiver-created','parent-namespace'])
+def test_mixed_opaque_mutations_and_runnable_work_fail_closed(mixed_inert_case,fault):
+    c=mixed_inert_case;p=deepcopy(c.packet)
+    if fault=='new-file':(c.opaque_job/'new.json').write_text('{}')
+    elif fault=='source':
+        snapshot=json.loads((c.opaque_job/'source-snapshot.json').read_bytes());snapshot['approvals']['owner']='changed'
+        (c.opaque_job/'source-snapshot.json').write_text(json.dumps(snapshot))
+    elif fault in ('row','event','queued','processing','ledger'):
+        with sqlite3.connect(c.database)as db:
+            if fault=='row':db.execute('UPDATE runs SET message=? WHERE id=?',('changed',c.opaque_id))
+            elif fault=='event':db.execute('INSERT INTO events VALUES(?,?,?,?)',('owner-a','new-event',c.opaque_id,3.))
+            elif fault=='ledger':db.execute('INSERT INTO verification_queue VALUES(?,?)',(c.opaque_id,'attention'))
+            else:db.execute('UPDATE runs SET state=? WHERE id=?',(fault.upper(),c.opaque_id))
+    elif fault=='receiver-created':
+        (c.receiver/c.opaque_id).mkdir()
+        p['receiver'][c.opaque_id]=inert.receiver_job_tree(c.receiver,c.opaque_id)
+        p['host']['receiver_sha256']=inert.hashed(p['receiver'])
+    else:
+        p['receiver'][c.opaque_id]['parent_namespace']['inode']+=1
+        p['host']['receiver_sha256']=inert.hashed(p['receiver'])
+    with pytest.raises((inert.PreservationError,recovery.RecoveryError)):
+        validate(c,p)
+
+
+def test_runtime_target_refuses_missing_or_conflicting_runtime_candidates(mixed_inert_case):
+    c=mixed_inert_case;jobs=deepcopy(c.baseline['jobs'])
+    jobs[c.opaque_id]['boundary']=inert.RUNTIME_CANDIDATE;jobs[c.opaque_id]['runtime_request_sha256']='e'*64
+    with pytest.raises(inert.PreservationError,match='RUNTIME_TARGET'):inert.runtime_target(jobs)
+    with pytest.raises(inert.PreservationError,match='RUNTIME_TARGET'):inert.runtime_target({c.opaque_id:c.baseline['jobs'][c.opaque_id]})
+
+
 def validate(case,packet=None,expected=None):
     with sqlite3.connect(case.database.as_uri()+'?mode=ro',uri=True) as db:
         db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN')

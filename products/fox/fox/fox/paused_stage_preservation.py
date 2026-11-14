@@ -17,6 +17,8 @@ BASELINE_SCOPE = 'fox-inert-startup-baseline-v1'
 READ_SCOPE = 'fox-inert-startup-paired-read-v1'
 PURPOSE = 'maintenance_inert_startup_preservation'
 STATE = 'inert_unresolved_history'
+RUNTIME_CANDIDATE = 'runtime_intent_candidate'
+OPAQUE_BOUNDARY = 'opaque_unresolved'
 
 
 class PreservationError(RuntimeError):
@@ -50,17 +52,52 @@ def runtime_identity(request, imported, snapshot):
         **{key: imported[key] for key in ('application_id', 'application_alias')}, 'workspace': 'FORMS2APEX_POC'}
 
 
+def runtime_target(jobs):
+    """Unique runtime candidate's saved target, never an opaque row's authority."""
+    targets = [item['target_profile_sha256'] for item in jobs.values()
+               if item['boundary'] == RUNTIME_CANDIDATE]
+    need(targets and all(sha(value) for value in targets) and len(set(targets)) == 1,
+         'INERT_RUNTIME_TARGET_UNCONFIRMED')
+    return {'target_profile_sha256': targets[0]}
+
+
+def receiver_job_tree(root, job_id):
+    """Full existing tree OR genuine missing child bound to its current parent."""
+    import os
+    import stat
+    from .verification_recovery import preclaim_tree, _need
+    root = Path(root).absolute()
+    _need(re.fullmatch('fox-[a-f0-9]{20}', job_id) is not None and root.resolve() == root,
+          'INERT_RECEIVER_ROOT_UNSAFE')
+    for parent in (root, *root.parents):
+        _need(not parent.is_symlink(), 'INERT_RECEIVER_ROOT_UNSAFE')
+    before = root.lstat()
+    _need(stat.S_ISDIR(before.st_mode) and (os.name == 'nt' or
+          before.st_uid == os.getuid() and not before.st_mode & 0o022), 'INERT_RECEIVER_ROOT_UNSAFE')
+    namespace = lambda info: {'device': info.st_dev, 'inode': info.st_ino,
+                             'owner': info.st_uid, 'mode': stat.S_IMODE(info.st_mode)}
+    path = root / job_id
+    _need(not path.is_symlink(), 'INERT_RECEIVER_ROOT_UNSAFE')
+    value = preclaim_tree(path) if path.exists() else {'absent': True, 'parent_namespace': namespace(before)}
+    _need(namespace(root.lstat()) == namespace(before) and root.resolve() == root,
+          'INERT_RECEIVER_NAMESPACE_CHANGED')
+    return value
+
+
 def receiver_collector_source():
     """Fixed stdlib no-follow collector. Runs only at configured private roots."""
     import inspect
     from .verification_recovery import RecoveryError, _need, digest, _load, preclaim_tree
+    # Remove only this fixed package import in the standalone stdlib emitter.
+    tree_source = inspect.getsource(receiver_job_tree).replace(
+        '    from .verification_recovery import preclaim_tree, _need\n', '')
     functions = (RecoveryError, _need, digest, _load, preclaim_tree, hashed, runtime_identity)
     return ('import hashlib,json,pathlib,re,sys\nfrom pathlib import Path\n' +
-        '\n'.join(inspect.getsource(function) for function in functions) + '''
+        '\n'.join(inspect.getsource(function) for function in functions) + '\n' + tree_source + '''
 p=json.load(sys.stdin);assert set(p)=={'receiver_jobs','jobs'}
 root=Path(p['receiver_jobs']);assert root.is_absolute() and root.resolve()==root
 assert 0<len(p['jobs'])<=100 and all(re.fullmatch('fox-[a-f0-9]{20}',j) for j in p['jobs'])
-before={j:preclaim_tree(root/j) for j in p['jobs']}
+before={j:receiver_job_tree(root,j) for j in p['jobs']}
 entries=list(root.iterdir());assert len(entries)<=4096
 for job in entries:
  assert not job.is_symlink() and job.is_dir()
@@ -69,18 +106,25 @@ for job in entries:
   path=stage/name;assert not path.exists() and not path.is_symlink()
 identities={};requests={}
 for job in p['jobs']:
+ if before[job].get('absent') is True:continue
  stage=root/job/'prototype-converter'
+ for name in ('verify_runtime.json','export-request.json','export-intent.json','export-attempt.json','export.json','prototype-package.zip'):
+  path=stage/name;assert not path.exists() and not path.is_symlink()
+ # Earlier unresolved jobs have no runtime envelope to interpret or validate.
+ # A partial/present runtime envelope is NEVER downgraded to opaque.
+ runtime=[(stage/n).exists() or (stage/n).is_symlink() for n in
+  ('verify_runtime-request.json','verify_runtime-intent.json')]
+ if not any(runtime):continue
+ assert all(runtime)
  documents={n:_load((stage/n).read_bytes(),20000000) for n in
   ('verify_runtime-request.json','verify_runtime-intent.json','import.json','snapshot.json')}
  request=documents['verify_runtime-request.json'];assert request['job_id']==job
  assert documents['verify_runtime-intent.json']=={'request_sha256':hashed(request)}
  assert set(request['prior_receipts'])=={'validate','prepare_schema','import'}
  assert request['prior_receipts']['import']==documents['import.json']
- for name in ('verify_runtime.json','export-intent.json','export.json','prototype-package.zip'):
-  path=stage/name;assert not path.exists() and not path.is_symlink()
  identities[job]=runtime_identity(request,documents['import.json'],documents['snapshot.json'])
  requests[job]=hashed(request)
-assert before=={j:preclaim_tree(root/j) for j in p['jobs']}
+assert before=={j:receiver_job_tree(root,j) for j in p['jobs']}
 print(json.dumps({'receiver':before,'identities':identities,'requests':requests},sort_keys=True))
 ''')
 
@@ -148,14 +192,27 @@ def observe_fox(database, db):
              and selection is not None and selection[0] == snapshot['selected_source_set_id']
              and run['source_hash'] == snapshot['source_hash'] and run['project'] == snapshot['project_id'],
              'INERT_OWNER_OR_SOURCE_CHANGED')
-        need('prototype-pipeline/verify_runtime-intent.json' in trees[identity]['files']
-             and not any(name in trees[identity]['files'] for name in (
-                 'prototype-pipeline/verify_runtime.json', 'prototype-pipeline/export-intent.json',
-                 'prototype-pipeline/export.json')), 'INERT_UNSUPPORTED_BOUNDARY')
+        files = trees[identity]['files']
+        nodes = set(files) | set(trees[identity]['directories'])
+        need(not any(name in nodes for name in ('prototype-pipeline/verify_runtime.json',
+             'prototype-pipeline/export-intent.json', 'prototype-pipeline/export.json',
+             'prototype-pipeline/prototype-package.zip', 'prototype-pipeline/runtime-request.json',
+             'prototype-pipeline/runtime-claim.json', 'prototype-pipeline/runtime-result.json',
+             'prototype-pipeline/runtime-receipt.json', 'prototype-pipeline/runtime-evidence')), 'INERT_UNSUPPORTED_BOUNDARY')
+        runtime = 'prototype-pipeline/verify_runtime-intent.json' in nodes
+        need(not runtime or 'prototype-pipeline/verify_runtime-intent.json' in files, 'INERT_RUNTIME_INTENT_INVALID')
+        request_name = 'prototype-pipeline/verify_runtime-request.json'
+        need(request_name not in nodes or runtime and request_name in files, 'INERT_RUNTIME_INTENT_INVALID')
+        request_sha = None
+        if runtime:
+            intent = _load((job / 'prototype-pipeline/verify_runtime-intent.json').read_bytes())
+            need(type(intent) is dict and set(intent) == {'request_sha256'} and sha(intent['request_sha256']),
+                 'INERT_RUNTIME_INTENT_INVALID')
+            request_sha = intent['request_sha256']
         jobs[identity] = {'row': run, 'owner': owner[0], 'source_set_id': selection[0],
                           'target_profile_sha256': snapshot['prototype']['target_profile_sha256'],
-                          'runtime_request_sha256': _load((job / 'prototype-pipeline/verify_runtime-intent.json').read_bytes())['request_sha256']}
-        need(sha(jobs[identity]['runtime_request_sha256']), 'INERT_RUNTIME_INTENT_INVALID')
+                          'boundary': RUNTIME_CANDIDATE if runtime else OPAQUE_BOUNDARY,
+                          'runtime_request_sha256': request_sha}
     need(db.total_changes == 0, 'INERT_DATABASE_CHANGED')
     return {'database': projection, 'jobs': jobs, 'fox': trees}
 
@@ -166,6 +223,16 @@ def validate_baseline(value):
          and value['scope'] == BASELINE_SCOPE and type(value['jobs']) is dict
          and 0 < len(value['jobs']) <= 100 and set(value['fox']) == set(value['receiver']) == set(value['jobs']),
          'INERT_EXPLICIT_BASELINE_REQUIRED')
+    for job, item in value['jobs'].items():
+        need(item.get('boundary') in (RUNTIME_CANDIDATE, OPAQUE_BOUNDARY)
+             and (sha(item.get('runtime_request_sha256')) if item['boundary'] == RUNTIME_CANDIDATE
+                  else item.get('runtime_request_sha256') is None), 'INERT_BOUNDARY_INVALID')
+        tree = value['receiver'][job]
+        if tree.get('absent') is True:
+            need(item['boundary'] == OPAQUE_BOUNDARY and set(tree) == {'absent', 'parent_namespace'}
+                 and type(tree['parent_namespace']) is dict
+                 and set(tree['parent_namespace']) == {'device','inode','owner','mode'},
+                 'INERT_RECEIVER_ABSENCE_INVALID')
     return value
 
 
@@ -208,4 +275,5 @@ def validate_pair(database, db, job_id, readback, expected, *, now=None):
     return {'admission': {'blocks_admission': True, 'recovery_state': STATE, 'retry_eligible': False},
             'preservation_allowed': True, 'preservation_state': STATE,
             'preserved': {'baseline_sha256': expected['baseline_sha256'], 'unresolved': True,
+                          'boundary': 'runtime_predispatch_unresolved' if baseline['jobs'][job_id]['boundary'] == RUNTIME_CANDIDATE else OPAQUE_BOUNDARY,
                           'closure_claimed': False, 'continuation_authorized': False}}

@@ -8,6 +8,30 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.22.16] - 2026-11-14
+
+### Preserve paused runs at different conversion stages
+
+- Stop assuming every paused conversion reached runtime testing. During guarded
+  startup, retain earlier unresolved runs alongside the proven runtime candidate,
+  with their original state, source, target metadata and full file inventories.
+- Represent a genuinely absent converter folder explicitly, bound to its parent
+  directory identity. Do not create a folder, discard a run or substitute an
+  empty inventory to make startup pass.
+- Derive runtime requests and the current target only from the exact runtime
+  subset. All paused jobs still participate in database, namespace, staging,
+  process and producer checks. Malformed or contradictory stage evidence rejects
+  preservation rather than being treated as an earlier failure.
+
+Verification: 138 focused checks passed, including the emitted startup and
+receiver collectors, actual local SQLite and file inventories, existing/absent
+older receiver folders, malformed file/directory markers, exact runtime subsets,
+target selection and unchanged-state refusals. External process and host checks
+in these tests are modelled; this is not live startup acceptance.
+The mixed-stage path still requires a proven runtime candidate and one runtime
+target. It grants no retry, closure, execution, technical verification or human
+acceptance. Live upgrade and end-to-end conversion remain unverified.
+
 ## [0.22.15] - 2026-11-14
 
 ### Reduce repeated checks of saved conversion reviews

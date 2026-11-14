@@ -10,7 +10,7 @@ import pytest
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path[:0]=[str(ROOT/'fox/tests'),str(ROOT/'fox'),str(ROOT)]
-from test_paused_stage_preservation import inert_case
+from test_paused_stage_preservation import inert_case, mixed_inert_case, validate
 from fox import paused_stage_preservation as inert
 from qa.operator import retirement_remote as remote, paused_stage_host as host
 from qa.operator.tests.test_retirement_remote_backend import historical_case, CURRENT
@@ -49,6 +49,83 @@ def test_emitted_startup_and_receiver_are_actual_local_readonly(inert_case,monke
 def test_receiver_rejects_every_dispatch_or_export_marker(inert_case,monkeypatch,name):
     c=inert_case;(c.stage/name).write_text('{}')
     with pytest.raises(AssertionError):execute(inert.receiver_collector_source(),{'receiver_jobs':str(c.receiver),'jobs':[c.job_id]},monkeypatch)
+
+
+@pytest.mark.parametrize('present',[False,True])
+def test_emitted_mixed_startup_preserves_all_jobs_and_receiver_runtime_subset(mixed_inert_case,monkeypatch,present):
+    c=mixed_inert_case
+    if present:
+        stage=c.receiver/c.opaque_id/'prototype-converter';stage.mkdir(parents=True)
+        (stage/'validate-intent.json').write_text('{"unknown":"earlier outcome preserved"}')
+        c.refresh()
+    from fox import prototype_job
+    monkeypatch.setenv('FOX_VERIFICATION_ENABLED','1');monkeypatch.setenv('FOX_VERIFIER_RELEASE_SHA256','f'*64)
+    monkeypatch.setenv('FOX_PROTOTYPE_PROFILE_FILE','/synthetic/nonsecret')
+    monkeypatch.setattr(prototype_job,'load_prototype_profile',lambda p:{'target_profile':{},'target_profile_sha256':'c'*64})
+    source=remote.STARTUP_INERT.replace("'file:/data/fox.sqlite3?mode=ro'",repr(c.database.as_uri()+'?mode=ro'))
+    source=source.replace("'/data/fox.sqlite3'",repr(str(c.database)))
+    before=c.database.read_bytes()
+    result=execute(source,{'source_sha256':__import__('hashlib').sha256(Path(inert.__file__).read_bytes()).hexdigest(),
+                           'release_sha256':'f'*64},monkeypatch)
+    received=execute(result['collector'],{'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])},monkeypatch)
+    assert result['observation']=={key:c.baseline[key]for key in ('database','jobs','fox')}
+    assert received['receiver']==c.baseline['receiver']
+    assert set(received['identities'])==set(received['requests'])=={c.job_id}
+    assert set(received['receiver'])=={c.job_id,c.opaque_id}
+    assert received['receiver'][c.opaque_id].get('absent')is (True if not present else None)
+    assert c.database.read_bytes()==before
+    assert (c.receiver/c.opaque_id).exists()is present
+
+
+@pytest.mark.parametrize('name',['verify_runtime-intent.json','verify_runtime-request.json','verify_runtime.json',
+    'export-request.json','export-intent.json','export-attempt.json','export.json','prototype-package.zip',
+    'runtime-request.json','runtime-claim.json','runtime-result.json','runtime-receipt.json','runtime-evidence'])
+@pytest.mark.parametrize('directory',[False,True])
+def test_opaque_receiver_cannot_hide_partial_runtime_or_later_artifacts(mixed_inert_case,monkeypatch,name,directory):
+    c=mixed_inert_case;stage=c.receiver/c.opaque_id/'prototype-converter';stage.mkdir(parents=True)
+    path=stage/name
+    if directory:path.mkdir()
+    else:path.write_text('{}')
+    with pytest.raises((AssertionError,RuntimeError,OSError)):
+        execute(inert.receiver_collector_source(),{'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])},monkeypatch)
+
+
+def test_receiver_absence_namespace_changes_and_new_children_are_not_adopted(mixed_inert_case):
+    c=mixed_inert_case;before=inert.receiver_job_tree(c.receiver,c.opaque_id)
+    (c.receiver/c.opaque_id).mkdir()
+    assert inert.receiver_job_tree(c.receiver,c.opaque_id)!=before
+    assert before['absent']is True and before['parent_namespace']['inode']==c.receiver.stat().st_ino
+
+
+def test_mixed_host_uses_runtime_subset_but_all_jobs_still_block_producers(mixed_inert_case,monkeypatch):
+    c=mixed_inert_case;runtime,pins,items=host_model(c,monkeypatch)
+    received=execute(inert.receiver_collector_source(),{'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])},monkeypatch)
+    c.baseline['runtime']=runtime
+    identity=deepcopy(c.expected['identity']);identity['profile_sha256']=host.hashed({'profile':'nonsecret'})
+    paired=host.paired(c.baseline,{key:c.baseline[key]for key in ('database','jobs','fox')},received,identity,pins,storage=c.storage)
+    assert set(paired)=={c.job_id,c.opaque_id}
+    for job,item in paired.items():
+        with __import__('sqlite3').connect(c.database.as_uri()+'?mode=ro',uri=True)as db:
+            db.row_factory=__import__('sqlite3').Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
+            result=inert.validate_pair(c.database,db,job,item['readback'],item['expected'])
+        assert result['admission']['blocks_admission']is True and result['admission']['retry_eligible']is False
+    bad=deepcopy(received);bad['requests'][c.opaque_id]='a'*64
+    with pytest.raises(RuntimeError):host.paired(c.baseline,{key:c.baseline[key]for key in ('database','jobs','fox')},bad,identity,pins,storage=c.storage)
+    staging=Path(runtime['staging_root'])/c.opaque_id;staging.mkdir(parents=True)
+    with pytest.raises(RuntimeError,match='HOST_ATTEMPT'):
+        host.collect(runtime,received['receiver'],received['identities'],c.baseline['jobs'],pins,storage=c.storage)
+
+
+def test_mixed_opaque_job_still_constrains_global_oldest_and_unknown_producers(mixed_inert_case,monkeypatch):
+    c=mixed_inert_case;runtime,pins,items=host_model(c,monkeypatch)
+    identities={c.job_id:inert.runtime_identity(c.request,c.request['prior_receipts']['import'],{'opaque':'preserved'})}
+    items.append({'Id':'9'*64,'Image':runtime['qa_image'],'State':{'Running':False,'Pid':0,'Status':'exited',
+        'FinishedAt':'1970-01-01T00:00:00.500000Z'},'Mounts':[]})
+    with pytest.raises(RuntimeError,match='UNATTRIBUTED_QA'):
+        host.collect(runtime,c.baseline['receiver'],identities,c.baseline['jobs'],pins,storage=c.storage)
+    items.pop();monkeypatch.setattr(host,'process_inventory',lambda *a,**kw:[{'pid':999,'start_ticks':1}])
+    with pytest.raises(RuntimeError,match='UNKNOWN_HOST_PRODUCER'):
+        host.collect(runtime,c.baseline['receiver'],identities,c.baseline['jobs'],pins,storage=c.storage)
 
 
 def host_model(c,monkeypatch):

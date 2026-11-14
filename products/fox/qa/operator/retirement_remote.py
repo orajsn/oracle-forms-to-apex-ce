@@ -32,7 +32,7 @@ db=sqlite3.connect('file:/data/fox.sqlite3?mode=ro',uri=True);db.row_factory=sql
 db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
 value=inert.observe_fox('/data/fox.sqlite3',db)
 profile=load_prototype_profile(pathlib.Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE']))
-assert all(j['target_profile_sha256']==profile['target_profile_sha256'] for j in value['jobs'].values())
+assert inert.runtime_target(value['jobs'])['target_profile_sha256']==profile['target_profile_sha256']
 assert value==inert.observe_fox('/data/fox.sqlite3',db) and db.total_changes==0
 print(json.dumps({'observation':value,'focused_profile':profile,'collector':inert.receiver_collector_source()},sort_keys=True))
 '''

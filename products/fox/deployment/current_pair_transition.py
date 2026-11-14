@@ -667,7 +667,7 @@ class Transition:
         release=self.R if new else self.old.release
         need(env.get('FOX_VERIFICATION_ENABLED')=='1' and env.get('FOX_VERIFIER_RELEASE_SHA256')==release,
              'INERT_ENABLED_ADMISSION_REQUIRED')
-        focused={'target_profile_sha256':next(iter(baseline['jobs'].values()))['target_profile_sha256']}
+        focused=inert.runtime_target(baseline['jobs'])
         retained=getattr(self,'_inert_live_profile',None) if stopped else None
         profile=self.preclaim_profile(fox,pins['fox'],focused,stopped=stopped,retained=retained)
         selected=self.new_i if new else self.old.document

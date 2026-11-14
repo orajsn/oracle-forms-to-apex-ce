@@ -1,11 +1,11 @@
 {
-  "version": "0.22.15",
+  "version": "0.22.16",
   "released_on": "2026-11-14",
-  "title": "Reduce repeated checks of saved conversion reviews",
+  "title": "Preserve paused runs at different conversion stages",
   "changes": [
-    "Reuse the final saved-review view within one unchanged, read-only verification operation.",
-    "Keep installed validator, member, manifest and directory checks fresh on every reuse.",
-    "Preserve current permissions, database checks, runtime checks and all earlier conversion evidence."
+    "Preserve earlier failed runs alongside a run waiting for its first runtime test during guarded startup.",
+    "Keep every saved run and file, including evidence that an earlier converter folder does not exist.",
+    "Reject malformed or changed stage evidence without restarting work or claiming conversion success."
   ],
   "limitations": [
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
@@ -14,7 +14,7 @@
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "Real-file OPAF-to-APEX import, authenticated runtime and downloadable export acceptance remain pending.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
-    "Inert startup preservation grants no retry, execution, closure or acceptance. Actual host compatibility and coherent deployment remain separate gates.",
+    "Inert startup preservation grants no retry, execution, closure or acceptance. Mixed stages require a proven runtime candidate and one runtime target; not every unresolved boundary is supported. Actual host compatibility and coherent deployment remain separate gates.",
     "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",

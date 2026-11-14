@@ -218,11 +218,13 @@ def startup_baseline(value, infrastructure, source_sha256):
 
 def paired(baseline, fox, receiver, identity, infrastructure, *, storage, stopped=False, verifier=None):
     """One shared measured route used by startup and transition; never a grant."""
+    runtime_jobs = {job for job, item in fox['jobs'].items() if item.get('boundary') == 'runtime_intent_candidate'}
     need(set(fox) == {'database', 'jobs', 'fox'}
          and fox == {key: baseline[key] for key in ('database', 'jobs', 'fox')}
          and receiver['receiver'] == baseline['receiver']
-         and set(receiver['identities']) == set(receiver['requests']) == set(fox['jobs']))
-    need(all(receiver['requests'][job] == item['runtime_request_sha256'] for job, item in fox['jobs'].items()))
+         and set(receiver['receiver']) == set(fox['jobs'])
+         and set(receiver['identities']) == set(receiver['requests']) == runtime_jobs)
+    need(all(receiver['requests'][job] == fox['jobs'][job]['runtime_request_sha256'] for job in runtime_jobs))
     host, profile = collect(baseline['runtime'], receiver['receiver'], receiver['identities'], fox['jobs'],
                             infrastructure, storage=storage, stopped=stopped, verifier=verifier)
     # Profile contents are existing nonsecret target metadata, not credentials.
@@ -363,9 +365,11 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
          and re.fullmatch('sha256:[a-f0-9]{64}',config['converter_image']))
     staging = safe(runtime['staging_root']); qa = safe(runtime['qa_root'])
     staging_identity = metadata(staging, directory=True); qa_identity = metadata(qa, directory=True)
-    attempts = {job: qa / ('prototype-' + hashed(identities[job])) for job in jobs}
+    runtime_jobs = {job for job, item in jobs.items() if item.get('boundary') == 'runtime_intent_candidate'}
+    need(set(identities) == runtime_jobs and set(receiver) == set(jobs), 'INERT_RUNTIME_SUBSET_CHANGED')
+    attempts = {job: qa / ('prototype-' + hashed(identities[job])) for job in runtime_jobs}
     for job in jobs:
-        for path in (staging / job, attempts[job]):
+        for path in [staging / job] + ([attempts[job]] if job in attempts else []):
             need(not path.exists() and not path.is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
     oldest = min(row['row']['created'] for row in jobs.values())
     verifier_ref=dict(verifier) if verifier is not None else None
@@ -461,7 +465,8 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
          and metadata(staging, directory=True) == staging_identity and metadata(qa, directory=True) == qa_identity,
          'INERT_HOST_CHANGED_DURING_READ')
     for job in jobs:
-        need(not (staging / job).exists() and not (staging / job).is_symlink()
-             and not attempts[job].exists() and not attempts[job].is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
+        need(not (staging / job).exists() and not (staging / job).is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
+    for path in attempts.values():
+        need(not path.exists() and not path.is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
     return {'runtime_sha256': hashed(runtime), 'receiver_sha256': hashed(receiver),
             'observation_sha256': hashed(first), 'blockers': []}, profile

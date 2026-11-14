@@ -10,6 +10,31 @@ import pytest
 
 from test_current_pair_transition import M
 from test_activate_project_release import M as A, profile, prototype_configuration, upgrade_plan
+from test_paused_stage_preservation import inert_case, mixed_inert_case
+
+
+def test_inert_transition_selects_runtime_candidate_not_lexically_first_opaque(mixed_inert_case,monkeypatch):
+    from fox import paused_stage_preservation as inert
+    c=mixed_inert_case;baseline=c.baseline
+    assert next(iter(baseline['jobs']))==c.opaque_id
+    inventory={'files':{'qa/operator/paused_stage_host.py':'1'*64,'fox/fox/paused_stage_preservation.py':'2'*64}}
+    context=object.__new__(M.Transition);context.old=SimpleNamespace(release='f'*64)
+    context.service=SimpleNamespace(product=SimpleNamespace(PrivateJournal=lambda release:SimpleNamespace(root='/synthetic/journal')))
+    context.p={'preclaim_preservation':{'path':'/synthetic/baseline.json','sha256':M.sha(M.cb(baseline))}}
+    context.new_i={'layout':{'inventory':{'path':'/synthetic/inventory.json'},'release_root':'/synthetic/release'}}
+    context.old_pins={'fox':{'id':'3'*64,'image':'sha256:'+'4'*64}}
+    context.A=SimpleNamespace(read=lambda path,**kw:M.cb(baseline if str(path).endswith('baseline.json')else inventory),
+        inspect_container=lambda identity:{'Id':identity},
+        environment=lambda value:{'FOX_VERIFICATION_ENABLED':'1','FOX_VERIFIER_RELEASE_SHA256':'f'*64})
+    monkeypatch.setattr(M,'absolute',lambda value:PurePosixPath(value))
+    monkeypatch.setattr(M,'load',lambda name,ref:inert if name=='fox.paused_stage_preservation'else SimpleNamespace())
+    class ProfileReached(Exception):pass
+    seen=[]
+    def profile_probe(fox,pin,focused,**kw):seen.append(focused);raise ProfileReached()
+    context.preclaim_profile=profile_probe
+    lease=SimpleNamespace(require_active=lambda *a:None)
+    with pytest.raises(ProfileReached):context.inert_read(stopped=False,new=False,lease=lease)
+    assert seen==[{'target_profile_sha256':'c'*64}]
 
 
 @pytest.fixture
