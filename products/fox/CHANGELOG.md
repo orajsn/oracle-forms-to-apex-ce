@@ -25,6 +25,24 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.23.1] - 2026-11-15
+
+### Recognize current service launchers during guarded upgrades
+
+- Attribute the current FOX and converter attach launchers to their exact
+  containers and user services. Recheck process birth, owner, executable,
+  command, service state and control group before excluding only those PIDs.
+- Keep native preparation, unknown producers, other processes and active locks
+  blocking. Stopped-pair checks require inactive services and no launcher PID.
+  This adds no retry, job closure, import or business-acceptance permission.
+
+Verification: 179 focused local startup/preservation tests passed and independent
+review passed. A broader legacy suite retained 333 passes, three failures and
+17 setup errors caused by unavailable private fixtures/profiles; it is not a
+passing full regression. Actual Linux checks and activation are separate gates.
+The prior 0.23.0 images were built but not activated; they remain unchanged.
+End-to-end real-FMB export acceptance is still pending.
+
 ## [0.23.0] - 2026-11-15
 
 ### Start safe new projects without replaying old runs

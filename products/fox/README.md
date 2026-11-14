@@ -15,9 +15,9 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.23.0; see the versioned changelog. Publication does not imply activation. |
+| Current software source | 0.23.1; see the versioned changelog. Publication does not imply activation. |
 | Hosted lab | 0.22.8. This documentation update does not poll or change the running service. |
-| Hosted candidate state | Earlier 0.22.16 source is staged separately, not activated. The 0.23.0 fixes still require a coherent build and live activation checks. |
+| Hosted candidate state | 0.23.0 images were built, not activated. The 0.23.1 launcher fix requires a new coherent build and live activation checks. |
 | Local verification | Fresh-admission, converter-isolation and startup/metadata suites passed with the limitations recorded in the changelog. This is not live conversion acceptance. |
 | Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
 | Development work | Active, focused on one real FMB reaching a proven SQL download and fresh-ID reimport. Broader repeatability/polish follows separately. |
@@ -28,6 +28,9 @@ unrelated stopped runs. The new route preserves old failures and asks the conver
 for a fresh read-only protocol observation. It does not restart old imports or
 change their status to make a new project pass. Actual hosted acceptance of the
 new route is still pending; the last verified hosted version remains 0.22.8.
+
+Version 0.23.1 corrects the startup observer's attribution of the two normal
+service launchers. It does not exempt the Forms worker or bypass idle checks.
 
 The lab reference target is **APEX 26.1.6 with SQLcl 26.1.2.0**. This is not a
 compatibility guarantee for another database, APEX patch or customer tenancy.

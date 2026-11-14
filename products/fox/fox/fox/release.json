@@ -1,8 +1,9 @@
 {
-  "version": "0.23.0",
+  "version": "0.23.1",
   "released_on": "2026-11-15",
-  "title": "Start safe new projects without replaying old runs",
+  "title": "Recognize current service launchers during guarded upgrades",
   "changes": [
+    "Recognize only independently measured current-pair service launchers during guarded startup; native and unknown workers remain blocking.",
     "Allow a fresh project after stopped prototype history only when a current read-only converter observation establishes protocol isolation.",
     "Preserve old runs, receipts and retry restrictions; reject active, uncertain or conflicting work.",
     "Recognize and fingerprint the product-owned schema index during guarded startup instead of treating it as a job directory.",

@@ -272,6 +272,7 @@ def host_model(c,monkeypatch):
     monkeypatch.setattr(host,'metadata',lambda *a,**k:{'device':1,'inode':2,'mode':448})
     monkeypatch.setattr(host,'effective_unit',lambda *a:{'MainPID':'0','ActiveState':'inactive'})
     monkeypatch.setattr(host,'process_inventory',lambda roots,**kw:[])
+    monkeypatch.setattr(host,'pair_launchers',lambda *a,**kw:[])
     monkeypatch.setattr(host,'lock_holders',lambda root:[])
     def command(args):
         if 'top' in args:return b'PID\n1\n'
@@ -441,3 +442,153 @@ def test_actual_ancestor_rule_does_not_create_peer_idle_bypass(monkeypatch):
     assert host.verifier_observation(binding) is None
     monkeypatch.setattr(host,'ancestor_pids',lambda:set())
     with pytest.raises(pytest.fail.Exception):host.verifier_observation(binding)
+
+
+def launcher_model(monkeypatch):
+    """Authored safe systemctl/proc metadata; not actual Linux service proof."""
+    image='sha256:'+'a'*64
+    pins={name:{'id':digit*64,'image':image} for name,digit in (('fox','1'),('forms2apex-mcp','2'))}
+    items=[{'Id':pin['id'],'Name':name,'Image':image,'State':{'Running':True,'Pid':100+i,'ConmonPid':200+i}}
+           for i,(name,pin) in enumerate(pins.items())]
+    units={};processes={}
+    for i,name in enumerate(pins):
+        pid=300+i;group='/user.slice/user-1000.slice/user@1000.service/app.slice/'+name+'.service'
+        argv=['/usr/bin/podman','start','--attach',name]
+        units[name+'.service']={'Id':name+'.service','LoadState':'loaded','MainPID':str(pid),'ActiveState':'active','SubState':'running',
+            'FragmentPath':str(Path.home()/'.config/systemd/user'/(name+'.service')),'DropInPaths':'',
+            'ControlGroup':group,'ExecStart':'{ path=/usr/bin/podman ; argv[]='+' '.join(argv)+
+            ' ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }'}
+        processes[pid]={'pid':pid,'start_ticks':10000+i,'uid':1000,'executable':'/usr/bin/podman',
+            'argv':argv,'cgroups':['0::'+group],'command_sha256':host.hashed(argv)}
+    def command(args):
+        assert args[:3]==['systemctl','--user','show']
+        assert 'Environment' not in args[-1]
+        return '\n'.join(k+'='+v for k,v in units[args[3]].items()).encode()
+    monkeypatch.setattr(host,'command',command)
+    monkeypatch.setattr(host,'launcher_process',lambda pid:deepcopy(processes[pid]))
+    monkeypatch.setattr(host.os,'getuid',lambda:1000,raising=False)
+    return pins,items,units,processes
+
+
+def test_exact_measured_pair_launchers_are_attributed(monkeypatch):
+    pins,items,units,processes=launcher_model(monkeypatch)
+    result=host.pair_launchers(items,pins)
+    assert {row['identity']['pid'] for row in result}=={300,301}
+    assert all(row['container_id']==pins[row['service'].removesuffix('.service')]['id'] for row in result)
+    processes[300]['argv'][-1]=pins['fox']['id']
+    units['fox.service']['ExecStart']=units['fox.service']['ExecStart'].replace(' --attach fox ', ' --attach '+pins['fox']['id']+' ')
+    assert host.pair_launchers(items,pins)
+
+
+@pytest.mark.parametrize('fault',['wrong-id','wrong-name','wrong-exe','wrong-cgroup','wrong-unit-args',
+    'remote-flag','extra-command','missing-pid','wrong-image','stopped-active','wrong-birth','service-race',
+    'dropin','wrong-fragment','wrong-unit'])
+def test_pair_launcher_attribution_fails_closed(monkeypatch,fault):
+    pins,items,units,processes=launcher_model(monkeypatch)
+    state=units['fox.service'];process=processes[300]
+    if fault=='wrong-id':process['argv'][-1]='9'*64
+    elif fault=='wrong-name':items[0]['Name']='other'
+    elif fault=='wrong-exe':process['executable']='/tmp/podman'
+    elif fault=='wrong-cgroup':process['cgroups']=['0::/other.slice/fox.service']
+    elif fault=='wrong-unit-args':state['ExecStart']=state['ExecStart'].replace(' --attach fox ', ' --attach other ')
+    elif fault=='remote-flag':process['argv'].insert(1,'--remote')
+    elif fault=='extra-command':state['ExecStart']+=' ; { path=/usr/bin/python ; argv[]=/usr/bin/python unknown.py ; }'
+    elif fault=='missing-pid':state['MainPID']='0'
+    elif fault=='dropin':state['DropInPaths']='/unexpected.conf'
+    elif fault=='wrong-fragment':state['FragmentPath']='/tmp/fox.service'
+    elif fault=='wrong-unit':state['Id']='other.service'
+    elif fault=='wrong-image':items[0]['Image']='sha256:'+'b'*64
+    elif fault=='stopped-active':
+        for item in items:item['State'].update(Running=False,Pid=0)
+    elif fault=='wrong-birth':
+        original=host.launcher_process;calls=[]
+        def changed(pid):
+            result=original(pid);calls.append(pid)
+            if len(calls)>1:result['start_ticks']+=1
+            return result
+        monkeypatch.setattr(host,'launcher_process',changed)
+    else:
+        original=host.command;calls=[]
+        def changed(args):
+            result=original(args);calls.append(args[3])
+            if len(calls)>1:result=result.replace(b'MainPID=300',b'MainPID=999')
+            return result
+        monkeypatch.setattr(host,'command',changed)
+    with pytest.raises(RuntimeError):host.pair_launchers(items,pins,stopped=fault=='stopped-active')
+
+
+def test_stopped_pair_requires_no_active_launchers(monkeypatch):
+    pins,items,units,processes=launcher_model(monkeypatch)
+    for unit in units.values():unit.update(MainPID='0',ActiveState='inactive',SubState='dead',ControlGroup='')
+    for item in items:item['State'].update(Running=False,Pid=0)
+    assert all(row['identity'] is None for row in host.pair_launchers(items,pins,stopped=True))
+    units['fox.service']['MainPID']='300'
+    with pytest.raises(RuntimeError):host.pair_launchers(items,pins,stopped=True)
+
+
+def test_launcher_observation_rechecked_around_inventory(inert_case,monkeypatch):
+    c=inert_case;runtime,pins,items=host_model(c,monkeypatch)
+    identities={c.job_id:inert.runtime_identity(c.request,c.request['prior_receipts']['import'],{'opaque':'preserved'})}
+    calls=[]
+    def changing(*a,**kw):
+        calls.append(True)
+        return [{'identity':{'pid':300,'start_ticks':len(calls)}}]
+    monkeypatch.setattr(host,'pair_launchers',changing)
+    with pytest.raises(RuntimeError,match='LAUNCHER_OBSERVATION_CHANGED'):
+        host.collect(runtime,c.baseline['receiver'],identities,c.baseline['jobs'],pins,storage=c.storage)
+
+
+def test_real_inventory_code_keeps_native_python_and_node_blocking(tmp_path,monkeypatch):
+    import hashlib
+    proc=tmp_path/'proc';proc.mkdir()
+    actual_path=host.Path
+    monkeypatch.setattr(host,'Path',lambda value:proc if value=='/proc' else actual_path(value))
+    monkeypatch.setattr(host.os,'getuid',lambda:1000,raising=False)
+    monkeypatch.setattr(host,'ancestor_pids',lambda:set())
+    identities={}
+    for pid,name,parent in ((300,'podman',1),(301,'python3',300),(302,'node',1),(303,'podman',1)):
+        root=proc/str(pid);root.mkdir()
+        raw=(('/usr/bin/podman\0start\0--attach\0fox\0') if pid==300 else '/usr/bin/'+name+'\0unknown\0').encode()
+        (root/'status').write_text('Uid:\t1000\t1000\t1000\t1000\n')
+        (root/'comm').write_text(name)
+        (root/'stat').write_text(str(pid)+' ('+name+') '+' '.join(['S',str(parent)]+['0']*17+[str(pid+1000)]))
+        (root/'cmdline').write_bytes(raw)
+        identities[pid]={'pid':pid,'start_ticks':pid+1000,'command_sha256':hashlib.sha256(raw).hexdigest()}
+    monkeypatch.setattr(host,'launcher_process',lambda pid:deepcopy(identities[pid]))
+    proof=[{'identity':deepcopy(identities[300])}]
+    result=host.process_inventory([],launchers=proof)
+    assert {row['pid'] for row in result}=={301,302,303}  # No descendant/name exemption.
+    proof[0]['identity']['start_ticks']+=1
+    with pytest.raises(RuntimeError,match='LAUNCHER_PROCESS_CHANGED'):
+        host.process_inventory([],launchers=proof)
+
+
+def test_launcher_identity_change_between_full_snapshots_refuses(inert_case,monkeypatch):
+    c=inert_case;runtime,pins,items=host_model(c,monkeypatch)
+    identities={c.job_id:inert.runtime_identity(c.request,c.request['prior_receipts']['import'],{'opaque':'preserved'})}
+    calls=[]
+    def changing(*a,**kw):
+        calls.append(True)
+        return [{'identity':{'pid':300,'start_ticks':1 if len(calls)<=2 else 2}}]
+    monkeypatch.setattr(host,'pair_launchers',changing)
+    with pytest.raises(RuntimeError,match='HOST_CHANGED_DURING_READ'):
+        host.collect(runtime,c.baseline['receiver'],identities,c.baseline['jobs'],pins,storage=c.storage)
+
+
+def test_real_launcher_proc_reader_checks_birth_exe_uid_and_cgroup(tmp_path,monkeypatch):
+    import hashlib
+    proc=tmp_path/'proc';root=proc/'300';root.mkdir(parents=True)
+    actual_path=host.Path
+    monkeypatch.setattr(host,'Path',lambda value:proc if value=='/proc' else actual_path(value))
+    monkeypatch.setattr(host.os,'getuid',lambda:1000,raising=False)
+    monkeypatch.setattr(host.os,'readlink',lambda path:'/usr/bin/podman')
+    raw=b'/usr/bin/podman\0start\0--attach\0fox\0'
+    (root/'stat').write_text('300 (podman) '+' '.join(['S','1']+['0']*17+['12345']))
+    (root/'status').write_text('Uid:\t1000\t1000\t1000\t1000\n')
+    (root/'cmdline').write_bytes(raw)
+    (root/'cgroup').write_text('0::/user.slice/fox.service\n')
+    result=host.launcher_process(300)
+    assert result['start_ticks']==12345 and result['executable']=='/usr/bin/podman'
+    assert result['command_sha256']==hashlib.sha256(raw).hexdigest()
+    (root/'status').write_text('Uid:\t1000\t0\t1000\t1000\n')
+    with pytest.raises(RuntimeError,match='LAUNCHER_PROCESS_INVALID'):host.launcher_process(300)

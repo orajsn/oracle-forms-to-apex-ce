@@ -279,7 +279,91 @@ def ancestor_pids():
     return allowed
 
 
-def process_inventory(container_roots, *, verifier=None):
+def launcher_process(pid):
+    """Bounded /proc identity read, including PID birth; never environment."""
+    need(type(pid) is int and pid > 1, 'INERT_LAUNCHER_PID_INVALID')
+    root=Path('/proc')/str(pid)
+    def read():
+        fields=(root/'stat').read_text().rsplit(')',1)[1].split()
+        raw=(root/'cmdline').read_bytes();status=(root/'status').read_text()
+        groups=(root/'cgroup').read_text().splitlines()
+        uid=re.search(r'^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$',status,re.M)
+        need(uid is not None and all(int(value)==os.getuid() for value in uid.groups())
+             and 0<len(raw)<=16384 and raw.endswith(b'\0') and len(groups)<=64
+             and all(len(line)<=2048 for line in groups), 'INERT_LAUNCHER_PROCESS_INVALID')
+        return {'pid':pid,'start_ticks':int(fields[19]),'uid':int(uid[1]),
+            'executable':os.readlink(root/'exe'),'argv':[arg.decode('ascii') for arg in raw[:-1].split(b'\0')],
+            'cgroups':groups,'command_sha256':hashlib.sha256(raw).hexdigest()}
+    first=read();need(first==read(), 'INERT_LAUNCHER_PROCESS_CHANGED')
+    need(first['start_ticks']>0, 'INERT_LAUNCHER_PROCESS_INVALID')
+    return first
+
+
+def pair_launchers(items, infrastructure, *, stopped=False):
+    """Attribute only actual fixed-pair systemd attach MainPIDs, not descendants."""
+    proofs=[]
+    for name in ('fox','forms2apex-mcp'):
+        unit=name+'.service';pin=infrastructure[name]
+        matches=[item for item in items if item['Id']==pin['id']]
+        need(len(matches)==1, 'INERT_LAUNCHER_CONTAINER_MISSING')
+        item=matches[0]
+        need(item['Image'].removeprefix('sha256:')==pin['image'].removeprefix('sha256:')
+             and type(item.get('Name')) is str and re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',item['Name']),
+             'INERT_LAUNCHER_CONTAINER_CHANGED')
+        def service():
+            raw=command(['systemctl','--user','show',unit,
+                '--property=Id,LoadState,ActiveState,SubState,MainPID,ControlGroup,ExecStart,FragmentPath,DropInPaths'])
+            rows=[line.split('=',1) for line in raw.decode().splitlines()]
+            need(all(len(row)==2 for row in rows) and len({row[0] for row in rows})==len(rows),
+                 'INERT_LAUNCHER_UNIT_INVALID')
+            value=dict(rows)
+            need(set(value)=={'Id','LoadState','ActiveState','SubState','MainPID','ControlGroup','ExecStart','FragmentPath','DropInPaths'}
+                 and value['Id']==unit and value['LoadState']=='loaded' and value['DropInPaths']==''
+                 and value['FragmentPath']==str(Path.home()/'.config/systemd/user'/unit), 'INERT_LAUNCHER_UNIT_INVALID')
+            return value
+        state=service()
+        if stopped:
+            need(state['ActiveState']=='inactive' and state['SubState']=='dead' and state['MainPID']=='0'
+                 and item['State']['Running'] is False and item['State']['Pid']==0,
+                 'INERT_STOPPED_PAIR_LAUNCHER_PRESENT')
+            identity=None
+            target='(?:'+re.escape(pin['id'])+'|'+re.escape(item['Name'])+')'
+            need(re.fullmatch(r'\{ path=/usr/bin/podman ; argv\[\]=/usr/bin/podman start --attach '+target+
+                 r' ; ignore_errors=no ; start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; pid=[0-9]{1,10}'
+                 r' ; code=[A-Za-z0-9()_-]+ ; status=[A-Za-z0-9/_-]+ \}',state['ExecStart']) is not None,
+                 'INERT_LAUNCHER_EXECSTART_CHANGED')
+        else:
+            need(state['ActiveState']=='active' and state['SubState']=='running'
+                 and re.fullmatch('[1-9][0-9]{0,9}',state['MainPID'])
+                 and item['State']['Running'] is True and item['State']['Pid']>0,
+                 'INERT_LAUNCHER_UNIT_NOT_RUNNING')
+            pid=int(state['MainPID']);identity=launcher_process(pid)
+            group=state['ControlGroup']
+            need(group.startswith('/') and str(PurePosixPath(group))==group and '..' not in PurePosixPath(group).parts
+                 and PurePosixPath(group).name==unit
+                 and ('0::'+group in identity['cgroups'] or any(re.fullmatch('[0-9]+:name=systemd:'+re.escape(group),line)
+                     for line in identity['cgroups'])), 'INERT_LAUNCHER_CGROUP_CHANGED')
+            argv=identity['argv']
+            need(identity['pid']==pid and identity['uid']==os.getuid() and identity['start_ticks']>0
+                 and identity['executable']=='/usr/bin/podman' and len(argv)==4
+                 and argv[:3]==['/usr/bin/podman','start','--attach'] and argv[3] in {pin['id'],item['Name']},
+                 'INERT_LAUNCHER_ARGV_CHANGED')
+            # systemctl renders one structured ExecStart. No shell parsing,
+            # alternate executable, extra command or extra option is accepted.
+            expected=r'\{ path=/usr/bin/podman ; argv\[\]='+re.escape(' '.join(argv))+r' ; ignore_errors=no ; '
+            # Podman's user-unit ExecStart metadata legitimately retains pid=0;
+            # only independently observed MainPID + /proc birth grants exclusion.
+            expected+=r'start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; pid=(?:0|'+str(pid)+')'
+            expected+=r' ; code=[A-Za-z0-9()_-]+ ; status=[A-Za-z0-9/_-]+ \}'
+            need(re.fullmatch(expected,state['ExecStart']) is not None, 'INERT_LAUNCHER_EXECSTART_CHANGED')
+            need(launcher_process(pid)==identity, 'INERT_LAUNCHER_PROCESS_CHANGED')
+        need(service()==state, 'INERT_LAUNCHER_SERVICE_CHANGED')
+        proofs.append({'service':unit,'state':state,'identity':identity,
+                       'container_id':pin['id'],'container_image':pin['image'],'container_name':item['Name']})
+    return proofs
+
+
+def process_inventory(container_roots, *, verifier=None, launchers=()):
     """Actual own-UID producer inventory. Unknown Python/Node/engine work blocks."""
     allowed=ancestor_pids()
     rows = []
@@ -296,6 +380,13 @@ def process_inventory(container_roots, *, verifier=None):
                 continue
             raw = (entry / 'cmdline').read_bytes()
             ticks = int((entry / 'stat').read_text().rsplit(')', 1)[1].split()[19])
+            launcher=[row['identity'] for row in launchers if row['identity'] is not None
+                      and row['identity']['pid']==int(entry.name)]
+            if launcher:
+                need(len(launcher)==1 and ticks==launcher[0]['start_ticks']
+                     and hashlib.sha256(raw).hexdigest()==launcher[0]['command_sha256']
+                     and launcher_process(int(entry.name))==launcher[0], 'INERT_LAUNCHER_PROCESS_CHANGED')
+                continue
             if verifier is not None and int(entry.name)==verifier['identity']['pid']:
                 need(ticks==verifier['identity']['start_ticks']
                      and hashlib.sha256(raw).hexdigest()==verifier['argv_sha256'],
@@ -384,7 +475,7 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
         # Never fetch arbitrary container Config/Env or health logs: unrelated
         # containers may carry credentials. Only producer/mount metadata crosses
         # this boundary. This Podman exposes the template field as .ID.
-        fmt=('{'+'"Id":{{json .ID}},"Image":{{json .Image}},"State":{'
+        fmt=('{'+'"Id":{{json .ID}},"Name":{{json .Name}},"Image":{{json .Image}},"State":{'
              '"Running":{{json .State.Running}},"Pid":{{json .State.Pid}},'
              '"ConmonPid":{{json .State.ConmonPid}},"Status":{{json .State.Status}},'
              '"FinishedAt":{{json .State.FinishedAt}}},"Mounts":['
@@ -453,13 +544,15 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
         if not stopped:
             top=command(['podman','--remote=false','top',infrastructure['forms2apex-mcp']['id'],'pid']).decode().splitlines()
             need(len(top)==2 and top[1].strip()=='1','INERT_RECEIVER_OPERATION_PRESENT')
+        launchers=pair_launchers(items,infrastructure,stopped=stopped)
         proof=current_verifier()
-        processes = process_inventory(container_roots,verifier=proof); locks = lock_holders(staging)
+        processes = process_inventory(container_roots,verifier=proof,launchers=launchers); locks = lock_holders(staging)
+        need(pair_launchers(items,infrastructure,stopped=stopped)==launchers,'INERT_LAUNCHER_OBSERVATION_CHANGED')
         again=current_verifier()
         need(proof==again,'INERT_VERIFIER_OBSERVATION_CHANGED')
         need(not processes and not locks, 'INERT_ACTIVE_OR_UNKNOWN_HOST_PRODUCER')
         return {'containers': result, 'processes': processes, 'locks': locks,
-                'unit': effective_unit(runtime, config),'verifier':proof}
+                'unit': effective_unit(runtime, config),'verifier':proof,'pair_launchers':launchers}
     first = snapshot(); second = snapshot()
     need(first == second and [read_ref(ref) for ref in refs] == first_bytes
          and metadata(staging, directory=True) == staging_identity and metadata(qa, directory=True) == qa_identity,
