@@ -440,6 +440,17 @@ class PrototypeGateway:
                 "source_review_authorized": False}
             return {**value, "witness_sha256": digest(value)}
 
+    def isolation_witness(self, job_id, challenge):
+        """Nonce-bound metadata only; never current authority or a replay grant."""
+        from .prototype_isolation import observe
+        # RLock is shared with all gateway stage handlers. Refuse reentry too.
+        _need(not _LOCK._is_owned() and _LOCK.acquire(blocking=False),
+              "PROTOTYPE_ISOLATION_BUSY")
+        try:
+            return observe(self, job_id, challenge)
+        finally:
+            _LOCK.release()
+
     def continue_validation(self, request, witness, record_sha256):
         """One first validation claim, never an uncertain validation replay."""
         request, witness = deepcopy(request), deepcopy(witness)

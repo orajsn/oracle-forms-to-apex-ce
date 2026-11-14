@@ -1,11 +1,12 @@
 {
-  "version": "0.22.16",
-  "released_on": "2026-11-14",
-  "title": "Preserve paused runs at different conversion stages",
+  "version": "0.23.0",
+  "released_on": "2026-11-15",
+  "title": "Start safe new projects without replaying old runs",
   "changes": [
-    "Preserve earlier failed runs alongside a run waiting for its first runtime test during guarded startup.",
-    "Keep every saved run and file, including evidence that an earlier converter folder does not exist.",
-    "Reject malformed or changed stage evidence without restarting work or claiming conversion success."
+    "Allow a fresh project after stopped prototype history only when a current read-only converter observation establishes protocol isolation.",
+    "Preserve old runs, receipts and retry restrictions; reject active, uncertain or conflicting work.",
+    "Recognize and fingerprint the product-owned schema index during guarded startup instead of treating it as a job directory.",
+    "Keep source approvals, review, target validation, runtime checks and business acceptance separate."
   ],
   "limitations": [
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
@@ -19,6 +20,6 @@
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
     "APEX generated, technical checks passed and business acceptance remain separate.",
     "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
-    "Release notes describe software changes, not proof of a successful conversion."
+    "Fresh-project isolation requires the supported single-converter process and a genuinely new project. It does not attest arbitrary manual processes, authorize old retries or prove a completed conversion."
   ]
 }

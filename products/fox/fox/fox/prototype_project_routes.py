@@ -103,7 +103,8 @@ def configured_target():
 
 def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                                     admission_allowed, target_reader=configured_target,
-                                    installation_projection=None, download_client_factory=None):
+                                    installation_projection=None, download_client_factory=None,
+                                    fresh_admission_allowed=None):
     def target_hash():
         try:
             envelope = target_reader()
@@ -1272,8 +1273,20 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             if old:
                 # Never create a second charged execution or overwrite earlier proof.
                 raise HTTPException(409, 'This source version already has a conversion run. Open that run; it has not been restarted or replaced.')
-            if not admission_allowed(c):
-                raise HTTPException(429, 'Another conversion or verification requires completion. Your source files are saved.')
+            admission_recheck=None
+            if fresh_admission_allowed is None:
+                if not admission_allowed(c):
+                    raise HTTPException(429, 'Another conversion or verification requires completion. Your source files are saved.')
+            else:
+                from .prototype_fresh_admission import FreshPrototypeAdmissionError
+                try:
+                    admission_recheck=fresh_admission_allowed(c,project_id=pid,source_hash=body.source_hash,
+                        target_profile_sha256=digest)
+                    if not callable(admission_recheck):
+                        raise FreshPrototypeAdmissionError()
+                    admission_recheck()
+                except FreshPrototypeAdmissionError as error:
+                    raise HTTPException(error.status_code,str(error)) from None
             if c.execute("SELECT COUNT(*) FROM runs WHERE state IN ('QUEUED','PROCESSING')").fetchone()[0] >= 5:
                 raise HTTPException(429, 'The conversion queue is full. Try again after an active run finishes.')
             locked = c.execute('SELECT owner,name FROM projects WHERE id=?', (pid,)).fetchone()
@@ -1302,5 +1315,10 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                       (rid, pid, body.source_hash, 'QUEUED', 'Waiting for source-bound prototype analysis.', now, now, None))
             c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
                       (p['owner'], 'approved_prototype_conversion', rid, now))
+            if admission_recheck is not None:
+                try:
+                    admission_recheck(new_run_id=rid)
+                except FreshPrototypeAdmissionError as error:
+                    raise HTTPException(error.status_code,str(error)) from None
         return {'id': rid, 'state': 'QUEUED', 'conversion_profile': PROFILE_ID,
                 'summary': admission['summary']}

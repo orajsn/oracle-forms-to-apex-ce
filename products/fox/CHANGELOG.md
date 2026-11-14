@@ -25,6 +25,44 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.23.0] - 2026-11-15
+
+### Start safe new projects without replaying old runs
+
+- Give fresh prototype submissions a separate, transaction-scoped admission
+  check. Unrelated stopped prototypes may be isolated only after a fresh
+  authenticated, nonce-bound converter observation; active or uncertain work
+  still refuses admission. Existing verification, continuation and retry gates
+  are unchanged. The same source bytes may be used in a different new project;
+  an existing project's run is never reset or replaced by this route.
+- Add a read-only converter observation for genuine receiver absence, runtime
+  work not yet dispatched, or a validated completed export. It uses the existing
+  stage lock and checks retained requests, receipts and known recovery artifacts.
+  It grants no execution, retry, closure or business acceptance. The supported
+  single-converter process is required; arbitrary manual processes are not attested.
+- Keep old rows, source files and ledgers unchanged across the new submission.
+  Reconstruct web-side requests to check actual receipt hashes; do not require
+  identity fields that the real converter receipt format does not contain.
+- Recognize the product-owned native-schema index as bounded retained metadata
+  during startup. Bind its bytes and file identity to existing and absent job
+  observations; reject unknown files, links and changes. Preserve all POSIX file
+  checks and handle Windows' differing path/handle ctime representations explicitly.
+- Repair the legacy preclaim test fixture to use its selected renderer without
+  adding a production compatibility alias or relaxing validation.
+
+Verification: 100 authenticated local API/transport/preclaim checks passed using
+the real receipt-envelope builder with authored stage outcomes; 171 converter
+checks passed with one Windows symlink-creation skip; 183 startup/metadata checks
+passed. Independent reviews passed after correcting the receipt-format mismatch.
+These are local/component checks, not live Oracle conversion acceptance. A separate
+longer-path test rerun failed Windows fixture copying; its failure is preserved.
+
+An isolated, write-denied candidate observation also parsed both retained lab
+histories successfully, with full job files and installed code/profile unchanged.
+It was not the serving HTTP witness and proves neither serving-process locking,
+admission permission nor deployment readiness. Source publication, activation,
+the real FMB journey and exact-download reimport remain separate acceptance steps.
+
 ## [0.22.16] - 2026-11-14
 
 ### Preserve paused runs at different conversion stages

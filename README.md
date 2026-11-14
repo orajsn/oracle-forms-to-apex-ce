@@ -14,10 +14,10 @@ This repository contains two related projects:
 | CE Workbench | This README | A Codex-assisted assessment and POC skill. |
 | FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
 
-FOX's latest published software source is **0.22.16**. Its last verified lab
-deployment is **0.22.8**; the newer candidate is staged, not activated. The full
+FOX's current software source is **0.23.0**. Its last verified lab deployment is
+**0.22.8**; earlier 0.22.16 source is staged, not activated. The full
 real-module conversion, runtime and downloadable-export acceptance is unfinished.
-See the [dated checkpoint](products/fox/README.md#current-checkpoint--14-november-2026),
+See the [dated checkpoint](products/fox/README.md#current-checkpoint--15-november-2026),
 [changelog](products/fox/CHANGELOG.md), and
 [retrospective history](products/fox/docs/historical-changelog.md).
 

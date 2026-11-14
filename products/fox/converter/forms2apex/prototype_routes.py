@@ -55,6 +55,20 @@ def attach_prototype_routes(mcp, gateway, settings):
         except (ValueError, TypeError, RuntimeError, OSError, KeyError, zipfile.BadZipFile):
             return JSONResponse({'error': 'Generated prototype export is unavailable or could not be verified. Existing evidence is preserved.'}, status_code=409)
 
+    @mcp.custom_route('/fox/prototype/jobs/{job_id}/isolation-witness', methods=['GET'], include_in_schema=False)
+    async def isolation_witness(request):
+        headers = {'Cache-Control': 'no-store'}
+        if not authorized(request):
+            return JSONResponse({'error': 'Unauthorized'}, status_code=401, headers=headers)
+        try:
+            job_id = request.path_params['job_id']; validate_job_id(job_id)
+            if list(request.query_params) != ['challenge'] or len(request.query_params.getlist('challenge')) != 1:
+                raise ValueError('Exact challenge required')
+            result = await asyncio.to_thread(gateway.isolation_witness, job_id, request.query_params['challenge'])
+            return JSONResponse(result, headers=headers)
+        except (ValueError, TypeError, RuntimeError, OSError, KeyError, zipfile.BadZipFile):
+            return JSONResponse({'error': 'Protocol isolation could not be verified. Existing evidence is preserved; no operation was authorized.'}, status_code=409, headers=headers)
+
     @mcp.custom_route('/fox/prototype/jobs/{job_id}/authority', methods=['POST', 'GET'], include_in_schema=False)
     async def authority(request):
         if not authorized(request):

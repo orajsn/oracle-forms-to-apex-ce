@@ -61,6 +61,53 @@ def runtime_target(jobs):
     return {'target_profile_sha256': targets[0]}
 
 
+def _receiver_parent_metadata(root, owner):
+    """Fingerprint only the product's bounded native-schema index, never adopt it.
+
+    schema_bootstrap.INDEX_NAME is create-only0600 and MAX_RECORD_BYTES=1000000.
+    Unknown root files, linked/special nodes and directory-shaped indexes reject.
+    Payload bytes remain opaque; no registry or operation success is inferred.
+    """
+    import os
+    import stat
+    from .verification_recovery import _need
+    entries = list(root.iterdir())
+    _need(len(entries) <= 4096, 'INERT_RECEIVER_ROOT_BOUNDS')
+    result = {}
+    fields = ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+    # Windows lstat and fstat can expose different ctime meanings. Keep each
+    # source's full before/after pin; only that cross-API comparison is omitted.
+    # POSIX still requires every field to match across the path and descriptor.
+    identity_fields = fields[:-1] if os.name == 'nt' else fields
+    for path in entries:
+        info = path.lstat()
+        _need(not stat.S_ISLNK(info.st_mode)
+              and not getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400),
+              'INERT_RECEIVER_ROOT_LINKED')
+        if path.name != '.native-schema-index.json':
+            _need(stat.S_ISDIR(info.st_mode), 'INERT_RECEIVER_ROOT_ENTRY_UNKNOWN')
+            continue
+        _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and 0 < info.st_size <= 1_000_000
+              and (os.name == 'nt' or info.st_uid == owner and not info.st_mode & 0o022),
+              'INERT_RECEIVER_METADATA_UNSAFE')
+        with os.fdopen(os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)), 'rb') as stream:
+            opened = os.fstat(stream.fileno())
+            _need(all(getattr(opened, name) == getattr(info, name) for name in identity_fields),
+                  'INERT_RECEIVER_METADATA_CHANGED')
+            raw = stream.read(1_000_001)
+            after = os.fstat(stream.fileno())
+        final = path.lstat()
+        _need(len(raw) == info.st_size
+              and all(getattr(opened, name) == getattr(after, name) for name in fields)
+              and all(getattr(info, name) == getattr(final, name) for name in fields),
+              'INERT_RECEIVER_METADATA_CHANGED')
+        result[path.name] = {'kind': 'regular', 'device': info.st_dev, 'inode': info.st_ino,
+            'owner': info.st_uid, 'group': info.st_gid, 'mode': stat.S_IMODE(info.st_mode),
+            'links': info.st_nlink, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns}
+    return result
+
+
 def receiver_job_tree(root, job_id):
     """Full existing tree OR genuine missing child bound to its current parent."""
     import os
@@ -76,11 +123,14 @@ def receiver_job_tree(root, job_id):
           before.st_uid == os.getuid() and not before.st_mode & 0o022), 'INERT_RECEIVER_ROOT_UNSAFE')
     namespace = lambda info: {'device': info.st_dev, 'inode': info.st_ino,
                              'owner': info.st_uid, 'mode': stat.S_IMODE(info.st_mode)}
+    metadata = _receiver_parent_metadata(root, before.st_uid)
     path = root / job_id
     _need(not path.is_symlink(), 'INERT_RECEIVER_ROOT_UNSAFE')
-    value = preclaim_tree(path) if path.exists() else {'absent': True, 'parent_namespace': namespace(before)}
-    _need(namespace(root.lstat()) == namespace(before) and root.resolve() == root,
+    value = preclaim_tree(path) if path.exists() else {'absent': True}
+    _need(_receiver_parent_metadata(root, before.st_uid) == metadata
+          and namespace(root.lstat()) == namespace(before) and root.resolve() == root,
           'INERT_RECEIVER_NAMESPACE_CHANGED')
+    value.update(parent_namespace=namespace(before), parent_metadata=metadata)
     return value
 
 
@@ -91,16 +141,22 @@ def receiver_collector_source():
     # Remove only this fixed package import in the standalone stdlib emitter.
     tree_source = inspect.getsource(receiver_job_tree).replace(
         '    from .verification_recovery import preclaim_tree, _need\n', '')
+    metadata_source = inspect.getsource(_receiver_parent_metadata).replace(
+        '    from .verification_recovery import _need\n', '')
     functions = (RecoveryError, _need, digest, _load, preclaim_tree, hashed, runtime_identity)
     return ('import hashlib,json,pathlib,re,sys\nfrom pathlib import Path\n' +
-        '\n'.join(inspect.getsource(function) for function in functions) + '\n' + tree_source + '''
+        '\n'.join(inspect.getsource(function) for function in functions) + '\n' + metadata_source + '\n' + tree_source + '''
 p=json.load(sys.stdin);assert set(p)=={'receiver_jobs','jobs'}
 root=Path(p['receiver_jobs']);assert root.is_absolute() and root.resolve()==root
 assert 0<len(p['jobs'])<=100 and all(re.fullmatch('fox-[a-f0-9]{20}',j) for j in p['jobs'])
 before={j:receiver_job_tree(root,j) for j in p['jobs']}
 entries=list(root.iterdir());assert len(entries)<=4096
 for job in entries:
- assert not job.is_symlink() and job.is_dir()
+ assert not job.is_symlink()
+ if job.name=='.native-schema-index.json':
+  assert job.is_file() and all(job.name in tree['parent_metadata'] for tree in before.values())
+  continue
+ assert job.is_dir()
  stage=job/'prototype-converter';assert not stage.is_symlink()
  for name in ('runtime-request.json','runtime-claim.json','runtime-result.json','runtime-receipt.json','runtime-evidence'):
   path=stage/name;assert not path.exists() and not path.is_symlink()
@@ -223,16 +279,32 @@ def validate_baseline(value):
          and value['scope'] == BASELINE_SCOPE and type(value['jobs']) is dict
          and 0 < len(value['jobs']) <= 100 and set(value['fox']) == set(value['receiver']) == set(value['jobs']),
          'INERT_EXPLICIT_BASELINE_REQUIRED')
+    parent = None
     for job, item in value['jobs'].items():
         need(item.get('boundary') in (RUNTIME_CANDIDATE, OPAQUE_BOUNDARY)
              and (sha(item.get('runtime_request_sha256')) if item['boundary'] == RUNTIME_CANDIDATE
                   else item.get('runtime_request_sha256') is None), 'INERT_BOUNDARY_INVALID')
         tree = value['receiver'][job]
+        need(type(tree) is dict and type(tree.get('parent_namespace')) is dict
+             and set(tree['parent_namespace']) == {'device','inode','owner','mode'}
+             and all(type(number) is int for number in tree['parent_namespace'].values())
+             and type(tree.get('parent_metadata')) is dict
+             and set(tree['parent_metadata']) <= {'.native-schema-index.json'}, 'INERT_RECEIVER_PARENT_INVALID')
+        for pin in tree['parent_metadata'].values():
+            need(type(pin) is dict and set(pin) == {'kind','device','inode','owner','group','mode','links','bytes',
+                 'sha256','mtime_ns','ctime_ns'} and pin['kind'] == 'regular' and sha(pin['sha256'])
+                 and all(type(pin[name]) is int for name in pin if name not in ('kind','sha256'))
+                 and pin['owner'] == tree['parent_namespace']['owner']
+                 and pin['links'] == 1 and 0 < pin['bytes'] <= 1_000_000, 'INERT_RECEIVER_METADATA_INVALID')
+        actual_parent = tree['parent_namespace'], tree['parent_metadata']
+        need(parent is None or parent == actual_parent, 'INERT_RECEIVER_PARENT_CHANGED')
+        parent = actual_parent
         if tree.get('absent') is True:
-            need(item['boundary'] == OPAQUE_BOUNDARY and set(tree) == {'absent', 'parent_namespace'}
-                 and type(tree['parent_namespace']) is dict
-                 and set(tree['parent_namespace']) == {'device','inode','owner','mode'},
+            need(item['boundary'] == OPAQUE_BOUNDARY and set(tree) == {'absent', 'parent_namespace','parent_metadata'},
                  'INERT_RECEIVER_ABSENCE_INVALID')
+        else:
+            need(set(tree) == {'files','directories','namespace','parent_namespace','parent_metadata'},
+                 'INERT_RECEIVER_TREE_INVALID')
     return value
 
 

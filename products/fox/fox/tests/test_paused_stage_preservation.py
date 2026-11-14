@@ -50,7 +50,7 @@ def inert_case(tmp_path):
         with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as db:
             db.row_factory=sqlite3.Row;db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
             return inert.observe_fox(path,db)
-    fox=observe();tree={job_id:recovery.preclaim_tree(receiver/job_id)}
+    fox=observe();tree={job_id:inert.receiver_job_tree(receiver,job_id)}
     baseline={'schema_version':1,'scope':inert.BASELINE_SCOPE,**fox,'receiver':tree,'runtime':{'synthetic':'metadata'}}
     identity={**{key:'f'*64 for key in ('pair_sha256','lease_sha256','release_sha256','source_sha256','profile_sha256')},
               'runtime_state':'running','stopped_writer_sha256':None,
@@ -87,13 +87,73 @@ def mixed_inert_case(inert_case):
     return c
 
 
+@pytest.fixture
+def indexed_mixed_case(mixed_inert_case):
+    from forms2apex import schema_bootstrap as writer
+    c=mixed_inert_case;registry=c.receiver/writer.REGISTRY_NAME;registry.mkdir(mode=0o700)
+    identity={'schema_version':1,'scope':'fox-native-schema-registry-v1',
+              'registry_name':writer.REGISTRY_NAME,'registry_id':'1'*32}
+    writer._new(registry/'identity.json',identity)
+    c.index=c.receiver/writer.INDEX_NAME;writer._new(c.index,identity)
+    c.refresh();return c
+
+
+def test_native_index_is_opaque_fingerprinted_and_bound_to_present_and_absent_trees(indexed_mixed_case):
+    c=indexed_mixed_case;raw=c.index.read_bytes();info=c.index.stat()
+    before=c.database.read_bytes(),recovery.preclaim_tree(c.job),recovery.preclaim_tree(c.opaque_job),raw
+    pin=c.baseline['receiver'][c.job_id]['parent_metadata'][c.index.name]
+    assert pin=={'kind':'regular','device':info.st_dev,'inode':info.st_ino,'owner':info.st_uid,'group':info.st_gid,
+        'mode':__import__('stat').S_IMODE(info.st_mode),'links':1,'bytes':len(raw),
+        'sha256':__import__('hashlib').sha256(raw).hexdigest(),'mtime_ns':info.st_mtime_ns,'ctime_ns':info.st_ctime_ns}
+    assert c.baseline['receiver'][c.opaque_id]['parent_metadata']=={c.index.name:pin}
+    assert c.baseline['receiver'][c.opaque_id]['absent']is True
+    assert validate(c)['preserved']['continuation_authorized']is False
+    assert before==(c.database.read_bytes(),recovery.preclaim_tree(c.job),recovery.preclaim_tree(c.opaque_job),c.index.read_bytes())
+    assert not(c.receiver/c.opaque_id).exists()
+
+
+@pytest.mark.parametrize('change',['bytes','mode','replacement','metadata-added','metadata-removed','missing-field','owner','hash'])
+def test_parent_metadata_mutations_cannot_be_ignored_or_adopted(indexed_mixed_case,change):
+    c=indexed_mixed_case;p=deepcopy(c.packet)
+    if change=='bytes':c.index.write_bytes(b'{"unresolved":"changed"}')
+    elif change=='mode':c.index.chmod(0o444)
+    elif change=='replacement':
+        replacement=c.root/'replacement';replacement.write_bytes(c.index.read_bytes());replacement.replace(c.index)
+    elif change=='metadata-removed':c.index.unlink()
+    elif change=='metadata-added':
+        # Compare the old explicit absence of root metadata to a new real file.
+        for tree in c.expected['baseline']['receiver'].values():tree['parent_metadata']={}
+        c.expected['baseline_sha256']=inert.hashed(c.expected['baseline']);p['binding']=c.expected['baseline_sha256']
+    elif change=='missing-field':
+        c.expected['baseline']['receiver'][c.opaque_id].pop('parent_metadata')
+        c.expected['baseline_sha256']=inert.hashed(c.expected['baseline']);p['binding']=c.expected['baseline_sha256']
+    else:
+        for tree in c.expected['baseline']['receiver'].values():
+            pin=tree['parent_metadata'][c.index.name]
+            if change=='owner':pin['owner']+=1
+            else:pin['sha256']='f'*64
+        c.expected['baseline_sha256']=inert.hashed(c.expected['baseline']);p['binding']=c.expected['baseline_sha256']
+    if change not in ('missing-field','owner','hash'):
+        p['receiver']={job:inert.receiver_job_tree(c.receiver,job)for job in c.baseline['jobs']}
+        p['host']['receiver_sha256']=inert.hashed(p['receiver'])
+    with pytest.raises(inert.PreservationError):validate(c,p)
+
+
+def test_unknown_index_payload_is_retained_not_semantically_adopted(indexed_mixed_case,monkeypatch):
+    c=indexed_mixed_case;c.index.write_bytes(b'opaque partial registry bytes, NOT success')
+    c.refresh()
+    from forms2apex import schema_bootstrap as writer
+    monkeypatch.setattr(writer,'_read',lambda *a:pytest.fail('No registry semantic adoption'))
+    assert validate(c)['admission']['retry_eligible']is False
+
+
 def test_mixed_runtime_and_earlier_failure_preserve_all_rows_trees_and_absence(mixed_inert_case):
     c=mixed_inert_case;before=(c.database.read_bytes(),recovery.preclaim_tree(c.job),recovery.preclaim_tree(c.opaque_job))
     assert len(before[2]['files'])==10 and not (c.receiver/c.opaque_id).exists()
     assert set(c.baseline['jobs'])=={c.job_id,c.opaque_id}
     assert c.baseline['jobs'][c.opaque_id]['boundary']==inert.OPAQUE_BOUNDARY
     assert c.baseline['jobs'][c.opaque_id]['runtime_request_sha256']is None
-    assert c.baseline['receiver'][c.opaque_id]=={'absent':True,'parent_namespace':{
+    assert c.baseline['receiver'][c.opaque_id]=={'absent':True,'parent_metadata':{},'parent_namespace':{
         'device':c.receiver.stat().st_dev,'inode':c.receiver.stat().st_ino,
         'owner':c.receiver.stat().st_uid,'mode':__import__('stat').S_IMODE(c.receiver.stat().st_mode)}}
     assert inert.runtime_target(c.baseline['jobs'])=={'target_profile_sha256':'c'*64}

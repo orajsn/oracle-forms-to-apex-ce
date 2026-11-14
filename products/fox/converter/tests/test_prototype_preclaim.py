@@ -24,7 +24,7 @@ def staged(case):
     members['binding.json'] = gateway.canonical(binding)
     members['native-plan.json'] = gateway.canonical({k: case.request[k] for k in ('plan_sha256', 'rendering_spec')})
     members['rendered.json'] = gateway.canonical({'zip_sha256': case.request['rendered_zip_sha256']})
-    members['candidate-apexlang.zip'] = gateway.native_blueprint.deterministic_prototype_zip(case.request['rendering_spec'])
+    members['candidate-apexlang.zip'] = case.renderer.deterministic_prototype_zip(case.request['rendering_spec'])
     bundle['source_authority']['binding_sha256'] = gateway.digest(binding)
     case.request['source_authority'] = deepcopy(bundle['source_authority'])
     for row in bundle['files']:

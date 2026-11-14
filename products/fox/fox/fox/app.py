@@ -1061,8 +1061,28 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 return False
         return (not verifier_config.enabled or
                 VerificationRecovery(database, enabled=True).admission_allowed(connection))
+    def fresh_prototype_admission(connection, *, project_id, source_hash, target_profile_sha256):
+        from .verification_recovery import VerificationRecovery
+        from .prototype_fresh_admission import prepare_fresh_admission
+        from .prototype_job import _configuration
+        from .prototype_authority import execution_target
+        from .prototype_transport import read_isolation_witness
+        from .opaf import canonical_hash
+        configuration=[]
+        def configured():
+            if not configuration:
+                configuration.append(_configuration(target_profile_sha256,
+                    installation_projection=(fresh.projection if fresh is not None else None)))
+            return configuration[0]
+        def target_check():
+            return canonical_hash(execution_target(configured()['target_profile_loader']()))
+        return prepare_fresh_admission(root=root,connection=connection,
+            recovery=VerificationRecovery(database,enabled=True),project_id=project_id,source_hash=source_hash,
+            target_check=target_check,witness_reader=lambda job_id,challenge:
+                read_isolation_witness(configured()['gateway'],job_id,challenge))
     attach_prototype_project_routes(app, root=root, db=db, project=project,
         current_sources=current_sources, admission_allowed=prototype_admission_allowed,
+        fresh_admission_allowed=(fresh_prototype_admission if verifier_config.enabled else None),
         installation_projection=(fresh.projection if fresh is not None else None))
     from .prototype_authority import attach_prototype_authority
     authority_mode = os.getenv('FOX_PROTOTYPE_AUTHORITY_ENABLED', '')

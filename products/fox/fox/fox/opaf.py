@@ -411,6 +411,7 @@ class ConverterClient:
         # Socket I/O bounds are NOT whole-stage deadlines; target preflight
         # has no aggregate bound. No child limit, authority TTL or retry changes.
         timeout = 600
+        response_limit = 8_000_000
         if method in ('POST', 'GET') and type(path) is str:
             stage = re.fullmatch(r'/fox/prototype/jobs/fox-[a-f0-9]{20}/stages/'
                                  r'(validate|prepare_schema|import|verify_runtime|export)', path)
@@ -420,12 +421,15 @@ class ConverterClient:
             elif method == 'POST' and re.fullmatch(
                     r'/fox/prototype/jobs/fox-[a-f0-9]{20}/continue-validation', path):
                 timeout = 1080
+            elif method == 'GET' and re.fullmatch(
+                    r'/fox/prototype/jobs/fox-[a-f0-9]{20}/isolation-witness\?challenge=[a-f0-9]{64}',path):
+                timeout, response_limit = 10, 8192
         conn=http.client.HTTPConnection('127.0.0.1',self._port,timeout=timeout)
         try:
             conn.request(method,path,json.dumps(payload) if payload is not None else None,
                          {'Authorization':'Bearer '+self.token,'Content-Type':'application/json'})
-            response=conn.getresponse();raw=response.read(8_000_001)
-            if response.status not in (200,201) or len(raw)>8_000_000:
+            response=conn.getresponse();raw=response.read(response_limit+1)
+            if response.status not in (200,201) or len(raw)>response_limit:
                 raise OpafError(f'Converter step failed (HTTP {response.status}); the job is retained. No automatic replay.',response.status)
             return raw if binary else json.loads(raw)
         except (OSError,http.client.HTTPException):

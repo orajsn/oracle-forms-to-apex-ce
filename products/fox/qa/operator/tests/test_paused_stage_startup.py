@@ -10,7 +10,7 @@ import pytest
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path[:0]=[str(ROOT/'fox/tests'),str(ROOT/'fox'),str(ROOT)]
-from test_paused_stage_preservation import inert_case, mixed_inert_case, validate
+from test_paused_stage_preservation import inert_case, mixed_inert_case, indexed_mixed_case, validate
 from fox import paused_stage_preservation as inert
 from qa.operator import retirement_remote as remote, paused_stage_host as host
 from qa.operator.tests.test_retirement_remote_backend import historical_case, CURRENT
@@ -95,6 +95,124 @@ def test_receiver_absence_namespace_changes_and_new_children_are_not_adopted(mix
     (c.receiver/c.opaque_id).mkdir()
     assert inert.receiver_job_tree(c.receiver,c.opaque_id)!=before
     assert before['absent']is True and before['parent_namespace']['inode']==c.receiver.stat().st_ino
+
+
+def test_actual_emitted_collector_accepts_and_preserves_product_root_index(indexed_mixed_case,monkeypatch):
+    c=indexed_mixed_case;before=c.database.read_bytes(),c.index.read_bytes()
+    payload={'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])}
+    received=execute(inert.receiver_collector_source(),payload,monkeypatch)
+    assert received['receiver']==c.baseline['receiver']
+    assert set(received['requests'])==set(received['identities'])=={c.job_id}
+    for tree in received['receiver'].values():
+        assert tree['parent_metadata'][c.index.name]['sha256']==__import__('hashlib').sha256(before[1]).hexdigest()
+    assert before==(c.database.read_bytes(),c.index.read_bytes())
+    assert not(c.receiver/c.opaque_id).exists()
+
+
+@pytest.mark.parametrize('fault',['unknown-file','index-directory','hardlink','zero','oversize'])
+def test_emitted_root_index_does_not_skip_unknown_or_unsafe_entries(indexed_mixed_case,monkeypatch,fault):
+    c=indexed_mixed_case
+    if fault=='unknown-file':(c.receiver/'unknown.json').write_text('{}')
+    elif fault=='index-directory':c.index.unlink();c.index.mkdir()
+    elif fault=='hardlink':__import__('os').link(c.index,c.root/'outside-index-link')
+    elif fault=='zero':c.index.write_bytes(b'')
+    else:c.index.write_bytes(b'x'*1_000_001)
+    with pytest.raises((AssertionError,RuntimeError,OSError)):
+        execute(inert.receiver_collector_source(),{'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])},monkeypatch)
+
+
+@pytest.mark.parametrize('fault',['symlink','reparse','special','wrong-owner','writable'])
+def test_native_metadata_stat_guards_fail_before_read(indexed_mixed_case,monkeypatch,fault):
+    import os,stat
+    c=indexed_mixed_case;original=Path.lstat;seen=[]
+    def lstat(path,*a,**kw):
+        info=original(path,*a,**kw)
+        if path!=c.index:return info
+        fields={name:getattr(info,name)for name in ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')}
+        if fault=='symlink':fields['st_mode']=stat.S_IFLNK|0o600
+        elif fault=='reparse':fields['st_file_attributes']=getattr(stat,'FILE_ATTRIBUTE_REPARSE_POINT',0x400)
+        elif fault=='special':fields['st_mode']=stat.S_IFIFO|0o600
+        elif fault=='wrong-owner':fields['st_uid']+=1
+        else:fields['st_mode']=stat.S_IFREG|0o666
+        return SimpleNamespace(**fields)
+    with monkeypatch.context()as patch:
+        patch.setattr(Path,'lstat',lstat)
+        patch.setattr(os,'open',lambda *a,**kw:seen.append(a)or pytest.fail('Unsafe metadata was opened'))
+        # This unit exercises the real POSIX stat predicate using native temporary paths.
+        patch.setattr(os,'name','posix')
+        with pytest.raises(RuntimeError):inert._receiver_parent_metadata(c.receiver,c.receiver.stat().st_uid)
+    assert seen==[]
+
+
+def test_root_metadata_change_during_job_tree_read_fails(indexed_mixed_case,monkeypatch):
+    c=indexed_mixed_case;original=inert._receiver_parent_metadata;calls=[]
+    def changing(root,owner):
+        calls.append(True)
+        if len(calls)==2:c.index.write_bytes(b'changed during collection')
+        return original(root,owner)
+    monkeypatch.setattr(inert,'_receiver_parent_metadata',changing)
+    with pytest.raises(RuntimeError,match='NAMESPACE_CHANGED'):inert.receiver_job_tree(c.receiver,c.opaque_id)
+
+
+@pytest.mark.parametrize('fault',['appeared','changed','replaced','removed'])
+def test_actual_emitted_collector_rejects_index_changes_during_collection(indexed_mixed_case,monkeypatch,fault):
+    c=indexed_mixed_case;original=Path.read_bytes;mutated=[]
+    if fault=='appeared':c.index.unlink();c.refresh()
+    def read(path,*a,**kw):
+        raw=original(path,*a,**kw)
+        if path==c.stage/'verify_runtime-request.json' and not mutated:
+            mutated.append(True)
+            if fault=='removed':c.index.unlink()
+            elif fault=='replaced':
+                replacement=c.root/'replacement';replacement.write_bytes(original(c.index));replacement.replace(c.index)
+            else:c.index.write_bytes(b'opaque changed bytes')
+        return raw
+    monkeypatch.setattr(Path,'read_bytes',read)
+    with pytest.raises((AssertionError,RuntimeError,OSError)):
+        execute(inert.receiver_collector_source(),{'receiver_jobs':str(c.receiver),'jobs':sorted(c.baseline['jobs'])},monkeypatch)
+    assert mutated==[True] and not(c.receiver/c.opaque_id).exists()
+
+
+@pytest.mark.parametrize('source',['path','descriptor'])
+@pytest.mark.parametrize('field',['st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns'])
+def test_metadata_each_stat_source_must_remain_stable(indexed_mixed_case,monkeypatch,source,field):
+    import os
+    c=indexed_mixed_case;original_path=Path.lstat;original_handle=os.fstat;counts={'path':0,'descriptor':0}
+    def changed(info):
+        fields={name:getattr(info,name)for name in
+                ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')}
+        fields[field]+=1
+        return SimpleNamespace(**fields)
+    def lstat(path,*a,**kw):
+        info=original_path(path,*a,**kw)
+        if path==c.index:
+            counts['path']+=1
+            if source=='path'and counts['path']==2:return changed(info)
+        return info
+    def fstat(descriptor):
+        counts['descriptor']+=1;info=original_handle(descriptor)
+        return changed(info)if source=='descriptor'and counts['descriptor']==2 else info
+    monkeypatch.setattr(Path,'lstat',lstat);monkeypatch.setattr(os,'fstat',fstat)
+    with pytest.raises(RuntimeError,match='METADATA_CHANGED'):
+        inert._receiver_parent_metadata(c.receiver,c.receiver.stat().st_uid)
+    assert counts['descriptor']==2
+
+
+def test_posix_cross_api_ctime_difference_still_rejects(indexed_mixed_case,monkeypatch):
+    import os,stat
+    c=indexed_mixed_case;info=c.index.lstat();original=Path.lstat;opened=[]
+    fields={name:getattr(info,name)for name in
+            ('st_dev','st_ino','st_uid','st_gid','st_mode','st_nlink','st_size','st_mtime_ns','st_ctime_ns')}
+    fields['st_mode']=stat.S_IFREG|0o600
+    path_fields=dict(fields);fields['st_ctime_ns']+=1
+    with monkeypatch.context()as patch:
+        patch.setattr(os,'name','posix')
+        patch.setattr(Path,'lstat',lambda path,*a,**kw:SimpleNamespace(**path_fields)
+                      if path==c.index else original(path,*a,**kw))
+        patch.setattr(os,'fstat',lambda descriptor:opened.append(descriptor)or SimpleNamespace(**fields))
+        with pytest.raises(RuntimeError,match='METADATA_CHANGED'):
+            inert._receiver_parent_metadata(c.receiver,info.st_uid)
+    assert len(opened)==1
 
 
 def test_mixed_host_uses_runtime_subset_but_all_jobs_still_block_producers(mixed_inert_case,monkeypatch):

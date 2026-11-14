@@ -46,6 +46,24 @@ _PRIVATE_KEY = re.compile(r'(?:password|passwd|pwd|api[_-]?key|client[_-]?secret
 _ABSOLUTE = re.compile(r'(?i)(?:\b[A-Z]:[\\/]|/(?:Users|home|root|opt|var|tmp)/)')
 
 
+def read_isolation_witness(client, job_id, challenge):
+    """Fresh metadata GET only; never stage, recover, replay or grant old work."""
+    if (not isinstance(client, ConverterClient) or type(job_id) is not str
+            or not re.fullmatch(r'fox-[a-f0-9]{20}',job_id) or type(challenge) is not str
+            or not re.fullmatch(r'[a-f0-9]{64}',challenge)):
+        raise OpafError('A trusted prototype isolation observation is required.')
+    try:
+        value=client.request('GET','/fox/prototype/jobs/'+job_id+'/isolation-witness?challenge='+challenge)
+    except OpafError as error:
+        if error.status_code is None:
+            raise OpafError('The read-only converter observation is unavailable. No work was restarted.',503) from None
+        raise
+    if (type(value) is not dict or value.get('job_id')!=job_id or value.get('challenge')!=challenge
+            or len(json.dumps(value,allow_nan=False).encode())>8192):
+        raise OpafError('The stopped prototype observation changed. No work was restarted.')
+    return value
+
+
 def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partition_epoch=False, screen_epoch=False):
     """Exact inert epoch two/three paths, mirrored by the private receiver."""
     from .prototype_clause_proof import JSON_FILES
