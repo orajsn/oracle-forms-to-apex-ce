@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import base64
 from copy import deepcopy
+import errno
 import hashlib
 import importlib
 import importlib.util
@@ -18,9 +19,11 @@ import os
 from pathlib import Path,PurePosixPath
 import re
 import shlex
+import ssl
 import subprocess
 import sys
 import time
+import urllib.error
 
 sys.dont_write_bytecode=True
 SCOPE='fox-current-pair-transition-v1'
@@ -41,6 +44,36 @@ def references(p):
     return REFS + (('snapshot_adapter',) if p['schema_version'] == 2 else ()) + (
         ('candidate_plan',) if p['schema_version'] == 2 and 'candidate_plan' in p else ()) + (
         ('preclaim_preservation',) if p['schema_version'] == 2 and 'preclaim_preservation' in p else ())
+
+
+def _public_health_transient(error):
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (502, 503)
+    reason = error.reason if isinstance(error, urllib.error.URLError) else error
+    if isinstance(reason, ssl.SSLError):
+        return False
+    return (isinstance(reason, (ConnectionRefusedError, ConnectionResetError, ConnectionAbortedError, TimeoutError))
+            or isinstance(reason, OSError) and reason.errno in
+                (errno.ECONNREFUSED, errno.ECONNRESET, errno.ECONNABORTED, errno.ETIMEDOUT))
+
+
+def wait_public_health(check):
+    """Only read-only transient TLS-start warmup; never restart or relax checks."""
+    deadline = time.monotonic() + 60
+    while True:
+        remaining = deadline - time.monotonic()
+        need(remaining > 0, 'PUBLIC_HEALTH_WARMUP_TIMEOUT')
+        try:
+            health = check(timeout=min(5, remaining))
+        except (urllib.error.URLError, OSError) as error:
+            if not _public_health_transient(error):
+                raise
+        else:
+            need(time.monotonic() < deadline, 'PUBLIC_HEALTH_WARMUP_TIMEOUT')
+            return health
+        remaining = deadline - time.monotonic()
+        need(remaining > 0, 'PUBLIC_HEALTH_WARMUP_TIMEOUT')
+        time.sleep(min(1, remaining))
 
 
 class TransitionError(RuntimeError):pass
@@ -877,7 +910,7 @@ class Transition:
                     retained=self.check_container(self.old_pins[name],self.retained[role],signatures['old'][role],running=False)
                     need(retained['State']['StartedAt']==old[name]['State']['StartedAt'],'OLD_CONTAINER_RESTARTED')
                 self.effect('release-tls',['sudo','-n','/usr/bin/systemctl','start','fox-https.service'])
-                health=self.M.public_health();need(self.operator_identity()==identity,'OPERATOR_CHANGED_DURING_RELEASE')
+                health=wait_public_health(self.M.public_health);need(self.operator_identity()==identity,'OPERATOR_CHANGED_DURING_RELEASE')
                 result={'status':'CURRENT_PAIR_FORWARD_UPGRADE_ACTIVATED','old_release':self.old.release,'new_release':self.R,
                     'installation_sha256':self.p['new_installation']['sha256'],'public_health':health,'operator_first_idle':witness,
                     'old_outcomes_preserved':True,'old_failed_session_replayed':False,'model_invoked':False,'application_generated':False,

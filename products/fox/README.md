@@ -16,7 +16,7 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 | Item | Last verified state |
 | --- | --- |
 | Current software source | 0.23.2; see the versioned changelog. Publication does not imply activation. |
-| Hosted lab | 0.22.8. This documentation update does not poll or change the running service. |
+| Hosted lab | 0.22.8 was restored with HTTPS and unchanged data after the failed 0.23.1 attempt. Preparation/runtime workers remain held for the corrected upgrade. |
 | Hosted candidate state | The 0.23.1 attempt stopped at a protected startup check. The 0.23.2 source-registration fix needs a new coherent deployment. |
 | Local verification | Fresh-admission, converter-isolation and startup/metadata suites passed with the limitations recorded in the changelog. This is not live conversion acceptance. |
 | Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
@@ -33,6 +33,8 @@ Version 0.23.1 corrects the startup observer's attribution of the two normal
 service launchers. It does not exempt the Forms worker or bypass idle checks.
 Version 0.23.2 registers a reader missing from the protected startup manifest
 and tests that exact loader path. Neither fix is proof of a completed conversion.
+The separately versioned [deployment tools](deployment/CHANGELOG.md) now allow
+bounded HTTPS warm-up without changing the frozen 0.23.2 application bundle.
 
 The lab reference target is **APEX 26.1.6 with SQLcl 26.1.2.0**. This is not a
 compatibility guarantee for another database, APEX patch or customer tenancy.

@@ -10,6 +10,12 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### 2026-11-15 — Recovered lab state and separate deployment-tool increment
+
+- Record the restored 0.22.8 lab and the still-pending corrected 0.23.2 deployment.
+- Publish deployment tool 0.1.1 with bounded HTTPS warm-up, its own changelog and
+  explicit runtime-bundle boundary. The original failed attempts remain preserved.
+
 ### 2026-11-14 — Current checkpoint, model routing and historical coverage
 
 - Refresh the repository and FOX READMEs: published source 0.22.16, last verified

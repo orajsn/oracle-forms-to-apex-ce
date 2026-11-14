@@ -1,24 +1,28 @@
 {
-  "version": "0.1.0",
-  "tag": "fox-deploy-v0.1.0",
-  "released_on": "2026-11-11",
+  "version": "0.1.1",
+  "tag": "fox-deploy-v0.1.1",
+  "released_on": "2026-11-15",
   "scope": "deployment-tools-only",
-  "title": "Include the measured shared contract in isolated proof reads",
+  "title": "Allow bounded HTTPS warm-up without repeating a service start",
   "tools": {
-    "current_pair_transition.py": "46026c22b349014617f65bbcf0de857e4a97882ef07a8a65e683adc1a2692de3"
+    "current_pair_transition.py": "41d0db4895130527fa9c834f859abf7a99f16d1ddd65fab86fecee6b97e2c322",
+    "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.21.5",
-    "source_bundle_sha256": "f57cffeadcd2b68088e0ba86cc15cdeaa9bac79a3ffc37dbc39241ef7f7df05e"
+    "fox_version": "0.23.2",
+    "source_bundle_sha256": "81b673752eb0c4e8ea4bcaf76132fed3d63f5218431ac471465f1ef7eabedfe7"
   },
   "changes": [
-    "Load fox_source_contract through the same hash-verified closed namespace as FOX and the renderer.",
-    "Require all four shared-package modules and matching hashes for the three canonical source mirrors.",
-    "Retain module-origin checks, immutable application artifacts and separate transition authorization."
+    "After one TLS service start, poll only transient connection failures or HTTP 502/503 within a fixed monotonic warm-up budget.",
+    "Keep certificate and hostname validation, no-proxy/no-redirect policy, exact healthy FOX response and existing output shape unchanged.",
+    "Pin both updated deployment tools in a new plan and inspection; do not modify the measured FOX runtime bundle."
   ],
   "verification": {
-    "focused_linux_tests_passed": 110,
-    "retained_real_draft_read_only_reconstruction_passed": true,
+    "focused_local_tests_passed": 47,
+    "deployment_regression_tests_passed": 235,
+    "deployment_regression_tests_skipped": 53,
+    "runtime_bundle_unchanged_verified": true,
+    "related_live_tls_recovery_observation_only": "Connection refused on first health read, healthy on second; not acceptance of this controller.",
     "live_transition_verified": false,
     "apex_conversion_completed": false
   }

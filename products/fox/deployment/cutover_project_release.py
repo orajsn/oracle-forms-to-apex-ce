@@ -234,13 +234,14 @@ def verify_service_unit(A,unit):
          'GENERATED_DEPENDENCY_CHANGED_DURING_VERIFY')
 
 
-def public_health():
+def public_health(*, timeout=15):
+    need(type(timeout) in (int, float) and 0 < timeout <= 15, 'PUBLIC_HEALTH_TIMEOUT_INVALID')
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self,*args,**kwargs):
             return None
     url = 'https://fox.129.213.189.48.sslip.io/api/health'
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
-    with opener.open(url,timeout=15) as response:
+    with opener.open(url,timeout=timeout) as response:
         need(response.status == 200 and response.url == url,'PUBLIC_HEALTH_NOT_CONFIRMED')
         raw = response.read(65537)
     need(len(raw) <= 65536,'PUBLIC_HEALTH_RESPONSE_TOO_LARGE')
