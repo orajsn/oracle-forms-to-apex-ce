@@ -10,6 +10,16 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### 2026-11-15 — Published 0.24.0 source and planned native deployment
+
+- Publish FOX 0.24.0 with its matching changelog. Final clean-source regression:
+  916 passed, 1 platform skip; frontend checks: 6 browser simulations, 13 modeled
+  state tests and TypeScript passed. Prior failed test runs remain separate.
+- Verify the offline package, dependency closure and isolated imports. This does
+  not establish a hosted conversion, Oracle import or exact-package reimport.
+- Document separately pinned deployment tool 0.2.0 and its explicit native mode.
+  Hosted FOX remains 0.23.2 until a new guarded transition is actually completed.
+
 ### 2026-11-15 — Recovered lab state and separate deployment-tool increment
 
 - Record the restored 0.22.8 lab and the still-pending corrected 0.23.2 deployment.

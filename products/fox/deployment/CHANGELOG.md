@@ -4,6 +4,33 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.0] - 2026-11-15
+
+- Add the explicit schema-2 mode `native-prototype-strict-stopped-v1`. Its exact
+  plan digest binds the choice. Schema 1 and the default strict path are unchanged.
+- Require a fresh inert preservation baseline and the configured prototype
+  authority. Retain the ordinary backup, isolated restore, old-data preservation,
+  pair checks, source admission, readiness and HTTPS checks.
+- Keep the strict verifier enabled but stopped with a clean exit. Do not start it
+  or claim a first-idle witness in this mode. Native per-job review, validation,
+  import, runtime and download gates remain separate and unchanged.
+- Under the existing old lease, bootstrap only genuine `release.json` and
+  `worker.lock` metadata for the new release. Reject collisions, drift or extra
+  members; create no session, claim or job. Preserve this metadata through HTTPS
+  release so a subsequent upgrade can acquire its real lease.
+- Use a distinct native completion that explicitly denies strict accepted output,
+  canonical strict completion, conversion success and human acceptance. Pin this
+  tool separately from the unchanged verified FOX 0.24.0 bundle.
+
+Verification: private candidate checks passed 192 tests with 3 platform skips,
+including actual local journal locking and subsequent lease acquisition. Default
+strict-method AST fingerprints are pinned to the prior published controller.
+Clean public integration passed 193 tests with 3 platform skips. Actual native
+upgrade remains a separate acceptance step. No hosted upgrade, model call or
+completed Forms conversion is claimed.
+
+See [native operating mode](NATIVE_MODE.md) for the boundary and required evidence.
+
 ## [0.1.1] - 2026-11-15
 
 - After the existing single TLS start, allow bounded read-only warm-up checks.

@@ -20,6 +20,7 @@ from pathlib import Path,PurePosixPath
 import re
 import shlex
 import ssl
+import stat
 import subprocess
 import sys
 import time
@@ -28,6 +29,7 @@ import urllib.error
 sys.dont_write_bytecode=True
 SCOPE='fox-current-pair-transition-v1'
 SCOPE_V2='fox-current-pair-transition-v2'
+NATIVE_MODE='native-prototype-strict-stopped-v1'
 SHA=re.compile(r'[a-f0-9]{64}\Z')
 PRESERVATION_STAGES={
     'fox-inert-startup-baseline-v1':'inert',
@@ -117,7 +119,10 @@ def plan_document(raw,expected):
     need(type(raw)is bytes and len(raw)<=1_000_000 and type(expected)is str and SHA.fullmatch(expected) and sha(raw)==expected,'EXACT_TRANSITION_PLAN_REQUIRED')
     p=document(raw)
     need(type(p)is dict and type(p.get('schema_version'))is int and p['schema_version'] in (1,2), 'TRANSITION_PLAN_INVALID')
-    need(set(p)=={'schema_version','scope','controller_sha256',*references(p)}
+    mode_keys={'operating_mode'} if p['schema_version']==2 and 'operating_mode' in p else set()
+    need(not mode_keys or type(p['operating_mode'])is str and p['operating_mode']==NATIVE_MODE,
+         'TRANSITION_OPERATING_MODE_INVALID')
+    need(set(p)=={'schema_version','scope','controller_sha256',*references(p),*mode_keys}
         and p['scope']==(SCOPE if p['schema_version']==1 else SCOPE_V2)
         and cb(p)==raw and type(p['controller_sha256'])is str and SHA.fullmatch(p['controller_sha256']), 'TRANSITION_PLAN_INVALID')
     for key in references(p):
@@ -125,6 +130,8 @@ def plan_document(raw,expected):
         absolute(ref['path'])
     need(p['old_installation']!=p['new_installation'] and p['old_unit']['path']==UNIT.as_posix()
         and p['new_unit']['path']!=UNIT.as_posix(),'DISTINCT_INSTALLATION_AND_UNIT_REQUIRED')
+    need(p.get('operating_mode')!=NATIVE_MODE or 'preclaim_preservation' in p,
+         'NATIVE_INERT_PRESERVATION_REFERENCE_REQUIRED')
     return p
 
 
@@ -176,6 +183,12 @@ def validate_candidate_plan_reference(p,path,raw,candidate):
          'EXPLICIT_CANDIDATE_PLAN_REFERENCE_REQUIRED')
     if reference is not None:
         need(reference=={'path':str(path),'sha256':sha(raw)},'CANDIDATE_PLAN_REFERENCE_CHANGED')
+
+
+def validate_native_bindings(candidate,baseline):
+    need(type(candidate.get('prototype_authority'))is dict,'NATIVE_PROTOTYPE_AUTHORITY_REQUIRED')
+    need(type(baseline)is dict and baseline.get('scope')=='fox-inert-startup-baseline-v1',
+         'NATIVE_INERT_PRESERVATION_REQUIRED')
 
 
 BACKEND=r'''
@@ -439,6 +452,9 @@ class Transition:
         self.candidate_path=absolute(self.new_i['provider']['path']).parent/'activation-plan.json'
         raw=A.read(self.candidate_path,private=True);self.candidate_plan=A.plan_document(raw,sha(raw))
         validate_candidate_plan_reference(p,self.candidate_path,raw,self.candidate_plan)
+        if p.get('operating_mode')==NATIVE_MODE:
+            validate_native_bindings(self.candidate_plan,
+                document(A.read(absolute(p['preclaim_preservation']['path']),private=True)))
         need(self.candidate_plan['current_installation']==p['old_installation'] and self.candidate_plan['release']==self.new_i['release']
             and self.candidate_plan['provider']==self.new_i['provider'] and self.candidate_plan['helper_sha256']==p['helper']['sha256'],'NEW_CANDIDATE_PLAN_CHANGED')
         self.root=PARENT/self.R;self.stage=self.root
@@ -798,6 +814,105 @@ class Transition:
             and value['worker']['state'] in ('idle','polling'),'FOX_WORKER_NOT_IDLE_HEALTHY')
         return value
 
+    def native_stopped_state(self,*,new,metadata=None):
+        """No verifier launch or idle claim: observe the installed stopped unit."""
+        A=self.A
+        need(sha(A.read(UNIT,private=True))==self.p['new_unit' if new else 'old_unit']['sha256'],
+             'NATIVE_VERIFIER_UNIT_CHANGED')
+        state=self.M.service_state(A,UNIT.name)
+        need(state['LoadState']=='loaded' and state['ActiveState']=='inactive'
+             and state['SubState']=='dead' and state['MainPID']=='0'
+             and state['FragmentPath']==str(UNIT),'NATIVE_VERIFIER_NOT_LOADED_STOPPED')
+        raw=A.command(['/usr/bin/systemctl','--user','show',UNIT.name,'--property=ExecMainStatus,Result'])
+        rows=raw.decode().splitlines()
+        need(len(rows)==2 and set(rows)=={'ExecMainStatus=0','Result=success'},
+             'NATIVE_VERIFIER_EXIT_NOT_CLEAN')
+        need(A.command(['/usr/bin/systemctl','--user','is-enabled',UNIT.name]).strip()==b'enabled',
+             'EXISTING_VERIFIER_ENABLEMENT_CHANGED')
+        path=Path(self.cfg['state_root'])/'product-verifier'/self.R[:16]
+        if metadata is None:
+            need(not path.exists() and not path.is_symlink(),'NEW_VERIFIER_ALREADY_HAS_STATE')
+        else:
+            need(new and self.native_journal_inventory()==metadata,'NATIVE_JOURNAL_METADATA_CHANGED')
+        return {**state,'ExecMainStatus':'0','Result':'success','enabled':True,
+                'new_verifier_journal_exists':metadata is not None,
+                'new_verifier_journal_metadata_only':metadata is not None}
+
+    def native_journal_inventory(self):
+        journal=self.service.product.PrivateJournal(self.R)
+        path=Path(self.cfg['state_root'])/'product-verifier'/self.R[:16]
+        need(journal.release==self.R and journal.root==path and journal.journal_root==path.parent,
+             'NATIVE_JOURNAL_PROVIDER_PATH_CHANGED')
+        info=path.lstat()
+        need(stat.S_ISDIR(info.st_mode) and not path.is_symlink() and path.resolve()==path
+             and {item.name for item in path.iterdir()}=={'release.json','worker.lock'},
+             'NATIVE_JOURNAL_NOT_METADATA_ONLY')
+        for name in ('release.json','worker.lock'):
+            item=(path/name).lstat()
+            need(stat.S_ISREG(item.st_mode) and item.st_nlink==1,'NATIVE_JOURNAL_FILE_UNSAFE')
+        raw={name:self.A.read(path/name,private=True) for name in ('release.json','worker.lock')}
+        need(raw=={'release.json':cb({'scope':'fox-product-verifier-journal-v1','release_sha256':self.R}),
+                   'worker.lock':b'0'},'NATIVE_JOURNAL_BINDING_CHANGED')
+        return {'root':str(path),'root_identity':{'device':info.st_dev,'inode':info.st_ino,
+            'mode':info.st_mode,'uid':info.st_uid,'gid':info.st_gid},
+            'files_sha256':{name:sha(value) for name,value in raw.items()}}
+
+    def bootstrap_native_journal(self,lease):
+        need(self.p.get('operating_mode')==NATIVE_MODE,'EXPLICIT_NATIVE_MODE_REQUIRED')
+        old_journal=self.service.product.PrivateJournal(self.old.release)
+        lease.require_active(self.old.release,old_journal.root)
+        self.native_stopped_state(new=True)
+        journal=self.service.product.PrivateJournal(self.R)
+        path=Path(self.cfg['state_root'])/'product-verifier'/self.R[:16]
+        need(journal.release==self.R and journal.root==path and journal.journal_root==path.parent,
+             'NATIVE_JOURNAL_PROVIDER_PATH_CHANGED')
+        self.scope();lease.require_active(self.old.release,old_journal.root)
+        # Exclusive genuine private-directory creation refuses a racing owner.
+        # The existing journal class alone writes release.json and worker.lock.
+        self.service.product.clean.private_directory(path)
+        identity=path.lstat()
+        with journal.lock(create=True) as new_lease:
+            new_lease.require_active(self.R,path)
+            metadata=self.native_journal_inventory()
+            need(metadata['root_identity']['device']==identity.st_dev
+                 and metadata['root_identity']['inode']==identity.st_ino,'NATIVE_JOURNAL_ROOT_CHANGED')
+            self.native_stopped_state(new=True,metadata=metadata)
+        lease.require_active(self.old.release,old_journal.root)
+        self.record('native-journal-metadata.json',{'status':'NATIVE_JOURNAL_METADATA_INSTALLED_NOT_STARTED',
+            'release_sha256':self.R,'metadata':metadata,'strict_verifier_started':False,
+            'strict_first_idle_observed':False,'sessions_created':False,'claims_created':False})
+        return metadata
+
+    def finish_native(self,old,signatures,before,lease):
+        """Distinct plan-bound completion; strict accepted output remains locked."""
+        metadata=None
+        def recheck():
+            state=self.native_stopped_state(new=True,metadata=metadata)
+            need(self.data(new=True)==before,'OUTCOMES_CHANGED_BEFORE_PUBLIC_RELEASE')
+            for role,name in (('fox','fox'),('converter','forms2apex-mcp')):
+                self.check_container(self.pins[name],name,signatures['new'][role],running=True)
+                retained=self.check_container(self.old_pins[name],self.retained[role],signatures['old'][role],running=False)
+                need(retained['State']['StartedAt']==old[name]['State']['StartedAt'],'OLD_CONTAINER_RESTARTED')
+            self.health()
+            return state
+        recheck()
+        metadata=self.bootstrap_native_journal(lease)
+        recheck()
+        self.effect('release-tls',['sudo','-n','/usr/bin/systemctl','start','fox-https.service'])
+        health=wait_public_health(self.M.public_health)
+        state=recheck()
+        result={'status':'CURRENT_PAIR_NATIVE_PROTOTYPE_UPGRADE_ACTIVATED_STRICT_STOPPED',
+            'operating_mode':NATIVE_MODE,'old_release':self.old.release,'new_release':self.R,
+            'installation_sha256':self.p['new_installation']['sha256'],'public_health':health,
+            'strict_verifier_state':state,'strict_verifier_started':False,'strict_first_idle_observed':False,
+            'native_journal_metadata':metadata,
+            'strict_accepted_output':False,'canonical_strict_upgrade_completion_claimed':False,
+            'old_outcomes_preserved':True,'old_failed_session_replayed':False,'model_invoked':False,
+            'application_generated':False,'end_to_end_conversion_proven':False,
+            'human_acceptance_recorded':False,'automatic_replay_permitted':False}
+        self.record('complete.json',result)
+        return result
+
     def preflight(self):
         A=self.A;self.old.preflight();self.scope();self.health()
         need(sha(A.read(UNIT,private=True))==self.p['old_unit']['sha256'],'OLD_UNIT_CHANGED')
@@ -835,6 +950,7 @@ class Transition:
         state=self.M.service_state(A,UNIT.name);need(state['MainPID']=='0' and state['ActiveState'] in ('failed','inactive'),'OLD_VERIFIER_NOT_STOPPED')
         need(A.command(['/usr/bin/systemctl','--user','is-enabled',UNIT.name]).strip()==b'enabled','EXISTING_VERIFIER_ENABLEMENT_CHANGED')
         need(not (Path(self.cfg['state_root'])/'product-verifier'/self.R[:16]).exists(),'NEW_VERIFIER_ALREADY_HAS_STATE')
+        if self.p.get('operating_mode')==NATIVE_MODE:self.native_stopped_state(new=False)
         self.M.verify_service_unit(A,absolute(self.p['new_unit']['path']))
         measurement=self.S.measure(self.snapshot_raw,expected_sha256=self.p['snapshot']['sha256'])
         need(measurement['fits_current_limits'] is True,'BACKUP_CAPACITY_GATE_FAILED')
@@ -901,6 +1017,8 @@ class Transition:
                 self.record('unit-replace-intent.json',{'old_sha256':sha(old_unit),'new_sha256':sha(unit),'new_installation':self.p['new_installation']})
                 os.replace(target,UNIT);A.sync(UNIT.parent)
                 self.effect('verifier-reload',['/usr/bin/systemctl','--user','daemon-reload'])
+                if self.p.get('operating_mode')==NATIVE_MODE:
+                    return self.finish_native(old,signatures,before,lease)
                 self.effect('verifier-start',['/usr/bin/systemctl','--user','start',UNIT.name])
                 identity=self.operator_identity();witness=self.child('new-first-idle','idle')
                 need(self.operator_identity()==identity,'NEW_OPERATOR_PROCESS_CHANGED')

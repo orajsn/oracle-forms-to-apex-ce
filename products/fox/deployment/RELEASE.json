@@ -1,28 +1,31 @@
 {
-  "version": "0.1.1",
-  "tag": "fox-deploy-v0.1.1",
+  "version": "0.2.0",
+  "tag": "fox-deploy-v0.2.0",
   "released_on": "2026-11-15",
   "scope": "deployment-tools-only",
-  "title": "Allow bounded HTTPS warm-up without repeating a service start",
+  "title": "Plan native-prototype upgrades with strict verification stopped",
   "tools": {
-    "current_pair_transition.py": "41d0db4895130527fa9c834f859abf7a99f16d1ddd65fab86fecee6b97e2c322",
+    "current_pair_transition.py": "27117bbecac8dbffb5f540eff6076071a35f886b3f9b072661dcd7e87faf7d29",
     "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.23.2",
-    "source_bundle_sha256": "81b673752eb0c4e8ea4bcaf76132fed3d63f5218431ac471465f1ef7eabedfe7"
+    "fox_version": "0.24.0",
+    "source_bundle_sha256": "66b7c0a15af45068d761114ecb245231813f98580ecab9e3a4628afa3704ed6b"
   },
   "changes": [
-    "After one TLS service start, poll only transient connection failures or HTTP 502/503 within a fixed monotonic warm-up budget.",
-    "Keep certificate and hostname validation, no-proxy/no-redirect policy, exact healthy FOX response and existing output shape unchanged.",
-    "Pin both updated deployment tools in a new plan and inspection; do not modify the measured FOX runtime bundle."
+    "Bind an explicit native operating mode in schema-2 plans; absent mode retains the exact strict path.",
+    "Require a fresh inert preservation floor and prototype authority, retaining normal backup, restore, pair, readiness and HTTPS gates.",
+    "Keep the enabled strict verifier stopped; create only genuine empty journal lease metadata, never sessions or an idle claim.",
+    "Emit a distinct native completion with strict acceptance and conversion acceptance false; preserve every old outcome.",
+    "Publish and pin this controller separately without modifying the measured FOX 0.24.0 bundle."
   ],
   "verification": {
-    "focused_local_tests_passed": 47,
-    "deployment_regression_tests_passed": 235,
-    "deployment_regression_tests_skipped": 53,
+    "private_candidate_tests_passed": 192,
+    "private_candidate_tests_skipped": 3,
+    "public_integration_checked": true,
+    "public_integration_tests_passed": 193,
+    "public_integration_tests_skipped": 3,
     "runtime_bundle_unchanged_verified": true,
-    "related_live_tls_recovery_observation_only": "Connection refused on first health read, healthy on second; not acceptance of this controller.",
     "live_transition_verified": false,
     "apex_conversion_completed": false
   }
