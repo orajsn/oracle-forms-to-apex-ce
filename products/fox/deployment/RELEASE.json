@@ -1,33 +1,28 @@
 {
-  "version": "0.2.1",
-  "tag": "fox-deploy-v0.2.1",
+  "version": "0.2.2",
+  "tag": "fox-deploy-v0.2.2",
   "released_on": "2026-11-15",
   "scope": "deployment-tools-only",
-  "title": "Preserve completed native prototypes across guarded upgrades",
+  "title": "Bind deployment to corrected FOX 0.24.2 preservation",
   "tools": {
     "current_pair_transition.py": "8876116e49a424a50eb535f3e4a6384d0a9bd2428129e975bbd271f76ac7fab9",
     "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.24.1",
-    "source_bundle_sha256": "50a1f3aae6e4c150138d57e85b79e0cd2e8dc71acb1759260ea838d97e91d8c2"
+    "fox_version": "0.24.2",
+    "source_bundle_sha256": "dbd93daf43a53cfd9a58d8e554559219056855a512ca7c0b9bade572989461cc"
   },
   "changes": [
-    "Read versioned mixed preservation baselines containing exact completed native prototypes and stopped historical runs.",
-    "Retain completed staging and QA evidence; validate original runtime identities and historical timestamps without renewing requests.",
-    "Bind stopped technical readers to the exact verified release inventory and real module/template origins.",
-    "Keep existing backup, isolated restore, readiness, producer checks and native-mode strict-stopped completion boundaries.",
-    "Require matching bundled FOX 0.24.1 readers; this is not an in-place edit of an installed application or historical receipt."
+    "Bind the unchanged controller and cutover tool bytes to the corrected completed-host reader bundled in FOX 0.24.2.",
+    "Retain the previous 0.24.1 package and unactivated installation as historical artifacts; never patch or relabel those frozen bytes.",
+    "Require a new coherent build and fresh held baseline. A successful read-only diagnostic overlay grants no activation authority."
   ],
   "verification": {
-    "materialized_layout_tests_passed": 47,
-    "host_controller_regression_tests_passed": 573,
-    "host_controller_regression_tests_skipped": 5,
-    "host_controller_regression_subtests_passed": 48,
-    "clean_source_tests_passed": 858,
-    "clean_source_tests_skipped": 11,
-    "clean_source_subtests_passed": 48,
-    "retained_real_package_read_only_semantics_verified": true,
+    "focused_host_tests_passed": 91,
+    "clean_source_tests_passed": 359,
+    "clean_source_tests_skipped": 5,
+    "real_retained_full_read_only_diagnostic_verified": true,
+    "real_diagnostic_used_explicit_reader_overlay": true,
     "live_transition_verified": false,
     "ui_download_verified": false,
     "exact_download_reimport_verified": false

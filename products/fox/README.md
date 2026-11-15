@@ -15,11 +15,11 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.24.1 download/preservation patch; see the versioned changelog. Publication does not imply activation. |
+| Current software source | 0.24.2 producer-format preservation patch; see the versioned changelog. Publication does not imply activation. |
 | Hosted lab | 0.24.0 is online, with preparation and runtime workers active. The separate strict-output verifier remains stopped. The download defect below prevents declaring the full user journey ready. |
 | Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
-| New source increment | 0.24.1 corrects typed required-input download validation and preserves completed jobs during guarded upgrades. The observed native prototype has five business pages; this is not full legacy-behavior equivalence. |
-| Deployment checkpoint | A reviewed forward continuation completed backup, isolated restore, pair replacement and readiness checks. Earlier failed attempts and saved jobs remain preserved. |
+| New source increment | 0.24.2 retains the download fix and corrects preservation of two JSON copies whose producers differ by one trailing newline. Original hashes and files remain separate and unchanged. |
+| Deployment checkpoint | 0.24.0 is the serving version. Prepared 0.24.1 containers were never activated after a complete-protocol test found the preservation issue. The corrected patch requires a new coherent build and actual acceptance. |
 | Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
 | Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
 | Full real-module acceptance | Still pending: successful hosted UI download and fresh-ID import/runtime verification of those exact downloaded SQL bytes. Three-run repeatability follows separately. |

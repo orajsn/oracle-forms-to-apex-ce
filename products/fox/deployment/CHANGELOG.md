@@ -4,6 +4,21 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.2] - 2026-11-15
+
+- Rebind the unchanged controller and cutover tool to FOX 0.24.2, which corrects
+  producer-specific JSON serialization checks in the bundled completed-host reader.
+  This increment changes the tested-bundle declaration, not controller behavior.
+- Preserve the published 0.24.1 package and its never-activated installation.
+  Require a new measured build and fresh held baseline; diagnostic overlays are
+  not installation, maintenance or activation authority.
+
+Verification: 91 focused host cases and 359 clean-source checks passed (5 skips).
+The complete read-only diagnostic passed against retained real lab evidence using
+an explicitly identified corrected-reader overlay; all measured data remained
+unchanged. Actual coherent deployment, UI download and exact-byte reimport remain
+separate acceptance steps.
+
 ## [0.2.1] - 2026-11-15
 
 - Accept versioned mixed inert baselines only when each completed native

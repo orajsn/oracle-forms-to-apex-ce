@@ -74,6 +74,39 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.24.2] - 2026-11-15
+
+### Preserve each producer's original JSON bytes
+
+- Correct completed-job preservation for `snapshot.json` and `import.json`:
+  the gateway normally adds one trailing newline; the runtime worker does not.
+  Equal records must not be rejected solely because these documented formats differ.
+- Require exact canonical worker bytes and exact canonical receiver bytes with
+  at most that one newline. Preserve each copy's original hash, size and node
+  identity separately. No stored evidence is trimmed, rewritten or normalized.
+- Keep runtime-request and browser-report copies byte-identical. Reject changed
+  values, arbitrary whitespace, byte-order marks, extra newlines and false hashes.
+- Add regression cases using the real gateway publisher and worker serializer.
+
+Verification: 91 focused and existing completed-host checks passed. Independent
+bounded source review cleared the correction. A live read-only comparison
+confirmed the exact one-newline difference in the retained real job and that
+all original files stayed unchanged. The full read-only lab diagnostic then
+passed with the corrected reader, checking receiver records, staging/browser
+evidence, package semantics and unchanged measurements. The reader was an
+explicit diagnostic overlay, not an installed patch or maintenance authority.
+Coherent deployment and a fresh held baseline remain separate gates.
+
+Clean staged-source regression passed 359 tests with 5 skips, including the
+materialized startup/transition and typed-download checks. Original source and
+unrelated work remained unchanged. Deployment tool 0.2.2 binds the unchanged
+controller bytes to this corrected application bundle.
+
+The prepared 0.24.1 candidates were never activated; they remain stopped with
+their evidence preserved. The lab remains on 0.24.0. No model, conversion, schema,
+application import or browser test is replayed by this correction. Hosted UI
+download and exact-downloaded-byte reimport are not yet claimed.
+
 ## [0.24.1] - 2026-11-15
 
 ### Download completed prototypes without discarding their history

@@ -388,9 +388,23 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
              and set(first['staging']['directories']) == {'prototype-converter', 'prototype-converter/runtime-evidence'},
              'INERT_COMPLETED_STAGING_EXTRA_OR_MISSING')
         receiver_files = receiver[job]['files']
-        need(all(receiver_files[name]['sha256'] == first['staging']['files'][name]['sha256']
-                 and receiver_files[name]['bytes'] == first['staging']['files'][name]['bytes'] for name in expected_stage),
-             'INERT_COMPLETED_RECEIVER_STAGING_CHANGED')
+        for name in expected_stage:
+            published, staged = receiver_files[name], first['staging']['files'][name]
+            values = {'prototype-converter/snapshot.json': packet['artifact_binding'],
+                      'prototype-converter/import.json': packet['imported']}
+            if name in values:
+                # The worker stages project_reviews.canonical(value); gateway
+                # publish() adds one LF and preserves an existing equal-object
+                # canonical record. Keep BOTH actual raw fingerprints intact.
+                raw = json.dumps(values[name], sort_keys=True, separators=(',', ':'),
+                                 ensure_ascii=False, allow_nan=False).encode('utf-8')
+                need(staged['sha256'] == hashlib.sha256(raw).hexdigest() and staged['bytes'] == len(raw)
+                     and any(published['sha256'] == hashlib.sha256(candidate).hexdigest()
+                             and published['bytes'] == len(candidate) for candidate in (raw, raw+b'\n')),
+                     'INERT_COMPLETED_RECEIVER_STAGING_CHANGED')
+            else:
+                need(published['sha256'] == staged['sha256'] and published['bytes'] == staged['bytes'],
+                     'INERT_COMPLETED_RECEIVER_STAGING_CHANGED')
         target = object_at(attempt / 'target.json'); intent = object_at(attempt / 'launch-intent.json')
         files = {name: hashlib.sha256((attempt / 'source' / name).read_bytes()).hexdigest() for name in original}
         expected_pages = []
