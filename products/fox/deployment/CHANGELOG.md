@@ -4,6 +4,26 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.1] - 2026-11-15
+
+- Accept versioned mixed inert baselines only when each completed native
+  prototype has exact reviewed, validated, runtime-tested and exported evidence.
+  Preserve old failures, original producer identities and historical timestamps.
+- Bind completed staging and browser-evidence trees without deleting, moving,
+  replaying or changing their acceptance. Unexpected or changed members reject.
+- Give stopped technical readers an explicit verified release-root/inventory
+  binding. Running readers continue to use the actual image source closure.
+- Require the matching FOX 0.24.1 bundled readers. This tool release retains
+  ordinary strict admission, backup/restore and readiness checks; native-mode
+  completion still does not claim strict-output or business acceptance.
+
+Verification: 47 materialized-layout checks passed; host/controller regressions
+passed 573 tests and 48 subtests, with 5 platform skips. Clean staged-source
+integration passed 858 tests and 48 subtests, with 11 skips. A read-only check
+against the retained real lab job passed without changing its package, original
+source or job files. That diagnostic is not a maintenance baseline, cutover,
+hosted UI download or fresh-ID import proof. Actual deployment remains separate.
+
 ## [0.2.0] - 2026-11-15
 
 - Add the explicit schema-2 mode `native-prototype-strict-stopped-v1`. Its exact

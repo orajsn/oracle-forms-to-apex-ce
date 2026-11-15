@@ -197,7 +197,7 @@ def startup_baseline(value, infrastructure, source_sha256):
     if reference is None:
         return None
     baseline = parse(read_ref(reference))
-    if baseline.get('scope') != 'fox-inert-startup-baseline-v1':
+    if baseline.get('scope') not in ('fox-inert-startup-baseline-v1', 'fox-inert-startup-baseline-v2'):
         return None
     need(value['for_startup'] is True and plan['scope'] == 'fox-current-pair-transition-v2'
          and plan['schema_version'] == 2)
@@ -213,12 +213,62 @@ def startup_baseline(value, infrastructure, source_sha256):
              'sha256':inventory['files']['deployment/target-profile.jsn-project-v2.json']}
     provider=parse(read_ref(installation['provider']))
     need(parse(read_ref(profile))==provider['target_profile'],'INERT_INSTALLED_PROVIDER_PROFILE_CHANGED')
-    return baseline, inventory['files']['fox/fox/paused_stage_preservation.py'],profile,verifier_binding(plan)
+    result = baseline, inventory['files']['fox/fox/paused_stage_preservation.py'],profile,verifier_binding(plan)
+    if baseline['scope'] == 'fox-inert-startup-baseline-v2':
+        return (*result, semantic_sources(inventory))
+    return result
+
+
+# Exact Python COPY projection of prepare_project_release.APP_RENDERER_FILES.
+# The materialized-image regression enforces equality; execution-side converter
+# modules are deliberately NOT installed or demanded in the FOX image.
+APP_RENDERER_PY = (
+    'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
+    'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
+    'forms2apex/prototype_package.py', 'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
+    'fox_source_contract/__init__.py', 'fox_source_contract/intake.py', 'fox_source_contract/native_source.py',
+    'fox_source_contract/project_conversion.py', 'defusedxml/__init__.py', 'defusedxml/common.py',
+    'defusedxml/ElementTree.py')
+APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
+                               'forms2apex/templates/blueprint-prototype-v1/')
+
+
+def semantic_sources(inventory):
+    """Pin only the measured FOX package and its exact renderer COPY closure."""
+    modules, templates = {}, {}
+    for name, pin in inventory['files'].items():
+        for prefix, package in (('fox/fox/', 'fox'), ('converter/forms2apex/', 'forms2apex'),
+                                ('converter/fox_source_contract/', 'fox_source_contract'),
+                                ('converter/defusedxml/', 'defusedxml')):
+            if not name.startswith(prefix):continue
+            relative = name[len(prefix):]
+            renderer = package + '/' + relative
+            if relative.endswith('.py') and (package == 'fox' or renderer in APP_RENDERER_PY):
+                tail = relative[:-3]
+                need('/' not in tail and tail.isidentifier(), 'INERT_SEMANTIC_NAMESPACE_INVALID')
+                modules[package if tail == '__init__' else package + '.' + tail] = pin
+            elif renderer.startswith(APP_RENDERER_TEMPLATE_ROOTS):
+                need('..' not in PurePosixPath(relative).parts and str(PurePosixPath(relative)) == relative,
+                     'INERT_SEMANTIC_NAMESPACE_INVALID')
+                templates[package + '/' + relative] = pin
+    need(all('converter/' + name in inventory['files'] for name in APP_RENDERER_PY)
+         and all(name in modules for name in ('fox', 'forms2apex', 'fox_source_contract', 'defusedxml',
+         'fox.paused_stage_preservation', 'fox.completed_prototype_preservation')) and templates
+         and all(type(pin) is str and re.fullmatch('[a-f0-9]{64}', pin)
+                 for pin in (*modules.values(), *templates.values())), 'INERT_SEMANTIC_NAMESPACE_INCOMPLETE')
+    return {'schema_version': 1, 'scope': 'fox-inert-startup-semantic-source-v1', 'root': '/app',
+            'modules': modules, 'templates': templates}
 
 
 def paired(baseline, fox, receiver, identity, infrastructure, *, storage, stopped=False, verifier=None):
     """One shared measured route used by startup and transition; never a grant."""
-    runtime_jobs = {job for job, item in fox['jobs'].items() if item.get('boundary') == 'runtime_intent_candidate'}
+    completed = baseline['scope'] == 'fox-inert-startup-baseline-v2'
+    runtime_jobs = {job for job, item in fox['jobs'].items()
+                    if item.get('boundary') in ('runtime_intent_candidate', 'completed_native_prototype')}
+    if completed:
+        need(set(receiver) == {'receiver', 'identities', 'requests', 'completed_packages'}
+             and set(receiver['completed_packages']) == {job for job, item in fox['jobs'].items()
+                 if item.get('boundary') == 'completed_native_prototype'}, 'INERT_COMPLETED_PACKAGE_SET_CHANGED')
     need(set(fox) == {'database', 'jobs', 'fox'}
          and fox == {key: baseline[key] for key in ('database', 'jobs', 'fox')}
          and receiver['receiver'] == baseline['receiver']
@@ -226,7 +276,8 @@ def paired(baseline, fox, receiver, identity, infrastructure, *, storage, stoppe
          and set(receiver['identities']) == set(receiver['requests']) == runtime_jobs)
     need(all(receiver['requests'][job] == fox['jobs'][job]['runtime_request_sha256'] for job in runtime_jobs))
     host, profile = collect(baseline['runtime'], receiver['receiver'], receiver['identities'], fox['jobs'],
-                            infrastructure, storage=storage, stopped=stopped, verifier=verifier)
+                            infrastructure, storage=storage, stopped=stopped, verifier=verifier,
+                            **({'completed_host': baseline['completed_host']} if completed else {}))
     # Profile contents are existing nonsecret target metadata, not credentials.
     # Both actual mounted focused profile and installed converter profile must
     # independently have been checked by the caller around this measurement.
@@ -234,7 +285,8 @@ def paired(baseline, fox, receiver, identity, infrastructure, *, storage, stoppe
     now = datetime.now(timezone.utc)
     from datetime import timedelta
     expected = {'baseline': baseline, 'baseline_sha256': hashed(baseline), 'identity': identity}
-    packet = {'schema_version': 1, 'scope': 'fox-inert-startup-paired-read-v1',
+    packet = {'schema_version': 2 if completed else 1,
+              'scope': 'fox-inert-startup-paired-read-v2' if completed else 'fox-inert-startup-paired-read-v1',
               'observed_at_utc': now.isoformat(), 'expires_at_utc': (now+timedelta(seconds=30)).isoformat(),
               'binding': expected['baseline_sha256'], 'fox': fox, 'receiver': receiver['receiver'],
               'host': host, 'identity': identity}
@@ -246,6 +298,175 @@ def metadata(path, *, directory=False):
     need(info.st_uid == os.getuid() and stat.S_IMODE(info.st_mode) == (0o700 if directory else 0o600)
          and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1))
     return {'device': info.st_dev, 'inode': info.st_ino, 'mode': stat.S_IMODE(info.st_mode)}
+
+
+def retained_tree(root):
+    """Exact historical host nodes, including every original inode; read only.
+
+    This is deliberately stdlib-only: the host runs from measured standalone
+    bytes, not a development import path or an execution-capable worker.
+    """
+    root = safe(root)
+    def stamp(path, directory):
+        info = path.lstat()
+        need(not stat.S_ISLNK(info.st_mode)
+             and not getattr(info, 'st_file_attributes', 0) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+             and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1)
+             and (os.name == 'nt' or info.st_uid == os.getuid()
+                  and stat.S_IMODE(info.st_mode) == (0o700 if directory else 0o600)),
+             'INERT_COMPLETED_HOST_NODE_UNSAFE')
+        return {'device': info.st_dev, 'inode': info.st_ino, 'owner': info.st_uid, 'group': info.st_gid,
+                'mode': stat.S_IMODE(info.st_mode), 'links': info.st_nlink,
+                'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns}
+    namespace = stamp(root, True)
+    files, directories, total, pending = {}, {}, 0, [root]
+    while pending:
+        directory = pending.pop()
+        for path in sorted(directory.iterdir()):
+            need(len(files) + len(directories) < 20000, 'INERT_COMPLETED_HOST_TREE_BOUNDS')
+            name = path.relative_to(root).as_posix()
+            is_directory = stat.S_ISDIR(path.lstat().st_mode)
+            before = stamp(path, is_directory)
+            if is_directory:
+                directories[name] = before; pending.append(path)
+            else:
+                size = path.stat().st_size
+                need(0 < size <= 64 * 1024 * 1024, 'INERT_COMPLETED_HOST_TREE_BOUNDS')
+                raw = path.read_bytes(); total += len(raw)
+                need(len(raw) == size and total <= 128 * 1024 * 1024
+                     and before == stamp(path, False), 'INERT_COMPLETED_HOST_TREE_CHANGED')
+                files[name] = {**before, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+    need(namespace == stamp(root, True)
+         and all(value == stamp(root / name, True) for name, value in directories.items()),
+         'INERT_COMPLETED_HOST_TREE_CHANGED')
+    return {'files': files, 'directories': directories, 'namespace': namespace}
+
+
+def completed_host_read(runtime, identities, jobs, receiver, expected):
+    """Bind original retained browser/staging bytes, never rerun a browser.
+
+    The receiver's pure collector and full measured FOX child separately prove
+    semantic receipts/package. Here those exact bytes are joined to original
+    configured runner/producer hashes and immutable host tree identities.
+    """
+    completed = {job: item['completed'] for job, item in jobs.items()
+                 if item.get('boundary') == 'completed_native_prototype'}
+    need(type(expected) is dict and set(expected) == set(completed) and completed,
+         'INERT_COMPLETED_HOST_BASELINE_REQUIRED')
+    producer = 'converter/forms2apex/prototype_runtime_bridge.py'
+    need(producer in runtime['sources'], 'INERT_ORIGINAL_PRODUCER_SOURCE_REQUIRED')
+    original = {name: runtime['sources']['qa/' + name]
+                for name in ('run-prototype.mjs', 'lib/contracts.mjs')}
+    observed = {}
+    for job, value in completed.items():
+        need(set(expected[job]) == {'staging', 'qa'} and identities[job] == value['runtime_identity'],
+             'INERT_COMPLETED_HOST_BINDING_CHANGED')
+        stage_job = safe(runtime['staging_root']) / job
+        stage = stage_job / 'prototype-converter'
+        attempt = safe(runtime['qa_root']) / ('prototype-' + hashed(identities[job]))
+        first = {'staging': retained_tree(stage_job), 'qa': retained_tree(attempt)}
+        need(first == expected[job], 'INERT_COMPLETED_HOST_TREE_CHANGED')
+        def object_at(path):
+            raw = path.read_bytes(); need(0 < len(raw) <= 4_000_000, 'INERT_COMPLETED_HOST_JSON_BOUNDS')
+            return parse(raw)
+        packet = object_at(stage / 'runtime-request.json')
+        request = packet['request']; identity = identities[job]
+        need(packet['binding'] == identity and hashed(request) == jobs[job]['runtime_request_sha256']
+             and packet['producer'] == {'component': 'fox-prototype-runtime-bridge',
+                 'code_sha256': runtime['sources'][producer]}, 'INERT_COMPLETED_ORIGINAL_PRODUCER_CHANGED')
+        # Staging is an intentionally small worker copy, not a second export.
+        artifacts = object_at(stage / 'runtime-evidence/browser-report.json')
+        report_raw = (stage / 'runtime-evidence/browser-report.json').read_bytes()
+        receipt = {**artifacts, 'artifacts': [{'path': 'runtime-evidence/browser-report.json',
+                    'sha256': hashlib.sha256(report_raw).hexdigest(), 'bytes': len(report_raw)}]}
+        need(hashed(receipt) == value['runtime_receipt_sha256']
+             and object_at(stage / 'snapshot.json') == packet['artifact_binding']
+             and object_at(stage / 'import.json') == packet['imported'], 'INERT_COMPLETED_STAGING_CHANGED')
+        expected_stage = {'prototype-converter/runtime-request.json', 'prototype-converter/snapshot.json',
+                          'prototype-converter/import.json', 'prototype-converter/runtime-evidence/browser-report.json'}
+        need(set(first['staging']['files']) == expected_stage
+             and set(first['staging']['directories']) == {'prototype-converter', 'prototype-converter/runtime-evidence'},
+             'INERT_COMPLETED_STAGING_EXTRA_OR_MISSING')
+        receiver_files = receiver[job]['files']
+        need(all(receiver_files[name]['sha256'] == first['staging']['files'][name]['sha256']
+                 and receiver_files[name]['bytes'] == first['staging']['files'][name]['bytes'] for name in expected_stage),
+             'INERT_COMPLETED_RECEIVER_STAGING_CHANGED')
+        target = object_at(attempt / 'target.json'); intent = object_at(attempt / 'launch-intent.json')
+        files = {name: hashlib.sha256((attempt / 'source' / name).read_bytes()).hexdigest() for name in original}
+        expected_pages = []
+        for block in request['rendering_spec']['blocks']:
+            checks = (['render', 'report_columns', 'search'] + (['detail_navigation'] if block['native_component'] == 'form' else [])
+                      if block['classification'] == 'database' else ['render', 'native_items'])
+            expected_pages.append({'page_id': 2 * block['sequence'] - 1,
+                                   'source_block_id': block['source_block_id'], 'checks': checks})
+            if block['native_component'] == 'form':
+                expected_pages.append({'page_id': 2 * block['sequence'], 'source_block_id': block['source_block_id'],
+                    'checks': ['render', 'native_items', 'create', 'update', 'synthetic_records_accounted'] +
+                    (['additional_required_input_validation'] if request['rendering_spec']['profile_id'] ==
+                     'native-blueprint-prototype-required-v1' else [])})
+        authority = target.get('credential_authority')
+        authority_hashes = {'credentials_sha256', 'username_sha256', 'authorization_reference_sha256'}
+        need(type(authority) is dict and set(authority) == {'schema_version', 'scope', 'workspace', 'db_name',
+             'ords_origin'} | authority_hashes and type(authority['schema_version']) is int
+             and authority['schema_version'] == 1 and authority['scope'] == 'fox-prototype-runtime-credentials-target-v1'
+             and all(authority[key] == packet['target'][key] for key in ('workspace', 'db_name', 'ords_origin'))
+             and all(type(authority[key]) is str and re.fullmatch('[a-f0-9]{64}', authority[key])
+                     for key in authority_hashes), 'INERT_COMPLETED_BROWSER_CREDENTIAL_BINDING_CHANGED')
+        need(set(target) == {'binding', 'spec', 'trace', 'pages', 'credential_authority', 'runner_files', 'code_sha256',
+             'image_id', 'data_retention', 'deadline_at_utc', 'request_deadline_at_utc', 'url'}
+             and target['pages'] == expected_pages and target['data_retention'] == 'synthetic_test_rows_retained'
+             and target['url'] == packet['target']['ords_origin'] + '/ords/r/forms2apex_poc/' +
+                 packet['imported']['application_alias'].lower() + '/'
+             and files == original and target.get('binding') == identity and target.get('spec') == request['rendering_spec']
+             and target.get('trace') == packet['trace'] and target.get('runner_files') == original
+             and target.get('code_sha256') == hashed(original) and target.get('image_id') == runtime['qa_image']
+             and target.get('request_deadline_at_utc') == packet['deadline_at_utc'],
+             'INERT_COMPLETED_BROWSER_TARGET_CHANGED')
+        need(intent == {'binding': identity, 'code_sha256': hashed(original), 'image_id': runtime['qa_image'],
+             'state': 'ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY', 'deadline_at_utc': target.get('deadline_at_utc'),
+             'request_deadline_at_utc': packet['deadline_at_utc']}, 'INERT_COMPLETED_BROWSER_INTENT_CHANGED')
+        need(artifacts.get('runner') == {'kind': 'authenticated_browser', 'tool': 'playwright',
+             'code_sha256': hashed(original), 'image_id': runtime['qa_image']}, 'INERT_COMPLETED_BROWSER_REPORT_CHANGED')
+        times = [datetime.fromisoformat(v.replace('Z', '+00:00')) for v in
+                 (packet['issued_at_utc'], artifacts['started_at_utc'], artifacts['completed_at_utc'],
+                  target['deadline_at_utc'], packet['deadline_at_utc'])]
+        need(all(v.tzinfo is not None and v.utcoffset().total_seconds() == 0 for v in times)
+             and times == sorted(times) and 0 < (times[-1] - times[0]).total_seconds() <= 540,
+             'INERT_COMPLETED_HISTORICAL_DEADLINE_CHANGED')
+        ledger_names = set(); sequence = 0
+        rows = {row['source_block_id']: row for row in artifacts['retained_rows']}
+        for block in request['rendering_spec']['blocks']:
+            if block['native_component'] != 'form':
+                continue
+            row = rows[block['source_block_id']]
+            required = next((field for field in block['fields']
+                             if field['in_edit_form'] and field.get('value_required')), None)
+            if request['rendering_spec']['profile_id'] == 'native-blueprint-prototype-required-v1' and required:
+                sequence += 1; name = 'required-input-' + str(sequence).zfill(3) + '.json'; ledger_names.add(name)
+                need(object_at(attempt / name) == {'binding': identity, 'source_block_id': block['source_block_id'],
+                    'source_item_id': required['source_item_id'],
+                    'state': 'INVALID_SUBMIT_ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'},
+                    'INERT_COMPLETED_REQUIRED_INPUT_INTENT_CHANGED')
+            for button, key in (('Create', None), ('Save Changes', row['primary_key'])):
+                sequence += 1; name = 'write-' + str(sequence).zfill(3) + '.json'; ledger_names.add(name)
+                write = object_at(attempt / name)
+                need(type(write) is dict and set(write) == {'binding', 'source_block_id', 'table_name', 'button',
+                     'primary_key', 'intended_values_sha256', 'state'}
+                     and write == {'binding': identity, 'source_block_id': block['source_block_id'],
+                         'table_name': block['table_name'], 'button': button, 'primary_key': key,
+                         'intended_values_sha256': write.get('intended_values_sha256'),
+                         'state': 'ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'}
+                     and type(write['intended_values_sha256']) is str
+                     and re.fullmatch('[a-f0-9]{64}', write['intended_values_sha256']),
+                     'INERT_COMPLETED_WRITE_INTENT_CHANGED')
+        need(object_at(attempt / 'progress.json') == artifacts, 'INERT_COMPLETED_BROWSER_PROGRESS_CHANGED')
+        need(set(first['qa']['files']) == {'target.json', 'launch-intent.json', 'progress.json',
+                 'source/run-prototype.mjs', 'source/lib/contracts.mjs'} | ledger_names
+             and set(first['qa']['directories']) == {'source', 'source/lib'}, 'INERT_COMPLETED_BROWSER_EXTRA_OR_MISSING')
+        need(first == {'staging': retained_tree(stage_job), 'qa': retained_tree(attempt)},
+             'INERT_COMPLETED_HOST_TREE_CHANGED')
+        observed[job] = first
+    return observed
 
 
 def effective_unit(runtime, config):
@@ -431,7 +652,8 @@ def overlaps(left, right):
     return a==b or a in b.parents or b in a.parents
 
 
-def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, stopped=False, verifier=None):
+def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, stopped=False, verifier=None,
+            completed_host=None):
     """Measure configured sources, roots, effective service, processes and engine.
 
     Historical unknown outcomes are NOT interpreted. Old unrelated stopped QA
@@ -456,12 +678,29 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
          and re.fullmatch('sha256:[a-f0-9]{64}',config['converter_image']))
     staging = safe(runtime['staging_root']); qa = safe(runtime['qa_root'])
     staging_identity = metadata(staging, directory=True); qa_identity = metadata(qa, directory=True)
-    runtime_jobs = {job for job, item in jobs.items() if item.get('boundary') == 'runtime_intent_candidate'}
+    completed = {job for job, item in jobs.items() if item.get('boundary') == 'completed_native_prototype'}
+    runtime_jobs = {job for job, item in jobs.items()
+                    if item.get('boundary') in ('runtime_intent_candidate', 'completed_native_prototype')}
     need(set(identities) == runtime_jobs and set(receiver) == set(jobs), 'INERT_RUNTIME_SUBSET_CHANGED')
+    need((completed_host is None and not completed) or
+         type(completed_host) is dict and set(completed_host) == completed and completed,
+         'INERT_COMPLETED_HOST_BASELINE_REQUIRED')
     attempts = {job: qa / ('prototype-' + hashed(identities[job])) for job in runtime_jobs}
     for job in jobs:
+        if job in completed:
+            continue
         for path in [staging / job] + ([attempts[job]] if job in attempts else []):
             need(not path.exists() and not path.is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
+    def retained():
+        if not completed:
+            return None
+        # Unknown siblings may still be producers/history; never select fresh
+        # empty roots to hide the configured originals or adopt extra attempts.
+        need({path.name for path in staging.iterdir()} <= completed | {'runtime-worker.lock'}
+             and {path.name for path in qa.iterdir()} == {attempts[job].name for job in completed},
+             'INERT_UNCLASSIFIED_HOST_ATTEMPT_PRESENT')
+        return completed_host_read(runtime, identities, jobs, receiver, completed_host)
+    retained_before = retained()
     oldest = min(row['row']['created'] for row in jobs.values())
     verifier_ref=dict(verifier) if verifier is not None else None
     def current_verifier():
@@ -509,7 +748,8 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
             state = item['State']; image = item['Image']
             image = image if image.startswith('sha256:') else 'sha256:' + image
             sources = [mount['Source'] for mount in item['Mounts']]
-            need(not any(source == root or source.startswith(root + '/') for source in sources for root in roots),
+            need(not any((overlaps(source, root) if completed else source == root or source.startswith(root + '/'))
+                         for source in sources for root in roots),
                  'INERT_BOUND_QA_CONTAINER_PRESENT')
             if state['Running']:
                 expected=pair_mounts.get(item['Id'])
@@ -558,8 +798,14 @@ def collect(runtime, receiver, identities, jobs, infrastructure, *, storage, sto
          and metadata(staging, directory=True) == staging_identity and metadata(qa, directory=True) == qa_identity,
          'INERT_HOST_CHANGED_DURING_READ')
     for job in jobs:
+        if job in completed:
+            continue
         need(not (staging / job).exists() and not (staging / job).is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
-    for path in attempts.values():
+    for job, path in attempts.items():
+        if job in completed:
+            continue
         need(not path.exists() and not path.is_symlink(), 'INERT_HOST_ATTEMPT_PRESENT')
+    need(retained_before == retained(), 'INERT_COMPLETED_HOST_TREE_CHANGED')
     return {'runtime_sha256': hashed(runtime), 'receiver_sha256': hashed(receiver),
-            'observation_sha256': hashed(first), 'blockers': []}, profile
+            'observation_sha256': hashed(first), 'blockers': [],
+            **({'completed_host_sha256': hashed(retained_before)} if completed else {})}, profile

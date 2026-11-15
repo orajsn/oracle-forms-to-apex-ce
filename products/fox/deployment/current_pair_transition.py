@@ -33,6 +33,7 @@ NATIVE_MODE='native-prototype-strict-stopped-v1'
 SHA=re.compile(r'[a-f0-9]{64}\Z')
 PRESERVATION_STAGES={
     'fox-inert-startup-baseline-v1':'inert',
+    'fox-inert-startup-baseline-v2':'inert',
     'fox-reviewed-preclaim-terminal-baseline-v1':'validate',
     'fox-reviewed-claimed-validation-terminal-baseline-v1':'validate',
     'fox-reviewed-schema-prewrite-terminal-baseline-v1':'prepare_schema',
@@ -187,7 +188,8 @@ def validate_candidate_plan_reference(p,path,raw,candidate):
 
 def validate_native_bindings(candidate,baseline):
     need(type(candidate.get('prototype_authority'))is dict,'NATIVE_PROTOTYPE_AUTHORITY_REQUIRED')
-    need(type(baseline)is dict and baseline.get('scope')=='fox-inert-startup-baseline-v1',
+    need(type(baseline)is dict and baseline.get('scope') in
+         ('fox-inert-startup-baseline-v1','fox-inert-startup-baseline-v2'),
          'NATIVE_INERT_PRESERVATION_REQUIRED')
 
 
@@ -217,7 +219,7 @@ with store._db(False) as db:
    return store._protected_read_status(db,job,purpose='maintenance_schema_prewrite_preservation',
     paired_readback=schema[job]['readback'],expected_pair=schema[job]['expected'])
   if job in paired:
-   inert=paired[job]['readback'].get('scope')=='fox-inert-startup-paired-read-v1'
+   inert=paired[job]['readback'].get('scope') in ('fox-inert-startup-paired-read-v1','fox-inert-startup-paired-read-v2')
    if inert:assert paired[job]['expected']['identity']['release_sha256']==p['inert_release']
    return store._protected_read_status(db,job,purpose='maintenance_inert_startup_preservation' if inert else 'maintenance_preclaim_preservation',
     paired_readback=paired[job]['readback'],expected_pair=paired[job]['expected'])
@@ -237,8 +239,8 @@ with store._db(False) as db:
     assert value['preserved']==preserved
     preservation[job]={'state':state,'preserved':preserved}
    elif job in paired:
-    inert=paired[job]['readback'].get('scope')=='fox-inert-startup-paired-read-v1'
-    state='inert_unresolved_history' if inert else 'claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
+    inert=paired[job]['readback'].get('scope') in ('fox-inert-startup-paired-read-v1','fox-inert-startup-paired-read-v2')
+    state=('inert_mixed_completed_history' if paired[job]['readback']['scope']=='fox-inert-startup-paired-read-v2' else 'inert_unresolved_history') if inert else 'claimed_validation_history' if paired[job]['readback']['scope']==m.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history'
     assert value['preservation_state']==state
     if inert:
      from fox.paused_stage_preservation import validate_pair
@@ -352,12 +354,53 @@ def preclaim_module_origin(name,new_sha256,physical_sha256):
     return path if new_sha256==physical_sha256 else '<measured-new:'+name+':'+new_sha256+'>'
 
 
-PRECLAIM_TECHNICAL=inspect.getsource(preclaim_module_origin)+r'''
+def preclaim_physical_sources(binding,sources):
+    """Stopped host only: actual pinned new-release origins, never /app aliases."""
+    import hashlib,json,pathlib
+    assert type(binding)is dict and set(binding)=={'schema_version','scope','release_root','inventory'}
+    assert type(binding['schema_version'])is int and binding['schema_version']==1
+    assert binding['scope']=='fox-preclaim-stopped-source-v1'
+    root=pathlib.Path(binding['release_root'])
+    assert root.is_absolute() and root.resolve()==root and '..' not in root.parts
+    def read(path):
+        assert path.is_absolute() and path.resolve()==path
+        assert all(not parent.is_symlink() for parent in (path,*path.parents))
+        before=path.stat();assert path.is_file() and before.st_nlink==1
+        raw=path.read_bytes();after=path.stat()
+        assert (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)==(
+            after.st_dev,after.st_ino,len(raw),after.st_mtime_ns,after.st_ctime_ns)
+        return raw
+    ref=binding['inventory'];assert type(ref)is dict and set(ref)=={'path','sha256'}
+    path=pathlib.Path(ref['path']);assert path==root.parent/'source-inventory.json'
+    raw=read(path);assert hashlib.sha256(raw).hexdigest()==ref['sha256']
+    inventory=json.loads(raw);assert inventory['schema_version']==1 and inventory['scope']=='fox-hosted-source-inventory-v1'
+    origins={};templates={}
+    for name,pin in inventory['files'].items():
+        for prefix,package in (('fox/fox/','fox'),('converter/forms2apex/','forms2apex'),
+                               ('converter/fox_source_contract/','fox_source_contract')):
+            if name.startswith(prefix) and name.endswith('.py'):
+                tail=name[len(prefix):-3];assert '/' not in tail and tail.isidentifier()
+                module=package if tail=='__init__' else package+'.'+tail
+                assert module in sources and hashlib.sha256(sources[module]).hexdigest()==pin
+                path=root/name;assert read(path)==sources[module];origins[module]=str(path)
+        if name.startswith('converter/forms2apex/templates/'):
+            path=root/name;assert hashlib.sha256(read(path)).hexdigest()==pin;templates[name]=pin
+    assert set(origins)==set(sources) and templates
+    nodes=list((root/'converter/forms2apex/templates').rglob('*'))
+    assert len(nodes)<=20000 and all(not path.is_symlink() and (path.is_file() or path.is_dir()) for path in nodes)
+    assert {path.relative_to(root).as_posix() for path in nodes if path.is_file()}==set(templates)
+    return origins
+
+
+PRECLAIM_TECHNICAL=inspect.getsource(preclaim_module_origin)+inspect.getsource(preclaim_physical_sources)+r'''
 import base64,hashlib,importlib.abc,importlib.util,json,pathlib,sys,types
 p=json.load(sys.stdin); sources={}
 for name,row in p['sources'].items():
  raw=base64.b64decode(row['bytes'],validate=True)
  assert hashlib.sha256(raw).hexdigest()==row['sha256'];sources[name]=raw
+stopped=p.get('stopped',False);assert type(stopped)is bool
+if stopped:origins=preclaim_physical_sources(p['physical_sources'],sources)
+else:assert 'physical_sources' not in p;origins=None
 class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
  def find_spec(self,name,path=None,target=None):
   if name.split('.')[0] not in ('fox','forms2apex','fox_source_contract'):return None
@@ -365,6 +408,11 @@ class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
   return importlib.util.spec_from_loader(name,self,is_package=name in ('fox','forms2apex','fox_source_contract'))
  def create_module(self,spec):return None
  def exec_module(self,m):
+  if origins is not None:
+   m.__file__=origins[m.__name__]
+   assert pathlib.Path(m.__file__).read_bytes()==sources[m.__name__]
+   if m.__name__ in ('fox','forms2apex','fox_source_contract'):m.__path__=[]
+   exec(compile(sources[m.__name__],m.__file__,'exec'),m.__dict__);return
   path=pathlib.Path('/app/'+m.__name__.replace('.','/')+('/__init__.py' if m.__name__ in ('fox','forms2apex','fox_source_contract') else '.py'))
   physical=hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() and not path.is_symlink() else None
   m.__file__=preclaim_module_origin(m.__name__,hashlib.sha256(sources[m.__name__]).hexdigest(),physical)
@@ -377,7 +425,17 @@ if p.get('inert') is True:
  database=pathlib.Path(p.get('data','/data'))/'fox.sqlite3'
  db=sqlite3.connect(database.as_uri()+'?mode=ro',uri=True);db.row_factory=sqlite3.Row
  db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
- value=observe_fox(database,db);assert value==observe_fox(database,db)
+ value=observe_fox(database,db)
+ completed={job:item['completed'] for job,item in value['jobs'].items() if item.get('boundary')=='completed_native_prototype'}
+ if completed:
+  assert p.get('baseline_scope')=='fox-inert-startup-baseline-v2'
+  assert set(p['completed_packages'])==set(completed)
+  from fox.completed_prototype_preservation import validate_completed_fox
+  for job,expected in completed.items():
+   package=base64.b64decode(p['completed_packages'][job],validate=True)
+   assert validate_completed_fox(database.parent/'jobs'/job,p['target'],package_raw=package)==expected
+ else:assert not p.get('completed_packages')
+ assert value==observe_fox(database,db) and db.total_changes==0
  print(json.dumps(value,sort_keys=True));raise SystemExit(0)
 from fox import verification_recovery as r
 stage=p.get('stage','validate');assert stage in ('validate','prepare_schema')
@@ -504,6 +562,15 @@ class Transition:
             need('fox.'+tail in result and result['fox.'+tail]['sha256']==
                  result['fox_source_contract.'+tail]['sha256'],'PRECLAIM_TECHNICAL_MIRROR_CHANGED')
         return result
+
+    def _preclaim_physical_binding(self):
+        root=absolute(self.new_i['layout']['release_root'])
+        ref=self.new_i['layout']['inventory']
+        need(absolute(ref['path'])==root.parent/'source-inventory.json','PRECLAIM_STOPPED_INVENTORY_OUTSIDE_RELEASE')
+        raw=self.A.read(absolute(ref['path']),private=True)
+        need(sha(raw)==ref['sha256'],'PRECLAIM_STOPPED_INVENTORY_CHANGED')
+        return {'schema_version':1,'scope':'fox-preclaim-stopped-source-v1',
+                'release_root':str(root),'inventory':dict(ref)}
 
     def preclaim_profile(self,fox,pin,baseline,*,stopped=False,retained=None):
         """Read the focused envelope through the existing protected RO probe.
@@ -731,10 +798,13 @@ class Transition:
         converter=self.A.inspect_container(pins['forms2apex-mcp']['id'])
         need(self.A.mount_map(converter).get('/run/fox-target/profile.json')==
              (str(provider_path),False),'INERT_MOUNTED_PROVIDER_PROFILE_CHANGED')
-        def observation():
+        def observation(packages=None):
             self.scope()
             payload={'sources':self._preclaim_sources(),'inert':True,
-                     'data':self.snapshot['role_paths']['fox-data'] if stopped else '/data'}
+                     'data':self.snapshot['role_paths']['fox-data'] if stopped else '/data',
+                     'baseline_scope':baseline['scope'],'completed_packages':packages or {},
+                     'target':profile['envelope']}
+            if stopped:payload.update(stopped=True,physical_sources=self._preclaim_physical_binding())
             args=(['/usr/bin/podman','unshare',self.cfg['python']['path']] if stopped else
                   ['/usr/bin/podman','exec','-i',pins['fox']['id'],'/usr/local/bin/python'])
             result=subprocess.run(args+['-I','-B','-c',PRECLAIM_TECHNICAL],input=cb(payload),capture_output=True,timeout=120)
@@ -742,13 +812,19 @@ class Transition:
                  'INERT_FOX_MEASUREMENT_UNCONFIRMED')
             return document(result.stdout)
         packet={'receiver_jobs':baseline['runtime']['receiver_jobs'],'jobs':sorted(baseline['jobs'])}
+        completed={job:item['completed'] for job,item in baseline['jobs'].items()
+                   if item.get('boundary')=='completed_native_prototype'}
+        if baseline['scope']==inert.BASELINE_SCOPE_V2:
+            packet.update(completed=completed,
+                producer_sha256=baseline['runtime']['sources']['converter/forms2apex/prototype_runtime_bridge.py'],
+                worker_sha256=baseline['runtime']['sources']['qa/operator/prototype_runtime_worker.py'])
         def receiver():
             result=subprocess.run(['/usr/bin/podman','unshare',self.cfg['python']['path'],'-I','-B','-c',inert.receiver_collector_source()],
                 input=cb(packet),capture_output=True,timeout=120)
-            need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=2_000_000,
+            need(result.returncode==0 and not result.stderr.strip() and 0<len(result.stdout)<=32_000_000,
                  'INERT_RECEIVER_MEASUREMENT_UNCONFIRMED')
             return document(result.stdout)
-        first=observation();received=receiver()
+        received=receiver();first=observation(received.get('completed_packages'))
         pair={name:{'id':pin['id'],'image':pin['image'],
               'configuration_sha256':self.M.configuration_signature(self.A,self.A.inspect_container(pin['id']))}
               for name,pin in pins.items()}
@@ -762,7 +838,7 @@ class Transition:
                  'receiver_jobs':self.snapshot['role_paths']['converter-jobs']}
         result=H.paired(baseline,first,received,identity,pins,storage=storage,stopped=stopped,
                         verifier=H.verifier_binding(self.p))
-        need(first==observation() and received==receiver(),'INERT_DATA_CHANGED_DURING_READ')
+        need(first==observation(received.get('completed_packages')) and received==receiver(),'INERT_DATA_CHANGED_DURING_READ')
         need(profile==self.preclaim_profile(self.A.inspect_container(pins['fox']['id']),pins['fox'],focused,
              stopped=stopped,retained=retained),'INERT_PROFILE_CHANGED_DURING_READ')
         lease.require_active(self.old.release,journal.root)

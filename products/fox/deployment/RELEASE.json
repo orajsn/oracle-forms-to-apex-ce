@@ -1,32 +1,35 @@
 {
-  "version": "0.2.0",
-  "tag": "fox-deploy-v0.2.0",
+  "version": "0.2.1",
+  "tag": "fox-deploy-v0.2.1",
   "released_on": "2026-11-15",
   "scope": "deployment-tools-only",
-  "title": "Plan native-prototype upgrades with strict verification stopped",
+  "title": "Preserve completed native prototypes across guarded upgrades",
   "tools": {
-    "current_pair_transition.py": "27117bbecac8dbffb5f540eff6076071a35f886b3f9b072661dcd7e87faf7d29",
+    "current_pair_transition.py": "8876116e49a424a50eb535f3e4a6384d0a9bd2428129e975bbd271f76ac7fab9",
     "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.24.0",
-    "source_bundle_sha256": "66b7c0a15af45068d761114ecb245231813f98580ecab9e3a4628afa3704ed6b"
+    "fox_version": "0.24.1",
+    "source_bundle_sha256": "50a1f3aae6e4c150138d57e85b79e0cd2e8dc71acb1759260ea838d97e91d8c2"
   },
   "changes": [
-    "Bind an explicit native operating mode in schema-2 plans; absent mode retains the exact strict path.",
-    "Require a fresh inert preservation floor and prototype authority, retaining normal backup, restore, pair, readiness and HTTPS gates.",
-    "Keep the enabled strict verifier stopped; create only genuine empty journal lease metadata, never sessions or an idle claim.",
-    "Emit a distinct native completion with strict acceptance and conversion acceptance false; preserve every old outcome.",
-    "Publish and pin this controller separately without modifying the measured FOX 0.24.0 bundle."
+    "Read versioned mixed preservation baselines containing exact completed native prototypes and stopped historical runs.",
+    "Retain completed staging and QA evidence; validate original runtime identities and historical timestamps without renewing requests.",
+    "Bind stopped technical readers to the exact verified release inventory and real module/template origins.",
+    "Keep existing backup, isolated restore, readiness, producer checks and native-mode strict-stopped completion boundaries.",
+    "Require matching bundled FOX 0.24.1 readers; this is not an in-place edit of an installed application or historical receipt."
   ],
   "verification": {
-    "private_candidate_tests_passed": 192,
-    "private_candidate_tests_skipped": 3,
-    "public_integration_checked": true,
-    "public_integration_tests_passed": 193,
-    "public_integration_tests_skipped": 3,
-    "runtime_bundle_unchanged_verified": true,
+    "materialized_layout_tests_passed": 47,
+    "host_controller_regression_tests_passed": 573,
+    "host_controller_regression_tests_skipped": 5,
+    "host_controller_regression_subtests_passed": 48,
+    "clean_source_tests_passed": 858,
+    "clean_source_tests_skipped": 11,
+    "clean_source_subtests_passed": 48,
+    "retained_real_package_read_only_semantics_verified": true,
     "live_transition_verified": false,
-    "apex_conversion_completed": false
+    "ui_download_verified": false,
+    "exact_download_reimport_verified": false
   }
 }

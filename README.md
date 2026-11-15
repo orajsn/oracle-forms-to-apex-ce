@@ -14,11 +14,12 @@ This repository contains two related projects:
 | CE Workbench | This README | A Codex-assisted assessment and POC skill. |
 | FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
 
-FOX's current software source is **0.24.0**; its last verified hosted lab is
-**0.23.2**, with raw-FMB preparation and a real OPAF mapping run demonstrated.
-The new explicit query-omission continuation is a source increment, not yet
-live acceptance. Full real-module runtime, SQL download and exact-package
-reimport remain unfinished.
+FOX's current software source is **0.24.1**; its last verified hosted lab is
+**0.24.0**. One approved real-FMB run has reached reviewed native APEX generation,
+authenticated runtime checks and retained SQL export with explicit query omissions.
+The new download/preservation patch still needs deployment. Successful UI download
+and fresh-ID import/runtime of those exact downloaded bytes remain unfinished;
+business acceptance is separate.
 See the [dated checkpoint](products/fox/README.md#current-checkpoint--15-november-2026),
 [changelog](products/fox/CHANGELOG.md), and
 [retrospective history](products/fox/docs/historical-changelog.md).

@@ -74,6 +74,40 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.24.1] - 2026-11-15
+
+### Download completed prototypes without discarding their history
+
+- Fix the completed-prototype download check: the required-input result uses
+  its canonical status strings, while ordinary runtime checks still require
+  boolean true. Reject unknown statuses and invalid page identities.
+- Add versioned read-only preservation for completed native prototypes alongside
+  stopped historical runs. Bind exact candidate, review, runtime and export
+  evidence without renewing expired requests or granting retry authority.
+- Retain completed staging and QA trees in upgrade checks. Preserve original
+  producer/source identities and reject changed, partial or unexpected history.
+- Match protected startup imports to the actual FOX image renderer closure.
+  Stopped-source readers verify explicit release inventory and physical origins;
+  no development import path or synthetic app directory substitutes for them.
+
+Verification before release integration: 209 download checks passed, with 5
+historical-profile cases skipped; the unchanged retained real package passes
+the corrected check. Core preservation: 181 passed, 6 skipped. Host/startup:
+47 real materialized-layout checks passed; regressions: 573 passed, 5 skipped
+and 48 subtests passed. Independent bounded review cleared the corrected source.
+These are local/source checks, not proof that this patch is deployed.
+
+Clean staged-source integration then passed 858 tests and 48 subtests, with
+11 skips; original source and unrelated work stayed unchanged. A read-only
+diagnostic on the real retained lab job also passed using the new pure readers:
+the exact export, original source files and job evidence stayed unchanged.
+No model, Oracle, conversion or import operation was invoked by that diagnostic.
+The matching controller is versioned separately as deployment tool 0.2.1.
+
+Hosted UI download and fresh-ID import/runtime of those exact downloaded bytes
+remain separate acceptance steps. No completed model, schema, import or export
+operation is replayed; business acceptance and full legacy parity are not claimed.
+
 ## [0.24.0] - 2026-11-15
 
 ### Explicit query omissions and same-run continuation

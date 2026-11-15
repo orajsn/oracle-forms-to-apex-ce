@@ -71,7 +71,9 @@ def test_new_modules_enter_measured_bundle_without_converter_expansion(tmp_path)
     data=inputs();core=Path(inert.__file__).read_bytes()
     from qa.operator import paused_stage_host
     host=Path(paused_stage_host.__file__).read_bytes()
-    data['files'].update({'fox/fox/paused_stage_preservation.py':core,'qa/operator/paused_stage_host.py':host})
+    completed=(ROOT/'fox/fox/completed_prototype_preservation.py').read_bytes()
+    data['files'].update({'fox/fox/paused_stage_preservation.py':core,'qa/operator/paused_stage_host.py':host,
+                          'fox/fox/completed_prototype_preservation.py':completed})
     output=tmp_path/'candidate';result=packaging.materialize(**data,output_root=output)
     import tarfile
     with tarfile.open(output/'paired-source.tar') as archive:
@@ -79,6 +81,8 @@ def test_new_modules_enter_measured_bundle_without_converter_expansion(tmp_path)
         assert 'bundle/fox/fox/paused_stage_preservation.py' in names
         assert 'bundle/qa/operator/paused_stage_host.py' in names
         assert 'build/fox/fox/paused_stage_preservation.py' in names
+        assert 'bundle/fox/fox/completed_prototype_preservation.py' in names
+        assert 'build/fox/fox/completed_prototype_preservation.py' in names
         assert not any(name.startswith('build/converter/') and 'paused_stage' in name for name in names)
         assert archive.extractfile('bundle/qa/operator/paused_stage_host.py').read()==host
     # Execute only the two frozen pure module bytes in isolated namespaces. No
@@ -259,7 +263,8 @@ def test_actual_post_verifier_start_statements_and_idle_probe_keep_inert_data(ve
         return SimpleNamespace(returncode=0,stderr=b'',stdout=json.dumps(result).encode())
     monkeypatch.setattr(host.subprocess,'run',run)
     seen=[]
-    def processes(roots,*,verifier):
+    def processes(roots,*,verifier,launchers):
+        assert launchers == []  # This test models no pair-attach launchers.
         assert verifier['identity']['pid']==c.pid and verifier['witness']['status']=='GENUINE_NEW_VERIFIER_IDLE_CLAIM'
         seen.append(verifier);return []
     monkeypatch.setattr(host,'process_inventory',processes)

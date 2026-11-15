@@ -120,10 +120,27 @@ def validate_generated_package(raw, *, request, export_receipt):
     if any(proof.get(key) != value for key, value in expected.items()):
         raise OpafError('Prototype runtime is not bound to the retained import.')
     pages = expected_runtime_pages(request['rendering_spec'])
-    if proof.get('pages') != [{'page_id': row['page_id'], 'source_block_id': row['source_block_id'],
-                             'passed': True, 'authenticated': True,
-                             'checks': {key: True for key in row['checks']}} for row in pages]:
+    if type(proof.get('pages')) is not list or len(proof['pages']) != len(pages):
         raise OpafError('Prototype runtime page coverage is incomplete.')
+    for actual, page in zip(proof['pages'], pages):
+        # Match the converter's typed page contract without importing its
+        # execution dependencies into the limited FOX renderer closure.
+        expected_checks = {name: True for name in page['checks']}
+        if 'additional_required_input_validation' in expected_checks:
+            block = next(block for block in request['rendering_spec']['blocks']
+                         if block['source_block_id'] == page['source_block_id'])
+            expected_checks['additional_required_input_validation'] = (
+                'PASSED' if any(field['value_required'] for field in block['fields'])
+                else 'NOT_EXERCISED_NO_ADDITIONAL_REQUIRED_FIELDS')
+        if (type(actual) is not dict
+                or set(actual) != {'page_id', 'source_block_id', 'passed', 'authenticated', 'checks'}
+                or type(actual['page_id']) is not int or actual['page_id'] != page['page_id']
+                or actual['source_block_id'] != page['source_block_id']
+                or actual['passed'] is not True or actual['authenticated'] is not True
+                or type(actual['checks']) is not dict or set(actual['checks']) != set(page['checks'])
+                or any(type(actual['checks'][name]) is not type(value) or actual['checks'][name] != value
+                       for name, value in expected_checks.items())):
+            raise OpafError('Prototype runtime page coverage is incomplete.')
     checked = validate_prototype_package(raw, request=request, imported=imported,
         runtime_receipt=proof, artifact_binding=binding, export_receipt=export_receipt)
     if checked['members']['evidence/runtime-evidence/browser-report.json'] != canonical(

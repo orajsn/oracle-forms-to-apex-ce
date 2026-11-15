@@ -20,11 +20,56 @@ SCOPE = 'fox-retired-history-remote-read-v1'
 MAX_PACKET = 2_000_000
 
 STARTUP_INERT = r'''
-import hashlib,json,os,pathlib,sqlite3,sys
+import base64,hashlib,importlib.abc,importlib.util,json,os,pathlib,re,sqlite3,sys
 sys.path.insert(0,'/app');sys.dont_write_bytecode=True
+p=json.load(sys.stdin)
+if p.get('baseline_scope')=='fox-inert-startup-baseline-v2':
+ pins=p['semantic_sources']
+ assert type(pins)is dict and set(pins)=={'schema_version','scope','root','modules','templates'}
+ assert type(pins['schema_version'])is int and pins['schema_version']==1
+ assert pins['scope']=='fox-inert-startup-semantic-source-v1' and pins['root']=='/app'
+ root=pathlib.Path(pins['root']);assert root.is_absolute() and root.resolve()==root
+ assert all(not path.is_symlink() for path in (root,*root.parents))
+ assert type(pins['modules'])is dict and type(pins['templates'])is dict and pins['templates']
+ assert {'fox','forms2apex','fox_source_contract','defusedxml','fox.paused_stage_preservation','fox.completed_prototype_preservation'}<=set(pins['modules'])
+ sources={};paths={}
+ for name,pin in pins['modules'].items():
+  parts=name.split('.');assert parts[0] in ('fox','forms2apex','fox_source_contract','defusedxml')
+  assert len(parts) in (1,2) and all(part.isidentifier() for part in parts)
+  assert type(pin)is str and re.fullmatch('[a-f0-9]{64}',pin)
+  path=root/(name.replace('.','/')+('/__init__.py' if len(parts)==1 else '.py'))
+  assert all(not parent.is_symlink() for parent in (path,*path.parents)) and path.is_file()
+  raw=path.read_bytes();assert hashlib.sha256(raw).hexdigest()==pin
+  paths[name]=path;sources[name]=raw
+ template_nodes=list((root/'forms2apex/templates').rglob('*'))
+ assert len(template_nodes)<=20000 and all(not path.is_symlink() and (path.is_file() or path.is_dir()) for path in template_nodes)
+ assert {path.relative_to(root).as_posix() for path in template_nodes if path.is_file()}==set(pins['templates'])
+ for name,pin in pins['templates'].items():
+  path=pathlib.PurePosixPath(name)
+  assert name.startswith('forms2apex/templates/') and str(path)==name and '..' not in path.parts
+  assert type(pin)is str and re.fullmatch('[a-f0-9]{64}',pin)
+  path=root/name;assert path.is_file() and all(not parent.is_symlink() for parent in (path,*path.parents))
+  assert hashlib.sha256(path.read_bytes()).hexdigest()==pin
+ # No already-loaded development module may evade the closed finder below.
+ for name,module in list(sys.modules.items()):
+  if name.split('.')[0] not in ('fox','forms2apex','fox_source_contract','defusedxml'):continue
+  assert name in paths and getattr(module,'__file__',None)==str(paths[name])
+  assert hashlib.sha256(pathlib.Path(module.__file__).read_bytes()).hexdigest()==pins['modules'][name]
+ class Finder(importlib.abc.MetaPathFinder,importlib.abc.Loader):
+  def find_spec(self,name,path=None,target=None):
+   if name.split('.')[0] not in ('fox','forms2apex','fox_source_contract','defusedxml'):return None
+   assert name in sources,'UNMEASURED_STARTUP_SEMANTIC_DEPENDENCY'
+   return importlib.util.spec_from_loader(name,self,is_package='.' not in name)
+  def create_module(self,spec):return None
+  def exec_module(self,module):
+   name=module.__name__;assert paths[name].read_bytes()==sources[name]
+   module.__file__=str(paths[name])
+   if '.' not in name:module.__path__=[]
+   exec(compile(sources[name],module.__file__,'exec'),module.__dict__)
+ sys.meta_path.insert(0,Finder())
+else:assert 'semantic_sources' not in p
 from fox import paused_stage_preservation as inert
 from fox.prototype_job import load_prototype_profile
-p=json.load(sys.stdin)
 assert hashlib.sha256(pathlib.Path(inert.__file__).read_bytes()).hexdigest()==p['source_sha256']
 assert os.environ.get('FOX_VERIFICATION_ENABLED')=='1'
 assert os.environ.get('FOX_VERIFIER_RELEASE_SHA256')==p['release_sha256']
@@ -33,6 +78,16 @@ db.execute('PRAGMA query_only=ON');db.execute('BEGIN')
 value=inert.observe_fox('/data/fox.sqlite3',db)
 profile=load_prototype_profile(pathlib.Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE']))
 assert inert.runtime_target(value['jobs'])['target_profile_sha256']==profile['target_profile_sha256']
+completed={job:item['completed'] for job,item in value['jobs'].items() if item.get('boundary')==inert.COMPLETED}
+if completed:
+ assert p.get('baseline_scope')==inert.BASELINE_SCOPE_V2
+ if p.get('discover_completed') is not True:
+  assert set(p['completed_packages'])==set(completed)
+  from fox.completed_prototype_preservation import validate_completed_fox
+  for job,expected in completed.items():
+   package=base64.b64decode(p['completed_packages'][job],validate=True)
+   assert validate_completed_fox(pathlib.Path('/data/jobs')/job,profile,package_raw=package)==expected
+else:assert not p.get('completed_packages')
 assert value==inert.observe_fox('/data/fox.sqlite3',db) and db.total_changes==0
 print(json.dumps({'observation':value,'focused_profile':profile,'collector':inert.receiver_collector_source()},sort_keys=True))
 '''
@@ -189,7 +244,8 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
         waiting, busy = [], []
         for job_id in sorted(ids):
             paired = paired_preclaim.get(job_id)
-            inert = paired is not None and paired['readback'].get('scope') == 'fox-inert-startup-paired-read-v1'
+            inert = paired is not None and paired['readback'].get('scope') in (
+                'fox-inert-startup-paired-read-v1', 'fox-inert-startup-paired-read-v2')
             schema = not inert and paired is not None and (root/'jobs'/job_id/'prototype-pipeline/prepare_schema-intent.json').exists()
             if inert:
                 _need(for_startup is True, 'RETIREMENT_REMOTE_INERT_STARTUP_ONLY')
@@ -209,7 +265,8 @@ def _backend_read(history, current_release, for_startup, queue_module, recovery_
             if protected['preservation_allowed']:
                 if paired is not None:
                     run = db.execute('SELECT * FROM runs WHERE id=?', (job_id,)).fetchone()
-                    state = ('inert_unresolved_history' if inert else 'schema_prewrite_history' if schema else 'claimed_validation_history' if paired['readback']['scope'] ==
+                    state = (('inert_mixed_completed_history' if paired['readback']['scope'] == 'fox-inert-startup-paired-read-v2'
+                        else 'inert_unresolved_history') if inert else 'schema_prewrite_history' if schema else 'claimed_validation_history' if paired['readback']['scope'] ==
                         recovery_module.CLAIMED_VALIDATION_MAINTENANCE_SCOPE else 'preclaim_validate_history')
                     _need(value['blocks_admission'] is True and value['retry_eligible'] is False
                         and protected['preservation_state'] == state and run is not None,
@@ -457,7 +514,8 @@ def _host_preclaim_health():
 def _host_preclaim_collect(code,packet):
     response=subprocess.run(['podman','unshare','/usr/bin/python3','-I','-B','-c',code],
         input=json.dumps(packet).encode(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120)
-    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
+    limit=32_000_000 if packet.get('completed') else 2_000_000
+    guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=limit)
     return json.loads(response.stdout)
 
 
@@ -469,17 +527,33 @@ def _host_inert(v, infrastructure, pins):
     H=type('HostReader',(),namespace)
     current=H.startup_baseline(v,infrastructure,hashlib.sha256(INERT_HOST_SOURCE.encode()).hexdigest())
     if current is None:return None
-    baseline,source_sha256,current_profile,verifier=current
+    guard(type(current) is tuple and len(current) in (4,5))
+    baseline,source_sha256,current_profile,verifier=current[:4]
+    completed_scope=baseline['scope']=='fox-inert-startup-baseline-v2'
+    guard(len(current)==(5 if completed_scope else 4))
+    semantic=current[4] if completed_scope else None
     guard(v['for_startup'] is True)
-    def fox_read():
+    completed={job:item['completed'] for job,item in baseline['jobs'].items()
+               if item.get('boundary')=='completed_native_prototype'}
+    def fox_read(packages=None):
+        request={'source_sha256':source_sha256,'release_sha256':v['release_sha256']}
+        if completed:
+            request.update(baseline_scope=baseline['scope'],semantic_sources=semantic)
+            if packages is None:request['discover_completed']=True
+            else:request['completed_packages']=packages
         response=subprocess.run(['podman','exec','-i',pins['fox']['Id'],'/usr/local/bin/python','-I','-B','-c',STARTUP_INERT_SOURCE],
-            input=json.dumps({'source_sha256':source_sha256,'release_sha256':v['release_sha256']}).encode(),
+            input=json.dumps(request).encode(),
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120)
         guard(response.returncode==0 and not response.stderr.strip() and 0<len(response.stdout)<=2_000_000)
         return json.loads(response.stdout)
     first=fox_read();collector=first['collector']
     packet={'receiver_jobs':baseline['runtime']['receiver_jobs'],'jobs':sorted(baseline['jobs'])}
+    if completed:
+        packet.update(completed=completed,
+            producer_sha256=baseline['runtime']['sources']['converter/forms2apex/prototype_runtime_bridge.py'],
+            worker_sha256=baseline['runtime']['sources']['qa/operator/prototype_runtime_worker.py'])
     receiver=_host_preclaim_collect(collector,packet)
+    if completed:guard(first==fox_read(receiver['completed_packages']))
     converter=pins['forms2apex-mcp'];mounts={m['Destination']:m for m in converter['Mounts']}
     guard(mounts['/opt/forms2apex/outputs/jobs']['Source']==packet['receiver_jobs']
         and mounts['/run/fox-target/profile.json']['Source']==current_profile['path']
@@ -498,7 +572,7 @@ def _host_inert(v, infrastructure, pins):
     fox_mounts={m['Destination']:m for m in pins['fox']['Mounts']}
     storage={'fox_data':fox_mounts['/data']['Source'],'receiver_jobs':packet['receiver_jobs']}
     paired=H.paired(baseline,first['observation'],receiver,identity,infrastructure,storage=storage,verifier=verifier)
-    guard(first==fox_read() and receiver==_host_preclaim_collect(collector,packet))
+    guard(first==fox_read(receiver.get('completed_packages')) and receiver==_host_preclaim_collect(collector,packet))
     _host_preclaim_health()
     capture={'v':v,'baseline':baseline,'fox':first,'receiver':receiver,'identity':identity,
              'host':next(iter(paired.values()))['readback']['host']}
