@@ -16,9 +16,10 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 | Item | Last verified state |
 | --- | --- |
 | Current software source | 0.24.0; see the versioned changelog. Publication does not imply activation. |
-| Hosted lab | 0.23.2 is online in native-prototype mode. Raw-FMB preparation and runtime workers are active; the separate strict-output verifier remains stopped. |
+| Hosted lab | 0.23.2 is online. Preparation and runtime workers are temporarily held during the upgrade; the separate strict-output verifier remains stopped. New conversion requests are not demo-ready. |
 | Real hosted conversion | One raw FMB was uploaded and extracted on OCI. Two OPAF mapping sections passed review; the third stopped before review on unsupported query-fact assertions. No APEX output exists for that run yet. |
 | New source increment | 0.24.0 adds an explicit partial-scope omission and same-run continuation for that bounded failure class. Coherent deployment and fresh live review are still required. |
+| Deployment checkpoint | The new pair is prepared but has not started. Cutover stopped before replacing the old application containers; prior HTTPS access was restored with saved jobs unchanged. |
 | Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
 | Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
 | Development work | Active, focused on one real FMB reaching a proven SQL download and fresh-ID reimport. Broader repeatability/polish follows separately. |

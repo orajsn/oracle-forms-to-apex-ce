@@ -10,6 +10,23 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### 2026-11-15 — Restored lab checkpoint and non-intrusive monitoring
+
+- Correct the hosted checkpoint: 0.23.2 is online, but preparation/runtime
+  workers remain held. Prepared 0.24.0 containers have not started, and the real
+  conversion has no APEX export yet.
+- Record that failed pre-swap attempts and saved jobs are preserved separately
+  from successful restoration of prior HTTPS access. No upgrade success is claimed.
+- Document shell-only observation while a guarded transition runs. A controlled
+  live read-only test confirmed that an unrelated Python observer is classified
+  as a potential producer. Overlapping status polling strongly supports the
+  observed failure mechanism; the historical rejected PID was not retained.
+- Require private log creation from inception in operator helpers, and distinguish
+  original worker completion from observer or transport completion.
+
+Documentation only: no application or deployment-tool version change, guard
+exemption, new cloud resource, conversion retry or new live acceptance claim.
+
 ### 2026-11-15 — Published 0.24.0 source and planned native deployment
 
 - Publish FOX 0.24.0 with its matching changelog. Final clean-source regression:
