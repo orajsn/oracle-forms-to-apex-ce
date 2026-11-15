@@ -71,17 +71,17 @@ class SnapshotContractTests(unittest.TestCase):
                          'operator-state/handoffs/.retained')
 
     def test_finite_capacity_and_other_safeguards_are_unchanged(self):
-        self.assertEqual(s.MAX_ENTRIES, 25000)
+        self.assertEqual(s.MAX_ENTRIES, 32768)
         self.assertEqual(s.MAX_MEMBER_BYTES, 64 * 1024 * 1024)
-        self.assertEqual(s.MAX_TOTAL_BYTES, 160 * 1024 * 1024)
+        self.assertEqual(s.MAX_TOTAL_BYTES, 256 * 1024 * 1024)
         self.assertEqual(s.MAX_MANIFEST_BYTES, 8 * 1024 * 1024)
         self.assertEqual((s.MAX_ROWS, s.MAX_ROW_BYTES, s.MAX_SQLITE_SECONDS),
                          (200000, 2 * 1024 * 1024, 30))
-        self.assertEqual(s.MAX_ARCHIVE_BYTES, 270172160)
+        self.assertEqual(s.MAX_ARCHIVE_BYTES, 384 * 1024 * 1024)
         self.assertEqual(s.MAX_ARCHIVE_BYTES, s.MAX_TOTAL_BYTES + s.MAX_ENTRIES * 4096)
 
-    def test_inventory_accepts_exactly_25000_and_rejects_25001(self):
-        value = inventory_fixture(25000)
+    def test_inventory_accepts_exactly_32768_and_rejects_32769(self):
+        value = inventory_fixture(32768)
         self.assertEqual(s._validate_inventory(value, ['fox-data']), 0)
         value['fox-data/overflow'] = dict(value['fox-data'])
         with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_INVALID$'):
@@ -93,15 +93,14 @@ class SnapshotContractTests(unittest.TestCase):
             root = Path(temporary)
             for index in range(s.MAX_ENTRIES - 1):
                 (root / str(index)).mkdir()
-            self.assertEqual(len(s._inventory({'fox-data': root})), 25000)
+            self.assertEqual(len(s._inventory({'fox-data': root})), 32768)
             (root / 'overflow').mkdir()
             with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_LIMIT_OR_DUPLICATE$'):
                 s._inventory({'fox-data': root})
 
     def test_member_and_total_byte_boundaries_remain_enforced(self):
-        value = inventory_fixture(5)
-        for index, size in enumerate((s.MAX_MEMBER_BYTES, s.MAX_MEMBER_BYTES,
-                                     32 * 1024 * 1024, 0)):
+        value = inventory_fixture(6)
+        for index, size in enumerate((s.MAX_MEMBER_BYTES,) * 4 + (0,)):
             value['fox-data/' + str(index)].update(
                 kind='file', bytes=size, sha256=s._sha(b''))
         self.assertEqual(s._validate_inventory(value, ['fox-data']), s.MAX_TOTAL_BYTES)
@@ -109,21 +108,20 @@ class SnapshotContractTests(unittest.TestCase):
         with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_FILE_INVALID$'):
             s._validate_inventory(value, ['fox-data'])
         value['fox-data/0']['bytes'] -= 1
-        value['fox-data/3']['bytes'] = 1
+        value['fox-data/4']['bytes'] = 1
         with self.assertRaisesRegex(s.SnapshotError, '^INVENTORY_ROOT_OR_SIZE_INVALID$'):
             s._validate_inventory(value, ['fox-data'])
 
     def test_source_collection_enforces_exact_total_and_unchanged_member_limit(self):
         with tempfile.TemporaryDirectory(prefix='fox-total-bound-') as temporary:
             root = Path(temporary)
-            for index, size in enumerate((s.MAX_MEMBER_BYTES, s.MAX_MEMBER_BYTES,
-                                         32 * 1024 * 1024)):
+            for index, size in enumerate((s.MAX_MEMBER_BYTES,) * 4):
                 with (root / str(index)).open('wb') as stream:
                     stream.truncate(size)
             inventory = s._inventory({'fox-data': root})
             self.assertEqual(sum(entry.get('bytes', 0) for entry in inventory.values()),
-                             160 * 1024 * 1024)
-            with (root / '2').open('ab') as stream:
+                             256 * 1024 * 1024)
+            with (root / 'overflow').open('wb') as stream:
                 stream.write(b'x')
             with self.assertRaisesRegex(s.SnapshotError, '^TOTAL_BYTES_LIMIT$'):
                 s._inventory({'fox-data': root})
@@ -149,7 +147,7 @@ class SnapshotContractTests(unittest.TestCase):
                     s._verify_archive(path, inventory_fixture(1))
 
     def test_exact_capacity_archive_stops_at_first_extra_member_without_payload_read(self):
-        value = inventory_fixture(25000)
+        value = inventory_fixture(32768)
         with tempfile.TemporaryDirectory(prefix='fox-tar-bound-') as temporary:
             path = Path(temporary) / 'roles.tar'
             with tarfile.open(str(path), 'w') as archive:
@@ -176,10 +174,10 @@ class SnapshotContractTests(unittest.TestCase):
                     patch.object(tarfile.TarFile, 'extractfile', side_effect=AssertionError('PAYLOAD_READ_FORBIDDEN')):
                 with self.assertRaisesRegex(s.SnapshotError, '^ARCHIVE_MEMBERSHIP_DIFFERS$'):
                     s._verify_archive(path, value)
-            self.assertEqual(len(observed), 25001)
+            self.assertEqual(len(observed), 32769)
 
     def test_entry_capacity_does_not_override_serialized_manifest_limit(self):
-        value = inventory_fixture(25000)
+        value = inventory_fixture(32768)
         self.assertLess(len(s._raw({'inventory': value})), s.MAX_MANIFEST_BYTES)
         # Legal long Unicode names expand under ensure_ascii=True. Entry count
         # alone is not a promise that every possible manifest fits eight MiB.
@@ -188,6 +186,23 @@ class SnapshotContractTests(unittest.TestCase):
             for index, entry in enumerate(list(value.values())[1:])}}
         self.assertEqual(s._validate_inventory(expanded, ['fox-data']), 0)
         self.assertGreater(len(s._raw({'inventory': expanded})), s.MAX_MANIFEST_BYTES)
+
+    def test_observed_capacity_shape_is_accepted_without_large_file_allocation(self):
+        # Authored metadata matching the measured count/total/largest tuple.
+        # This is not an actual backup or a claim about retained file contents.
+        value = inventory_fixture(26060)
+        remaining, largest = 173960035, 2157721
+        for index in range(26059):
+            if not remaining:
+                break
+            size = min(remaining, largest)
+            value['fox-data/' + str(index)].update(kind='file', bytes=size, sha256=s._sha(b''))
+            remaining -= size
+        self.assertEqual(remaining, 0)
+        self.assertEqual(len(value), 26060)
+        self.assertEqual(max(entry.get('bytes', 0) for entry in value.values()), largest)
+        self.assertEqual(s._validate_inventory(value, ['fox-data']), 173960035)
+        self.assertLess(len(s._raw({'inventory': value})), s.MAX_MANIFEST_BYTES)
 
 
 @unittest.skipUnless(os.name == 'posix', 'Actual POSIX permissions required; use local WSL unittest runner.')

@@ -1,14 +1,13 @@
 {
-  "version": "0.24.2",
+  "version": "0.24.3",
   "released_on": "2026-11-15",
-  "title": "Preserve completed evidence in its original producer formats",
+  "title": "Preserve growing test history within explicit backup bounds",
   "changes": [
-    "Recognize the exact canonical JSON formats used by the gateway and runtime worker for saved snapshot and import records.",
-    "Keep each original copy's hash, size and file identity independently bound; never rewrite stored evidence to make an upgrade check pass.",
-    "Continue requiring exact byte identity for runtime requests and browser reports; reject unexpected formatting or changed values.",
-    "Exercise the real gateway and worker serializers in preservation regression tests.",
-    "Preserve old runs, receipts and retry restrictions; reject active, uncertain or conflicting work.",
-    "Keep source approvals, review, target validation, runtime checks and business acceptance separate."
+    "Raise the explicit snapshot allowance to 32768 entries and 256 MiB total so retained development history can be backed up without deletion.",
+    "Keep the 64 MiB per-file and 8 MiB manifest bounds, archive integrity checks and mandatory isolated restore unchanged.",
+    "Keep limits fixed and versioned; never expand them automatically or exclude evidence to make an upgrade pass.",
+    "Retain the completed-prototype download and producer-format preservation fixes from the preceding releases.",
+    "Preserve original sources, applications, failed operations and independent human acceptance."
   ],
   "limitations": [
     "The new omission route supports only the exact same-block redacted filter and ordering failure class before its reviewer starts. It does not recover hidden values or claim equivalent query behavior.",

@@ -74,6 +74,35 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.24.3] - 2026-11-15
+
+### Back up retained development history before the download-fix rollout
+
+- Increase fixed snapshot capacity from 25,000 to 32,768 entries and from
+  160 MiB to 256 MiB total. Keep the 64 MiB member and 8 MiB manifest bounds.
+  The derived archive bound is 384 MiB; it is not an extra cloud allocation.
+- Preserve all history rather than deleting old jobs to fit the previous bound.
+  No automatic expansion, source exclusion or backup/restore bypass is added.
+- Retain the preceding download and completed-evidence preservation corrections.
+
+A live read-only measurement found 26,060 entries and a 173,960,035-byte
+conservative upper bound. The original upgrade inspection stopped at the
+capacity gate before activation; its failure remains recorded. This change
+requires a new coherent package and a fresh successful inspection, backup and
+isolated restore. The serving lab remains 0.24.0 with auxiliary workers held.
+Hosted UI download and exact-downloaded-byte reimport remain unproven.
+
+Verification: 398 clean staged-source tests passed, with 60 platform/historical
+skips. Capacity-specific Windows checks passed 39 tests with 55 skips; Linux
+snapshot checks passed 34, hosted checks passed 40 with 20 skips, and 17 real
+rootless-namespace checks covered 17 of those skips. Three opt-in integration
+checks remain unrun. Independent bounded source and evidence review cleared
+the change. These local checks are not live backup or deployment acceptance.
+
+The new reader accepts older bounded archives. Older readers may reject archives
+above their old limits; use the matching new reader for a new larger backup.
+Deployment tool 0.2.3 binds the unchanged controller to this new bundle.
+
 ## [0.24.2] - 2026-11-15
 
 ### Preserve each producer's original JSON bytes

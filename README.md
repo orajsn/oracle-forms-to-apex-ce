@@ -14,10 +14,12 @@ This repository contains two related projects:
 | CE Workbench | This README | A Codex-assisted assessment and POC skill. |
 | FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
 
-FOX's current software source is **0.24.2**; its last verified hosted lab is
+FOX's current software source is **0.24.3**; its last verified hosted lab is
 **0.24.0**. One approved real-FMB run has reached reviewed native APEX generation,
 authenticated runtime checks and retained SQL export with explicit query omissions.
-The new download/preservation patch still needs deployment. Successful UI download
+The new download/preservation patch still needs deployment. The pre-switch backup
+capacity check stopped the prior attempt; 0.24.3 increases fixed bounds while
+preserving all history. Successful UI download
 and fresh-ID import/runtime of those exact downloaded bytes remain unfinished;
 business acceptance is separate.
 See the [dated checkpoint](products/fox/README.md#current-checkpoint--15-november-2026),

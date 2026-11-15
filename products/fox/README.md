@@ -15,11 +15,11 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.24.2 producer-format preservation patch; see the versioned changelog. Publication does not imply activation. |
-| Hosted lab | 0.24.0 is online, with preparation and runtime workers active. The separate strict-output verifier remains stopped. The download defect below prevents declaring the full user journey ready. |
+| Current software source | 0.24.3 bounded backup-capacity patch, retaining the preceding download/preservation fixes; see the versioned changelog. Publication does not imply activation. |
+| Hosted lab | 0.24.0 remains online. Preparation and runtime workers are held for the guarded upgrade; the strict-output verifier is stopped. The download defect below prevents declaring the full user journey ready. |
 | Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
-| New source increment | 0.24.2 retains the download fix and corrects preservation of two JSON copies whose producers differ by one trailing newline. Original hashes and files remain separate and unchanged. |
-| Deployment checkpoint | 0.24.0 is the serving version. Prepared 0.24.1 containers were never activated after a complete-protocol test found the preservation issue. The corrected patch requires a new coherent build and actual acceptance. |
+| New source increment | 0.24.3 increases fixed backup bounds to preserve growing test history without deletion. Original files, independent hashes, per-file limits and isolated restore remain required. |
+| Deployment checkpoint | 0.24.0 is serving. Prepared 0.24.1 and 0.24.2 containers have never started. The 0.24.2 pre-switch inspection stopped at its backup-capacity gate; a new coherent package and actual acceptance are required. |
 | Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
 | Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
 | Full real-module acceptance | Still pending: successful hosted UI download and fresh-ID import/runtime verification of those exact downloaded SQL bytes. Three-run repeatability follows separately. |

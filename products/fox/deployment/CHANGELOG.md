@@ -4,6 +4,20 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.3] - 2026-11-15
+
+- Bind the unchanged controller and cutover tool to FOX 0.24.3 and its fixed
+  32,768-entry / 256 MiB snapshot allowance. Per-file, manifest, backup and
+  isolated-restore checks remain required; no live override is introduced.
+- Preserve the previous capacity failure and never-started candidates. A fresh
+  coherent installation and successful inspection are required before switching.
+
+Verification: 398 clean-source tests passed (60 skips). Capacity coverage also
+includes 34 Linux snapshot tests, 40 hosted tests (20 skips) and 17 real rootless
+assembly tests covering 17 of those skips. Three opt-in host integration tests
+remain unrun. These checks do not prove live backup, deployment, UI download
+or exact-downloaded-byte reimport. Older readers may reject larger new backups.
+
 ## [0.2.2] - 2026-11-15
 
 - Rebind the unchanged controller and cutover tool to FOX 0.24.2, which corrects
