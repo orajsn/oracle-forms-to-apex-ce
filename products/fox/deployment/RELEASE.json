@@ -1,32 +1,29 @@
 {
-  "version": "0.2.3",
-  "tag": "fox-deploy-v0.2.3",
-  "released_on": "2026-11-15",
+  "version": "0.2.4",
+  "tag": "fox-deploy-v0.2.4",
+  "released_on": "2026-11-16",
   "scope": "deployment-tools-only",
-  "title": "Bind deployment to FOX 0.24.3 bounded snapshot capacity",
+  "title": "Bind deployment to FOX 0.25.0 versioned source-check closures",
   "tools": {
     "current_pair_transition.py": "8876116e49a424a50eb535f3e4a6384d0a9bd2428129e975bbd271f76ac7fab9",
     "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.24.3",
-    "source_bundle_sha256": "d1d47eaa1885a8ebb5116cf4da04563ee676ecff1f81d146dc1846808e38c802"
+    "fox_version": "0.25.0",
+    "source_bundle_sha256": "986212386610065b554493cd97d788459b4353f53ce4450c89dc703adcb98714"
   },
   "changes": [
-    "Bind the unchanged controller and cutover tool bytes to the versioned snapshot-capacity change bundled in FOX 0.24.3.",
-    "Preserve the prior stopped candidates and the failed capacity inspection without rewriting or replaying them.",
-    "Require a coherent new build, fresh inspection and genuine backup plus isolated restore; no private capacity override or evidence exclusion."
+    "Bind the unchanged controller and cutover tools to the measured FOX 0.25.0 bundle and its versioned renderer and browser closures.",
+    "Keep the original browser runner for historical profiles and require the separate driver, fixture binding and ordered check evidence for the new profile.",
+    "Preserve earlier stopped candidates, original jobs and failed operations. Require a fresh coherent installation, backup and isolated restore before activation."
   ],
   "verification": {
-    "clean_source_tests_passed": 398,
-    "clean_source_tests_skipped": 60,
-    "windows_capacity_tests_passed": 39,
-    "windows_capacity_tests_skipped": 55,
-    "linux_snapshot_tests_passed": 34,
-    "linux_hosted_tests_passed": 40,
-    "linux_hosted_tests_skipped": 20,
-    "linux_rootless_tests_passed": 17,
-    "live_capacity_failure_measured": true,
+    "clean_source_tests_passed": 871,
+    "clean_source_tests_skipped": 7,
+    "source_bound_connectionless_sqlcl_validation": true,
+    "local_authored_browser_checks_only": true,
+    "live_new_profile_fixtures_verified": false,
+    "live_new_profile_runtime_verified": false,
     "live_backup_verified": false,
     "live_transition_verified": false,
     "ui_download_verified": false,

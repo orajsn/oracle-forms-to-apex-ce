@@ -546,6 +546,9 @@ def reconstruct(job, snapshot, original, target):
     if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
     if 'candidate_format_policy' in selected: binding['candidate_format_policy']=selected['candidate_format_policy']
     if 'native_input_policy' in selected: binding['native_input_policy']=selected['native_input_policy']
+    if 'count_guard' in selected:
+        from .forms_count_guard_selection import bound_count_guard
+        binding['count_guard'] = bound_count_guard(selected)
     same(read(root / 'binding.json'), binding)
     same(read(root / 'packet.json'), packet)
     same(read(root / 'sources-manifest.json'), {'source_binding': selected['source_binding'],

@@ -49,11 +49,18 @@ def runtime_identity(request, imported, snapshot):
     Keep byte-compatible with prototype_package.runtime_binding's returned
     identity. This does not call its semantic validators or adopt old receipts.
     """
-    return {'schema_version': 1, 'scope': 'fox-native-blueprint-runtime-v1',
+    value = {'schema_version': 1, 'scope': 'fox-native-blueprint-runtime-v1',
         'profile_id': request['rendering_spec']['profile_id'],
         **{key: request[key] for key in ('job_id', 'project_id', 'source_binding', 'plan_sha256', 'rendered_zip_sha256')},
         'artifact_binding_sha256': hashed(snapshot), 'import_receipt_sha256': hashed(imported),
         **{key: imported[key] for key in ('application_id', 'application_alias')}, 'workspace': 'FORMS2APEX_POC'}
+    if request['rendering_spec']['profile_id'] == 'native-blueprint-prototype-count-guard-v1':
+        # Identity projection only. The measured semantic child separately checks
+        # the exact fixture recipe/SQL and the original stage's actual outcome.
+        prepared = request['prior_receipts']['prepare_schema']
+        need(type(prepared.get('count_guard_fixture')) is dict, 'INERT_COUNT_FIXTURE_BINDING_REQUIRED')
+        value['count_guard_fixture_sha256'] = hashed(prepared['count_guard_fixture'])
+    return value
 
 
 def runtime_target(jobs):

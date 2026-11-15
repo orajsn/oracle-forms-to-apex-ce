@@ -1,26 +1,28 @@
 {
-  "version": "0.24.3",
-  "released_on": "2026-11-15",
-  "title": "Preserve growing test history within explicit backup bounds",
+  "version": "0.25.0",
+  "released_on": "2026-11-16",
+  "title": "Choose a source-backed check for a native APEX prototype",
   "changes": [
-    "Raise the explicit snapshot allowance to 32768 entries and 256 MiB total so retained development history can be backed up without deletion.",
-    "Keep the 64 MiB per-file and 8 MiB manifest bounds, archive integrity checks and mandatory isolated restore unchanged.",
-    "Keep limits fixed and versioned; never expand them automatically or exclude evidence to make an upgrade pass.",
-    "Retain the completed-prototype download and producer-format preservation fixes from the preceding releases.",
-    "Preserve original sources, applications, failed operations and independent human acceptance."
+    "Find supported checks in the selected Forms source and show the exact source file, module, block and button.",
+    "Include one check in a new conversion only after explicit partial-scope approval; retain the exact selection through saved progress and supported recovery.",
+    "Generate a separate native APEX check from a proven initial null-or-zero count predicate, without inventing the original approval action.",
+    "Require four source-bound synthetic test cases, exact browser outcomes and before/after row checks before releasing the new profile's export.",
+    "Keep lookup, stale-source, timeout and continue-without-check choices explicit in the business-user interface.",
+    "Preserve older runs and their original browser proof with a separate versioned check-profile runner.",
+    "Include the preceding download correction and bounded history-preservation fixes; deployment remains a separate checked step."
   ],
   "limitations": [
+    "The new check recognizes one narrow, directly proven first count predicate. It is not a general PL/SQL translator or full button conversion.",
+    "The check reads saved synthetic detail rows. Empty grouping values and no matching rows pass; negative nonzero values are not rejected. Unsaved Forms buffers, later statements, exception handling and approval remain unconverted.",
+    "The source/API/UI and connectionless SQLcl checks do not prove installed fixture creation, actual Oracle browser behavior or a successful hosted download. Live acceptance remains pending.",
     "The new omission route supports only the exact same-block redacted filter and ordering failure class before its reviewer starts. It does not recover hidden values or claim equivalent query behavior.",
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
-    "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
-    "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
+    "Server-side preparation requires operator configuration and testing. The hosted route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
     "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
     "The retained real-file run has completed OPAF review, APEX import, authenticated runtime checks and server-side SQL export on the lab target. UI download and exact-downloaded-byte fresh-ID import remain pending until the patch is deployed and exercised.",
     "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
     "Inert startup preservation grants no retry, execution, closure or acceptance. Mixed stages require a proven runtime candidate and one runtime target; not every unresolved boundary is supported. Actual host compatibility and coherent deployment remain separate gates.",
-    "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
-    "APEX generated, technical checks passed and business acceptance remain separate. A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
-    "Fresh-project isolation requires the supported single-converter process and a genuinely new project. It does not attest arbitrary manual processes, authorize old retries or prove a completed conversion."
+    "APEX generated, technical checks passed and business acceptance remain separate. A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence."
   ]
 }

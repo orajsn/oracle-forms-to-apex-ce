@@ -630,8 +630,13 @@ class PrototypeGateway:
                 ddl, "select 'FOX_PROTO_CREATED=1' from dual;"])
             _need(output.strip() == "FOX_PROTO_CREATED=1", "PROTOTYPE_SCHEMA_OUTCOME_UNCONFIRMED")
             self._observe(root, spec)
-        return {"ready_for_import": True, "tables": tables,
-                "schema_ddl_sha256": hashlib.sha256(ddl.encode()).hexdigest(), "database_writes": bool(tables)}
+        result = {"ready_for_import": True, "tables": tables,
+                  "schema_ddl_sha256": hashlib.sha256(ddl.encode()).hexdigest(), "database_writes": bool(tables)}
+        from . import native_blueprint_count_guard, count_guard_fixture
+        if blueprint_profiles.select(spec) is native_blueprint_count_guard:
+            result["count_guard_fixture"] = count_guard_fixture.prepare(root, request,
+                execute_sql=lambda commands: self._sql(root, commands), fresh_check=check)
+        return result
 
     def run_stage(self, stage, request):
         return self._run_stage(stage, request)
@@ -715,8 +720,22 @@ class PrototypeGateway:
                     imported = request["prior_receipts"]["import"]
                     self._observe(root, spec)
                     if stage == "verify_runtime":
+                        from . import native_blueprint_count_guard, count_guard_fixture
+                        fixture = None
+                        if blueprint_profiles.select(spec) is native_blueprint_count_guard:
+                            prepared = request["prior_receipts"]["prepare_schema"]
+                            fixture = prepared.get("count_guard_fixture")
+                            count_guard_fixture.validate_receipt(request, fixture,
+                                prepare_request_sha256=prepared["request_sha256"])
+                            check()
+                            count_guard_fixture.observe(request, fixture,
+                                execute_sql=lambda commands: self._sql(root, commands))
                         result = verify_runtime(self.settings, root, request, imported=imported,
                             artifact_binding=binding, verifier=self.runtime_verifier, freshness_check=check)
+                        if fixture is not None:
+                            check()
+                            result["count_guard_fixture_recheck"] = count_guard_fixture.observe(request, fixture,
+                                execute_sql=lambda commands: self._sql(root, commands))
                     else:
                         result = export_prototype(self.settings, root, request, imported=imported,
                             artifact_binding=binding,

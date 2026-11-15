@@ -25,8 +25,16 @@ def bound_native_input_policy(binding):
     return policy
 
 
-def build_native_plan(documents, blueprint, *, native_input_policy=None, **kwargs):
+def build_native_plan(documents, blueprint, *, native_input_policy=None, count_guard=None, **kwargs):
     """Closed dispatch. The default returns the unmodified legacy plan."""
+    if count_guard is not None:
+        from .forms_count_guard_selection import bound_count_guard
+        from .forms_native_count_guard_plan import build_native_count_guard_prototype_plan
+        choice = bound_count_guard({'count_guard': count_guard})
+        if native_input_policy is not None:
+            bound_native_input_policy({'native_input_policy': native_input_policy})
+        return build_native_count_guard_prototype_plan(documents, blueprint,
+            count_guard_selection=choice['selection'], partial_scope_consent=choice['partial_scope_consent'], **kwargs)
     if native_input_policy is None:
         return forms_native_plan.build_native_prototype_plan(documents, blueprint, **kwargs)
     bound_native_input_policy({"native_input_policy": native_input_policy})

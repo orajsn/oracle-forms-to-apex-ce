@@ -47,9 +47,27 @@ def runtime_case(tmp_path_factory, monkeypatch, request):
         for block in value["blocks"]:
             for field in block["fields"]:
                 field["value_required"] = block["native_component"] == "form"
+    if request.param == "count-v1":
+        monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "converter/tests"))
+        from test_native_blueprint_count_guard import spec
+        value = spec()
+        value["blocks"][0]["fields"][0]["value_required"] = True
+        # Mirror the source's report-only detail. QA never makes it editable.
+        value["blocks"][1]["native_component"] = "report"
+        for field in value["blocks"][1]["fields"]:
+            field["in_edit_form"] = False
     renderer = blueprint_profiles.select(value)
     request = {"job_id": job_id, "project_id": value["project_id"], "source_binding": value["source_binding"],
                "plan_sha256": "b" * 64, "rendered_zip_sha256": "c" * 64, "rendering_spec": value}
+    if value["schema_version"] == 3:
+        from forms2apex import count_guard_fixture
+        plan = count_guard_fixture.plan(request)
+        request["prior_receipts"] = {"prepare_schema": {"status": "COMPLETE", "ready_for_import": True,
+            "request_sha256": "e" * 64, "count_guard_fixture": {"plan": plan,
+                "plan_sha256": digest(plan), "request_sha256": "e" * 64,
+                "fixture_sql_sha256": hashlib.sha256(count_guard_fixture.insert_sql(request).encode()).hexdigest(),
+                "prepared": True, "rows": [{"case": row["case"], "primary_key": str(index + 100)}
+                                           for index, row in enumerate(plan["cases"])]}}}
     imported = {"imported": True, "application_id": 12345, "application_alias": alias_for_job(job_id),
                 "workspace": "FORMS2APEX_POC", "import_intent_sha256": "d" * 64, "compiled_metadata_sha256": "e" * 64}
     authority = {"schema_version": 1, "scope": "fox-prototype-runtime-credentials-target-v1",
@@ -101,11 +119,14 @@ def runtime_case(tmp_path_factory, monkeypatch, request):
                            calls=calls, root=root, inspected=inspected)
 
 
+@pytest.mark.parametrize("runtime_case", ["v1", "required-v1", "count-v1"], indirect=True)
 def test_host_adapter_uses_exact_cached_rootless_image_private_mounts_and_retained_rows(runtime_case):
     case = runtime_case
     receipt = case.adapter(case.request, **case.args)
     assert receipt["passed"] is True and receipt["data_retention"] == "synthetic_test_rows_retained"
-    assert len(receipt["retained_rows"]) == 2 and all(row["deleted"] is False for row in receipt["retained_rows"])
+    assert len(receipt["retained_rows"]) == sum(block["native_component"] == "form"
+        for block in case.request["rendering_spec"]["blocks"])
+    assert all(row["deleted"] is False for row in receipt["retained_rows"])
     launch = case.calls[-1]
     assert "--pull=never" in launch and "--read-only" in launch and "--cap-drop=all" in launch
     assert "--privileged" not in launch and "--publish" not in launch and "--network=host" not in launch
@@ -114,6 +135,18 @@ def test_host_adapter_uses_exact_cached_rootless_image_private_mounts_and_retain
     assert all(value != str(case.config.credentials_file.parent) for value in launch)
     assert any(kwargs.get("secret") is True for _, kwargs in case.inspected)
     assert len(case.calls) == 3
+    packet = read_object(next(case.config.qa_root.glob("prototype-*/target.json")))
+    if case.request["rendering_spec"]["schema_version"] == 3:
+        assert set(packet["runner_files"]) == {"run-count-guard-v1.mjs", "lib/contracts.mjs", "lib/count-guard.mjs"}
+        assert packet["runner_files"]["lib/count-guard.mjs"] == module.file_digest(module._ROOT / "lib/count-guard.mjs")
+        assert launch[-1] == "/opt/fox-qa/run-count-guard-v1.mjs"
+        assert any(":/opt/fox-qa/lib/count-guard.mjs:ro,Z" in arg for arg in launch)
+        assert packet["count_guard_fixture"] == case.request["prior_receipts"]["prepare_schema"]["count_guard_fixture"]
+        assert packet["binding"]["count_guard_fixture_sha256"] == digest(packet["count_guard_fixture"])
+    else:
+        assert set(packet["runner_files"]) == {"run-prototype.mjs", "lib/contracts.mjs"}
+        assert launch[-1] == "/opt/fox-qa/run-prototype.mjs"
+        assert not any(":/opt/fox-qa/lib/count-guard.mjs:" in arg for arg in launch)
     before = list(case.calls)
     recover_args = {key: value for key, value in case.args.items() if key != "freshness_check"}
     assert case.adapter.recover(case.request, **recover_args) == receipt
@@ -140,6 +173,7 @@ def test_clean_credentials_wrong_target_or_unbound_identity_never_launches(runti
     assert not case.calls
 
 
+@pytest.mark.parametrize("runtime_case", ["v1", "required-v1", "count-v1"], indirect=True)
 def test_image_drift_and_unknown_launch_outcome_are_not_replayed(runtime_case):
     case = runtime_case
     original = case.adapter.command
@@ -206,7 +240,9 @@ def test_forms_without_labelled_marker_policy_stop_before_browser(runtime_case):
             if field["data_type"] == "VARCHAR2":
                 field["length"] = 1
     case.args["trace"] = blueprint_profiles.select(case.request["rendering_spec"]).prototype_trace(case.request["rendering_spec"])
-    with pytest.raises(RuntimeError, match="LABELLED_FORM_INPUT_POLICY_UNAVAILABLE"):
+    expected = ("COUNT_GUARD_FIXTURE_LABELLED_KEY_TOO_SHORT" if case.request["rendering_spec"]["schema_version"] == 3
+                else "LABELLED_FORM_INPUT_POLICY_UNAVAILABLE")
+    with pytest.raises(RuntimeError, match=expected):
         case.adapter(case.request, **case.args)
     assert not case.calls
 
@@ -262,6 +298,7 @@ def test_actual_container_lifetime_is_below_client_observation_budget(runtime_ca
 
 
 @pytest.mark.parametrize('deadline', [None, 'bad-date', '2026-01-01T00:00:00', '2026-01-01T00:00:00+00:00'])
+@pytest.mark.parametrize("runtime_case", ["v1", "required-v1", "count-v1"], indirect=True)
 def test_missing_malformed_or_expired_deadline_never_launches(runtime_case, deadline):
     case = runtime_case
     case.adapter.config = replace(case.config, request_deadline_at_utc=deadline)
@@ -332,3 +369,59 @@ def test_lifetime_is_recomputed_after_slow_final_authority_check(runtime_case, m
     case.adapter.command = command
     case.args['freshness_check'] = fresh
     case.adapter(case.request, **case.args)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "wrong_prepare", "wrong_plan", "duplicate_id"])
+@pytest.mark.parametrize("runtime_case", ["count-v1"], indirect=True)
+def test_count_fixture_must_match_original_prepare_before_any_host_command(runtime_case, mutation):
+    case = runtime_case
+    prepared = case.request["prior_receipts"]["prepare_schema"]
+    if mutation == "missing":
+        prepared.pop("count_guard_fixture")
+    elif mutation == "wrong_prepare":
+        prepared["request_sha256"] = "f" * 64
+    elif mutation == "wrong_plan":
+        prepared["count_guard_fixture"]["plan"]["project_id"] = "other-project"
+    else:
+        prepared["count_guard_fixture"]["rows"][1]["primary_key"] = prepared["count_guard_fixture"]["rows"][0]["primary_key"]
+    with pytest.raises(RuntimeError, match="FIXTURE"):
+        case.adapter(case.request, **case.args)
+    assert case.calls == [] and not list(case.config.qa_root.iterdir())
+
+
+@pytest.mark.parametrize("runtime_case", ["count-v1"], indirect=True)
+def test_count_recovery_rejects_changed_packet_fixture_without_commands(runtime_case):
+    case = runtime_case
+    case.adapter(case.request, **case.args)
+    target = next(case.config.qa_root.glob("prototype-*/target.json"))
+    packet = read_object(target)
+    packet["count_guard_fixture"]["rows"][0]["primary_key"] = "999"
+    target.write_bytes(canonical(packet))
+    before = list(case.calls)
+    with pytest.raises(RuntimeError, match="RETAINED_FIXTURE_CHANGED"):
+        case.adapter.recover(case.request, **{key: value for key, value in case.args.items() if key != "freshness_check"})
+    assert case.calls == before
+
+
+@pytest.mark.parametrize("runtime_case", ["count-v1"], indirect=True)
+def test_count_recovery_binds_exact_physical_helper_bytes(runtime_case):
+    case = runtime_case
+    case.adapter(case.request, **case.args)
+    helper = next(case.config.qa_root.glob("prototype-*/source/lib/count-guard.mjs"))
+    helper.write_bytes(helper.read_bytes() + b"\n// synthetic drift\n")
+    before = list(case.calls)
+    with pytest.raises(RuntimeError, match="RETAINED_SOURCE_CHANGED"):
+        case.adapter.recover(case.request, **{key: value for key, value in case.args.items() if key != "freshness_check"})
+    assert case.calls == before
+
+
+@pytest.mark.parametrize("runtime_case", ["count-v1"], indirect=True)
+def test_missing_versioned_driver_never_falls_back_to_historical_runner(runtime_case, monkeypatch, tmp_path):
+    case = runtime_case
+    (tmp_path / "run-prototype.mjs").write_bytes(b"throw Error('legacy fallback forbidden')")
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib/contracts.mjs").write_bytes(b"// synthetic contracts")
+    monkeypatch.setattr(module, "_ROOT", tmp_path)
+    with pytest.raises(RuntimeError, match="Required evidence file is missing or linked"):
+        case.adapter(case.request, **case.args)
+    assert case.calls == [] and not list(case.config.qa_root.iterdir())

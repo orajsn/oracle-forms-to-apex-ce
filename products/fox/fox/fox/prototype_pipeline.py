@@ -41,6 +41,7 @@ from .prototype_claim_resolution import resolved_mapper, ARTIFACTS as RESOLUTION
 from .forms_focus_merge import merge_focus_blueprints
 from .forms_native_plan import POLICY_ID
 from .forms_native_required_plan import build_native_plan, bound_native_input_policy
+from .forms_count_guard_selection import bound_count_guard, selected_source_rule
 from .forms_understanding_packet import local_packet
 from .native_pipeline import _json, _save_once, _sync
 from .opaf import OpafError, canonical_hash, validate_model_environment
@@ -101,6 +102,50 @@ def _saved_native_input_policy(job, *, binding=None, requested=None, documents=N
         return None
     except (ValueError, KeyError, TypeError, AttributeError):
         raise OpafError('Native input policy or its immutable source approval is invalid or changed.') from None
+
+
+def _saved_count_guard(job, *, binding=None, requested=None, documents=None,
+                       project_id=None, project_name=None, source_binding=None,
+                       staged_projection=False):
+    """Exact creation-time partial scope, never a default or old-run upgrade."""
+    try:
+        if type(staged_projection) is not bool:
+            raise ValueError('Invalid technical projection mode.')
+        wanted = bound_count_guard({} if requested is None else {'count_guard': requested})
+        retained = bound_count_guard(binding) if binding is not None else wanted
+        path = Path(job) / 'source-snapshot.json'
+        if path.exists() or path.is_symlink():
+            from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+            snapshot, _ = read_prototype_snapshot(job)
+            selected = snapshot.get('prototype', {})
+            saved = bound_count_guard(selected)
+            if (binding is not None and retained != saved) or (wanted is not None and wanted != saved):
+                raise ValueError('Count-check scope differs from original creation approval.')
+            if saved is not None:
+                exact = validate_prototype_snapshot(snapshot)
+                keys = ('schema_version', 'max_owned_objects', 'source_binding', 'focus_plan_sha256',
+                        'approved_policy_id', 'metadata_task_policy', 'candidate_format_policy',
+                        'native_input_policy', 'count_guard')
+                if binding is not None and any((key in binding) != (key in selected)
+                        or binding.get(key) != selected.get(key) for key in keys):
+                    raise ValueError('Count-check binding differs from admitted source scope.')
+                if (documents is not None and documents != exact
+                        or project_id is not None and project_id != snapshot['project_id']
+                        or project_name is not None and project_name != snapshot['project_name']
+                        or source_binding is not None and source_binding != selected['source_binding']):
+                    raise ValueError('Count-check source/project differs from admitted source.')
+            return saved
+        if staged_projection and binding is not None:
+            # Technical provenance only; the gateway still needs current owner
+            # authority from the original admitted job before any effects.
+            if retained is not None and documents is not None:
+                selected_source_rule(documents, retained)
+            return retained
+        if retained is not None or wanted is not None:
+            raise ValueError('A count check needs its original immutable admitted snapshot.')
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError, ImportError):
+        raise OpafError('Count-check source selection or explicit partial-scope approval is invalid or changed.') from None
 
 
 def _directory(path):
@@ -324,6 +369,7 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
         raise OpafError('Prototype authority directory is unsafe or missing.')
     binding = _json(checkpoints / 'binding.json')
     native_input_policy = _saved_native_input_policy(job, binding=binding, staged_projection=staged_projection)
+    count_guard = _saved_count_guard(job, binding=binding, staged_projection=staged_projection)
     manifest = _json(checkpoints / 'sources-manifest.json')
     if ((request.get('job_id'), request.get('project_id'), request.get('source_binding')) !=
             (job.name, binding.get('project_id'), binding.get('source_binding'))
@@ -345,6 +391,9 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
         documents.append((source['name'], raw))
     packet = local_packet(documents)
     _saved_native_input_policy(job, binding=binding, documents=documents,
+        project_id=binding.get('project_id'), project_name=binding.get('project_name'),
+        source_binding=binding.get('source_binding'), staged_projection=staged_projection)
+    _saved_count_guard(job, binding=binding, documents=documents,
         project_id=binding.get('project_id'), project_name=binding.get('project_name'),
         source_binding=binding.get('source_binding'), staged_projection=staged_projection)
     if packet != _artifact_json(checkpoints / 'packet.json'):
@@ -388,7 +437,7 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
             raise OpafError('Prototype authority lacks an approved source-bound design review.')
         candidates.append(candidate)
     merged = merge_focus_blueprints(documents, plan, candidates)
-    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy,
+    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy, count_guard=count_guard,
         project_id=binding['project_id'], project_name=binding['project_name'], approved_policy_id=POLICY_ID)
     if (merged != _artifact_json(checkpoints / 'merged-blueprint.json')
             or native_plan != _artifact_json(checkpoints / 'native-plan.json')
@@ -473,7 +522,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
                            converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
-                           native_input_policy=None):
+                           native_input_policy=None, count_guard=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -492,6 +541,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     native_input_policy = _saved_native_input_policy(job, requested=native_input_policy,
         documents=documents, project_id=project_id, project_name=project_name,
         source_binding=expected_source_binding)
+    count_guard = _saved_count_guard(job, requested=count_guard, documents=documents,
+        project_id=project_id, project_name=project_name, source_binding=expected_source_binding)
     if (not isinstance(profile, dict) or any(not isinstance(profile.get(name), dict)
             for name in ('mapper', 'reviewer'))
             or any(not isinstance(profile[name].get('workflow_id'), str) for name in ('mapper', 'reviewer'))
@@ -519,7 +570,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     limit = bound_focus_limit(strategy)
     plan = build_focus_plan(documents, expected_source_binding=expected_source_binding,
                             approved_chunk_hashes=approved_chunk_hashes, max_owned_objects=limit)
-    if native_input_policy is not None:
+    if native_input_policy is not None or count_guard is not None:
         if (persisted['schema_version'] != focus_schema_version
                 or persisted['approved_chunk_hashes'] != approved_chunk_hashes
                 or persisted['approved_policy_id'] != approved_policy_id
@@ -535,6 +586,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'approved_policy_id': approved_policy_id}
     if native_input_policy is not None:
         binding['native_input_policy'] = native_input_policy
+    if count_guard is not None:
+        binding['count_guard'] = count_guard
     if metadata_task_policy is not None:
         from .prototype_dsc_identity_repair import TASK_POLICY
         if metadata_task_policy != TASK_POLICY: raise OpafError('Unknown immutable prototype metadata task policy.')
@@ -620,7 +673,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         views.append(view)
     merged = merge_focus_blueprints(documents, plan, candidates)
     _save_artifact(checkpoints / 'merged-blueprint.json', merged)
-    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy,
+    native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy, count_guard=count_guard,
         project_id=project_id, project_name=project_name, approved_policy_id=approved_policy_id)
     _save_artifact(checkpoints / 'native-plan.json', native_plan)
     review_index = _review_index(checkpoints, plan)

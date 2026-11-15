@@ -17,6 +17,7 @@ import re
 import stat
 
 from forms2apex import blueprint_profiles
+from forms2apex import count_guard_fixture, native_blueprint_count_guard
 from forms2apex.project_reviews import canonical, digest, read_object
 from forms2apex.prototype_release import expected_runtime_pages, runtime_binding, validate_runtime_receipt
 from forms2apex.provenance import file_digest
@@ -67,6 +68,30 @@ def new(path, raw):
         stream.write(raw)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def prepared_count_fixture(request, spec):
+    if spec["profile_id"] != native_blueprint_count_guard.PROFILE_ID:
+        return None
+    prepared = request.get("prior_receipts", {}).get("prepare_schema", {})
+    need(type(prepared) is dict and prepared.get("status") == "COMPLETE"
+         and prepared.get("ready_for_import") is True
+         and type(prepared.get("request_sha256")) is str
+         and _SHA.fullmatch(prepared["request_sha256"]),
+         "PROTOTYPE_BROWSER_ORIGINAL_COUNT_FIXTURE_REQUIRED")
+    receipt = prepared.get("count_guard_fixture")
+    count_guard_fixture.validate_receipt(request, receipt,
+        prepare_request_sha256=prepared["request_sha256"])
+    return receipt
+
+
+def runner_names(spec):
+    # Historical completed receipts pin the exact original two-script runner.
+    # New behavior uses a separately named physical entrypoint, never rewrites
+    # the old source or silently falls back to it for a v3 request.
+    if spec["profile_id"] == native_blueprint_count_guard.PROFILE_ID:
+        return ("run-count-guard-v1.mjs", "lib/contracts.mjs", "lib/count-guard.mjs")
+    return ("run-prototype.mjs", "lib/contracts.mjs")
 
 
 @dataclass(frozen=True)
@@ -142,6 +167,7 @@ class PrototypeBrowser:
         renderer = blueprint_profiles.select(request["rendering_spec"])
         spec = renderer.validate_prototype_spec(request["rendering_spec"])
         need(trace == renderer.prototype_trace(spec), "PROTOTYPE_BROWSER_TRACE_CHANGED")
+        fixture = prepared_count_fixture(request, spec)
         root, jobs = Path(root), Path(config.jobs_root)
         private(jobs, directory=True)
         private(root, directory=True)
@@ -165,7 +191,9 @@ class PrototypeBrowser:
                          for field in block["fields"])
                      and all(field["nullable"] or field["in_edit_form"] for field in block["fields"]),
                      "PROTOTYPE_BROWSER_LABELLED_FORM_INPUT_POLICY_UNAVAILABLE")
-        scripts = {"run-prototype.mjs": _ROOT / "run-prototype.mjs", "lib/contracts.mjs": _ROOT / "lib/contracts.mjs"}
+        names = runner_names(spec)
+        scripts = {name: _ROOT / name for name in names}
+        driver = names[0]
         code = {name: file_digest(path) for name, path in scripts.items()}
         identity = runtime_binding(request, imported, artifact_binding)
         packet = {"binding": identity, "spec": spec, "trace": trace, "pages": expected_runtime_pages(spec),
@@ -173,6 +201,8 @@ class PrototypeBrowser:
                   "image_id": config.image_id, "data_retention": "synthetic_test_rows_retained",
                   "deadline_at_utc": deadline.isoformat(), "request_deadline_at_utc": config.request_deadline_at_utc,
                   "url": ORIGIN + "/ords/r/forms2apex_poc/" + imported["application_alias"].lower() + "/"}
+        if fixture is not None:
+            packet["count_guard_fixture"] = fixture
         fresh()
         info = self.command(["podman", "--remote=false", "info", "--format", "{{.Host.Security.Rootless}}"])
         need(info.stdout.strip() == b"true", "PROTOTYPE_BROWSER_ROOTLESS_ENGINE_REQUIRED")
@@ -206,8 +236,10 @@ class PrototypeBrowser:
         # Dedicated credential file only, never wallet/.ssh/config directories.
         for source, destination, mode in ((target, "/inputs/target.json", "ro"),
                 (config.credentials_file, "/inputs/credentials.json", "ro"),
-                (source / "run-prototype.mjs", "/opt/fox-qa/run-prototype.mjs", "ro"),
+                (source / driver, "/opt/fox-qa/" + driver, "ro"),
                 (source / "lib/contracts.mjs", "/opt/fox-qa/lib/contracts.mjs", "ro"),
+                *(((source / "lib/count-guard.mjs", "/opt/fox-qa/lib/count-guard.mjs", "ro"),)
+                  if fixture is not None else ()),
                 (results, "/results", "rw"), (attempt, "/dispatch", "rw")):
             # Never relabel the retained credential file. Its existing operator
             # SELinux context must already permit the approved read-only mount.
@@ -224,7 +256,7 @@ class PrototypeBrowser:
         lifetime = int((deadline - datetime.now(timezone.utc)).total_seconds())
         need(lifetime >= 1, "PROTOTYPE_BROWSER_EXPIRED_UNKNOWN_NO_REPLAY")
         args += ["--timeout", str(lifetime), "--stop-timeout", "1",
-                 "--entrypoint", "node", config.image_id, "/opt/fox-qa/run-prototype.mjs"]
+                 "--entrypoint", "node", config.image_id, "/opt/fox-qa/" + driver]
         # This bounds the actual container via Podman's daemon/conmon, not just
         # the client. A client timeout remains UNKNOWN: it is never evidence
         # that the container ended or that an in-flight write did not commit.
@@ -253,6 +285,7 @@ class PrototypeBrowser:
         renderer = blueprint_profiles.select(request["rendering_spec"])
         spec = renderer.validate_prototype_spec(request["rendering_spec"])
         need(trace == renderer.prototype_trace(spec), "PROTOTYPE_BROWSER_TRACE_CHANGED")
+        fixture = prepared_count_fixture(request, spec)
         root = Path(root)
         need(root == Path(config.jobs_root) / request["job_id"] / "prototype-converter",
              "PROTOTYPE_BROWSER_EXACT_JOB_REQUIRED")
@@ -265,7 +298,8 @@ class PrototypeBrowser:
         need(packet.get("binding") == identity and packet.get("trace") == trace
              and packet.get("spec") == request["rendering_spec"] and packet.get("image_id") == config.image_id,
              "PROTOTYPE_BROWSER_RETAINED_BINDING_CHANGED")
-        files = {name: file_digest(attempt / "source" / name) for name in ("run-prototype.mjs", "lib/contracts.mjs")}
+        need(packet.get("count_guard_fixture") == fixture, "PROTOTYPE_BROWSER_RETAINED_FIXTURE_CHANGED")
+        files = {name: file_digest(attempt / "source" / name) for name in runner_names(spec)}
         need(packet.get("runner_files") == files and packet.get("code_sha256") == digest(files),
              "PROTOTYPE_BROWSER_RETAINED_SOURCE_CHANGED")
         intent = read_object(attempt / "launch-intent.json")

@@ -112,6 +112,12 @@ def mapping_recovery_proof(job: Path, snapshot, original: bytes):
         from .prototype_candidate_format import POLICY
         if selected['candidate_format_policy'] != POLICY: raise OpafError('Unknown recovery candidate format policy.')
         binding['candidate_format_policy']=selected['candidate_format_policy']
+    if 'native_input_policy' in selected:
+        from .forms_native_required_plan import bound_native_input_policy
+        binding['native_input_policy'] = bound_native_input_policy(selected)
+    if 'count_guard' in selected:
+        from .forms_count_guard_selection import bound_count_guard
+        binding['count_guard'] = bound_count_guard(selected)
     if _json(checkpoints / 'binding.json') != binding:
         raise OpafError('Mapping-recovery pipeline binding changed.')
     manifest = {'source_binding': selected['source_binding'],

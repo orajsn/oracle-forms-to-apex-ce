@@ -4,6 +4,28 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.4] - 2026-11-16
+
+### [maintenance] Versioned renderer and browser closures for FOX 0.25.0
+
+Impact: Package the new source-check profile without replacing the browser
+runner used by older completed prototypes. This is deployment support, not a
+claim that the hosted converter has been upgraded.
+
+Change: Add the explicit renderer-v3 member set, separate count-check driver and
+helper, and exact completed-history identities for its fixture and four check
+attempts. Historical v1/v2 member sets and runner bytes remain unchanged. Bind
+the unchanged controller/cutover tools to the measured 0.25.0 application bundle.
+
+Verification: The clean staged product tree passed 871 tests, with seven skips.
+Targeted browser and retention checks use local authored scenarios, not live
+Oracle behavior. The application bundle was built offline. The earlier stopped
+candidates and failed operations remain separate and preserved.
+
+Remaining: New Linux/OCI installation, backup/restore, activation, actual fixture
+and browser execution, UI download and exact-byte reimport are not proven by this
+metadata. No source overlay or old operation replay is authorized.
+
 ## [0.2.3] - 2026-11-15
 
 - Bind the unchanged controller and cutover tool to FOX 0.24.3 and its fixed

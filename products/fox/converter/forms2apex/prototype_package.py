@@ -13,11 +13,20 @@ from pathlib import PurePosixPath
 import re
 import zipfile
 
-from . import blueprint_profiles, native_blueprint_required
+from . import blueprint_profiles, native_blueprint_required, native_blueprint_count_guard
 
 
 RUNTIME_SCOPE = "fox-native-blueprint-runtime-v1"
 PACKAGE_SCOPE = "fox-native-blueprint-package-v1"
+COUNT_GUARD_RUNTIME_CHECKS = (
+    "count_guard_source_bound_fixture",
+    "count_guard_null_rejected",
+    "count_guard_zero_rejected",
+    "count_guard_positive_passed",
+    "count_guard_negative_nonzero_passed",
+    "count_guard_unrelated_rows_ignored",
+    "count_guard_no_approval_request",
+)
 _SHA = re.compile(r"[a-f0-9]{64}\Z")
 
 
@@ -67,11 +76,14 @@ def expected_runtime_pages(spec):
             checks = ["render", "report_columns", "search"]
             if block["native_component"] == "form":
                 checks.append("detail_navigation")
+        if (renderer is native_blueprint_count_guard
+                and block["source_block_id"] == spec["count_guard"]["source_objects"]["owner_block"]):
+            checks.extend(COUNT_GUARD_RUNTIME_CHECKS)
         result.append({"page_id": pages["page_id"], "source_block_id": block["source_block_id"],
                        "checks": checks})
         if block["native_component"] == "form":
             checks = ["render", "native_items", "create", "update", "synthetic_records_accounted"]
-            if renderer is native_blueprint_required:
+            if renderer in (native_blueprint_required, native_blueprint_count_guard):
                 checks.append("additional_required_input_validation")
             result.append({"page_id": pages["form_page_id"], "source_block_id": block["source_block_id"],
                            "checks": checks})
@@ -85,7 +97,7 @@ def runtime_binding(request, imported, artifact_binding):
     # New-profile receipts must never bind an old/missing renderer context.
     # Historical v1 binding semantics stay unchanged; its gateway/bridge still
     # enforce their original exact snapshot context.
-    if renderer is native_blueprint_required:
+    if renderer in (native_blueprint_required, native_blueprint_count_guard):
         _need(type(artifact_binding) is dict and artifact_binding.get("template") == renderer.context(),
               "PROTOTYPE_RUNTIME_TEMPLATE_PROFILE_MISMATCH")
     app_id, alias = imported.get("application_id"), imported.get("application_alias")
@@ -95,12 +107,23 @@ def runtime_binding(request, imported, artifact_binding):
           and all(type(imported.get(key)) is str and _SHA.fullmatch(imported[key])
                   for key in ("import_intent_sha256", "compiled_metadata_sha256")),
           "PROTOTYPE_RUNTIME_EXACT_IMPORT_REQUIRED")
-    return {"schema_version": 1, "scope": RUNTIME_SCOPE, "profile_id": renderer.PROFILE_ID,
+    result = {"schema_version": 1, "scope": RUNTIME_SCOPE, "profile_id": renderer.PROFILE_ID,
             "job_id": request["job_id"], "project_id": request["project_id"],
             "source_binding": request["source_binding"], "plan_sha256": request["plan_sha256"],
             "rendered_zip_sha256": request["rendered_zip_sha256"],
             "artifact_binding_sha256": digest(artifact_binding), "import_receipt_sha256": digest(imported),
             "application_id": app_id, "application_alias": alias, "workspace": "FORMS2APEX_POC"}
+    if renderer is native_blueprint_count_guard:
+        from . import count_guard_fixture
+        prepared = request.get("prior_receipts", {}).get("prepare_schema", {})
+        _need(type(prepared) is dict and prepared.get("status") == "COMPLETE"
+              and prepared.get("ready_for_import") is True, "PROTOTYPE_COUNT_FIXTURE_PREPARATION_REQUIRED")
+        count_guard_fixture.validate_receipt(request, prepared.get("count_guard_fixture"),
+            prepare_request_sha256=prepared.get("request_sha256"))
+        _need(type(prepared.get("request_sha256")) is str and _SHA.fullmatch(prepared["request_sha256"]),
+              "PROTOTYPE_COUNT_FIXTURE_PREPARE_BINDING_REQUIRED")
+        result["count_guard_fixture_sha256"] = digest(prepared["count_guard_fixture"])
+    return result
 
 
 def _package_zip(members):

@@ -59,12 +59,20 @@ def validate_prototype_snapshot(snapshot):
         approvals, selected = snapshot['approvals'], snapshot['prototype']
         bound_focus_limit(selected)
         native_input_policy = bound_native_input_policy(selected)
+        from .forms_count_guard_selection import bound_count_guard
+        count_guard = bound_count_guard(selected)
         selected_keys = {'schema_version', 'source_binding', 'focus_plan_sha256',
                          'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
         if selected['schema_version'] == 2:
             selected_keys.add('max_owned_objects')
         if native_input_policy is not None:
             selected_keys.add('native_input_policy')
+        if count_guard is not None:
+            selected_keys.add('count_guard')
+            if approvals.get('isolated_count_check') is not True:
+                raise ValueError('Explicit isolated-check partial-scope approval is missing.')
+        elif 'isolated_count_check' in approvals:
+            raise ValueError('Partial-check approval cannot upgrade an old snapshot.')
         if 'metadata_task_policy' in selected:
             from .prototype_dsc_identity_repair import TASK_POLICY
             if selected['metadata_task_policy'] != TASK_POLICY: raise ValueError()
@@ -95,7 +103,10 @@ def validate_prototype_snapshot(snapshot):
             approved_external_ai=approvals['external_ai'],
             approved_prototype_scope=approvals['synthetic_prototype'],
             schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
-            candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy)
+            candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy,
+            **({'count_guard_policy': count_guard['policy_id'], 'count_guard_selection': count_guard['selection'],
+                'approved_count_guard_partial_scope': approvals['isolated_count_check']}
+               if count_guard is not None else {}))
         if rebuilt['prototype'] != selected:
             raise ValueError()
         from .prototype_mapping_recovery import validate_retry_lineage
@@ -256,7 +267,7 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
         focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
         candidate_format_policy=selected.get('candidate_format_policy'),
-        native_input_policy=selected.get('native_input_policy'))
+        native_input_policy=selected.get('native_input_policy'), count_guard=selected.get('count_guard'))
     still_approved()
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record

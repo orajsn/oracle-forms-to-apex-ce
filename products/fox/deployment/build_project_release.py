@@ -53,8 +53,12 @@ LEGACY_APP_RENDERER_FILES = (
     'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
     'defusedxml-0.7.1.dist-info/LICENSE',
 )
-APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
+REQUIRED_APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
     'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
+)
+APP_RENDERER_FILES = REQUIRED_APP_RENDERER_FILES + (
+    'forms2apex/forms_count_guard.py', 'forms2apex/native_blueprint_count_guard.py',
+    'forms2apex/count_guard_fixture.py',
 )
 APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
                                'forms2apex/templates/blueprint-prototype-v1/')
@@ -202,11 +206,13 @@ def validate_files(files):
     recipe = bundle['deployment/Containerfile.project-fox']
     legacy_renderer = b'# fox-prototype-renderer-closure-v1\n' in recipe
     required_renderer = b'# fox-prototype-renderer-closure-v2\n' in recipe
-    need(not (legacy_renderer and required_renderer), 'AMBIGUOUS_APP_RENDERER_CLOSURE')
-    if legacy_renderer or required_renderer:
+    count_guard_renderer = b'# fox-prototype-renderer-closure-v3\n' in recipe
+    need(sum((legacy_renderer, required_renderer, count_guard_renderer)) <= 1, 'AMBIGUOUS_APP_RENDERER_CLOSURE')
+    if legacy_renderer or required_renderer or count_guard_renderer:
         converter = {name.removeprefix('converter/'): raw for name, raw in bundle.items()
                      if name.startswith('converter/')}
-        required_files = APP_RENDERER_FILES if required_renderer else LEGACY_APP_RENDERER_FILES
+        required_files = (APP_RENDERER_FILES if count_guard_renderer else
+                          REQUIRED_APP_RENDERER_FILES if required_renderer else LEGACY_APP_RENDERER_FILES)
         names = set(required_files)
         names.update(name for name in converter if name.startswith(APP_RENDERER_TEMPLATE_ROOTS))
         need(set(required_files).issubset(converter)

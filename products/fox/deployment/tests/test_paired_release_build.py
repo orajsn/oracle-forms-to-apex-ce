@@ -394,6 +394,7 @@ def test_historical_app_context_without_renderer_marker_is_not_relabelled(tmp_pa
     recipe = 'bundle/deployment/Containerfile.project-fox'
     files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v1\n', b'').replace(
         b'# fox-prototype-renderer-closure-v2\n', b'').replace(
+        b'# fox-prototype-renderer-closure-v3\n', b'').replace(
         b'COPY --chown=1000:1000 renderer /app\n', b'')
     files['build/fox/Containerfile'] = files[recipe]
     for name in list(files):
@@ -409,14 +410,16 @@ def test_historical_app_context_without_renderer_marker_is_not_relabelled(tmp_pa
     assert not any(name.startswith('build/fox/renderer/') for name in checked)
 
 
-def test_historical_v1_renderer_projection_keeps_its_original_member_set(tmp_path):
+@pytest.mark.parametrize('version', (1, 2))
+def test_historical_renderer_projection_keeps_its_original_member_set(tmp_path, version):
     output, result = prepared(tmp_path)
     files, _ = r.load_archive((output/'paired-source.tar').read_bytes(), result['archive_sha256'])
     recipe = 'bundle/deployment/Containerfile.project-fox'
-    files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v2\n',
-                                        b'# fox-prototype-renderer-closure-v1\n')
+    files[recipe] = files[recipe].replace(b'# fox-prototype-renderer-closure-v3\n',
+                                        f'# fox-prototype-renderer-closure-v{version}\n'.encode())
     files['build/fox/Containerfile'] = files[recipe]
-    for name in set(p.APP_RENDERER_FILES) - set(p.LEGACY_APP_RENDERER_FILES):
+    expected_files = p.LEGACY_APP_RENDERER_FILES if version == 1 else p.REQUIRED_APP_RENDERER_FILES
+    for name in set(p.APP_RENDERER_FILES) - set(expected_files):
         del files['build/fox/renderer/'+name]
     inventory = json.loads(files['source-inventory.json'])
     inventory['files']['deployment/Containerfile.project-fox'] = r.digest(files[recipe])
@@ -426,7 +429,8 @@ def test_historical_v1_renderer_projection_keeps_its_original_member_set(tmp_pat
     files['manifest.json'] = r.canonical(manifest)
     checked, _ = r.validate_files(reseal(files))
     assert 'build/fox/renderer/forms2apex/native_blueprint.py' in checked
-    assert 'build/fox/renderer/forms2apex/native_blueprint_required.py' not in checked
+    assert ('build/fox/renderer/forms2apex/native_blueprint_required.py' in checked) == (version == 2)
+    assert 'build/fox/renderer/forms2apex/native_blueprint_count_guard.py' not in checked
 
 
 def test_conflicting_renderer_recipe_markers_are_rejected(tmp_path):

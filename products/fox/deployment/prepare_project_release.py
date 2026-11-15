@@ -34,9 +34,9 @@ PROFILE_FILES = (
     "deployment/project-opaf-profile-v2.json", "deployment/target-profile.jsn-project-v2.json",
 )
 QA_FILES = (
-    "qa/package.json", "qa/package-lock.json", "qa/run-native.mjs", "qa/run-project.mjs", "qa/run-prototype.mjs",
+    "qa/package.json", "qa/package-lock.json", "qa/run-native.mjs", "qa/run-project.mjs", "qa/run-prototype.mjs", "qa/run-count-guard-v1.mjs",
     "qa/prepare-target.mjs", "qa/run-jsn-qa.sh", "qa/run-fox-journey.mjs",
-    "qa/run-product-download.mjs", "qa/lib/contracts.mjs", "qa/lib/package-evidence.mjs",
+    "qa/run-product-download.mjs", "qa/lib/contracts.mjs", "qa/lib/package-evidence.mjs", "qa/lib/count-guard.mjs",
     "qa/lib/assert-jsn-vm.sh", "qa/lib/project-profile.mjs", "qa/lib/project-runner-inputs.mjs",
     "qa/lib/project-runtime.mjs", "qa/lib/project-browser.mjs",
 )
@@ -56,8 +56,12 @@ LEGACY_APP_RENDERER_FILES = (
     'defusedxml/__init__.py', 'defusedxml/common.py', 'defusedxml/ElementTree.py',
     'defusedxml-0.7.1.dist-info/LICENSE',
 )
-APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
+REQUIRED_APP_RENDERER_FILES = LEGACY_APP_RENDERER_FILES + (
     'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
+)
+APP_RENDERER_FILES = REQUIRED_APP_RENDERER_FILES + (
+    'forms2apex/forms_count_guard.py', 'forms2apex/native_blueprint_count_guard.py',
+    'forms2apex/count_guard_fixture.py',
 )
 APP_RENDERER_TEMPLATE_ROOTS = ('forms2apex/templates/native-table-v1/',
                                'forms2apex/templates/blueprint-prototype-v1/')
@@ -254,11 +258,11 @@ USER root
 RUN python -I -B -c "import pathlib,shutil; roots=[pathlib.Path('/app/fox'),pathlib.Path('/app/dist')]; optional=[pathlib.Path('/app/forms2apex'),pathlib.Path('/app/fox_source_contract'),pathlib.Path('/app/defusedxml'),pathlib.Path('/app/defusedxml-0.7.1.dist-info')]; roots += [p for p in optional if p.exists() or p.is_symlink()]; assert all(p.is_dir() and not p.is_symlink() and p.resolve()==p for p in roots); [shutil.rmtree(p) for p in roots]"
 COPY --chown=1000:1000 fox /app/fox
 COPY --chown=1000:1000 dist /app/dist
-# fox-prototype-renderer-closure-v2
+# fox-prototype-renderer-closure-v3
 COPY --chown=1000:1000 renderer /app
 WORKDIR /app
 USER 1000:1000
-RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; from forms2apex import native_blueprint,native_blueprint_required,blueprint_profiles; assert fox.project_conversion.PROFILE_ID=='native-project-v1'; assert native_blueprint.context()['profile_id']=='native-blueprint-prototype-v1'; assert native_blueprint_required.context()['profile_id']=='native-blueprint-prototype-required-v1'"
+RUN python -B -c "import fox.project_conversion,fox.native_project_pipeline,fox.technical_release; from forms2apex import native_blueprint,native_blueprint_required,native_blueprint_count_guard,blueprint_profiles; assert fox.project_conversion.PROFILE_ID=='native-project-v1'; assert native_blueprint.context()['profile_id']=='native-blueprint-prototype-v1'; assert native_blueprint_required.context()['profile_id']=='native-blueprint-prototype-required-v1'; assert native_blueprint_count_guard.context()['profile_id']=='native-blueprint-prototype-count-guard-v1'"
 """
     converter = f"""FROM {BASE_IMAGES['converter']}
 USER root

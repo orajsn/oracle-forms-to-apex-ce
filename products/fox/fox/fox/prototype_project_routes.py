@@ -9,11 +9,11 @@ import sqlite3
 from pathlib import Path
 import time
 import uuid
-from typing import Literal
+from typing import ClassVar, Literal
 
 from fastapi import HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import Response
-from pydantic import BaseModel, Field, StrictBool, StrictInt
+from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from . import source_history
 from .intake import inventory, MAX_FILE_BYTES
@@ -24,6 +24,7 @@ from .prototype_admission import (PROFILE_ID, describe_prototype_sources,
 
 
 class PrototypeRunInput(BaseModel):
+    allow_count_guard_creation: ClassVar[bool] = False
     source_hash: str = Field(pattern=r'^[0-9a-f]{64}$')
     source_binding: str = Field(pattern=r'^[0-9a-f]{64}$')
     expected_current_source_set_id: str = Field(min_length=1, max_length=128)
@@ -33,14 +34,35 @@ class PrototypeRunInput(BaseModel):
     approved_external_ai: StrictBool
     approved_prototype_scope: StrictBool
 
+    @model_validator(mode='before')
+    @classmethod
+    def creation_only_count_check(cls, value):
+        if (not cls.allow_count_guard_creation and isinstance(value, dict) and any(key in value for key in
+                ('count_guard_policy', 'count_guard_selection', 'approved_count_guard_partial_scope'))):
+            raise ValueError('A count-check selection is creation-only and cannot upgrade an existing run.')
+        return value
+
 
 class PrototypeContinuationInput(PrototypeRunInput):
     checkpoint_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
+class CountGuardSelectionInput(BaseModel):
+    model_config = {'extra': 'forbid'}
+    source_name: StrictStr = Field(min_length=1, max_length=180)
+    source_sha256: StrictStr = Field(pattern=r'^[a-f0-9]{64}$')
+    module: StrictStr = Field(min_length=1, max_length=128)
+    block: StrictStr = Field(min_length=1, max_length=128)
+    item: StrictStr = Field(min_length=1, max_length=128)
+
+
 class PrototypeNewRunInput(PrototypeRunInput):
     # A creation-only choice: continuations cannot upgrade old immutable jobs.
+    allow_count_guard_creation: ClassVar[bool] = True
     native_input_policy: Literal['forms-required-inputs-v1'] | None = None
+    count_guard_policy: Literal['forms-isolated-count-check-v1'] | None = None
+    count_guard_selection: CountGuardSelectionInput | None = None
+    approved_count_guard_partial_scope: StrictBool | None = None
 
 
 class PrototypeEpochInput(PrototypeContinuationInput):
@@ -280,7 +302,11 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             approved_redacted_source=True, approved_external_ai=True,
             approved_prototype_scope=True, schema_version=2,metadata_task_policy=selected.get('metadata_task_policy'),
             candidate_format_policy=selected.get('candidate_format_policy'),
-            native_input_policy=selected.get('native_input_policy'))
+            native_input_policy=selected.get('native_input_policy'),
+            **({'count_guard_policy': selected['count_guard']['policy_id'],
+                'count_guard_selection': selected['count_guard']['selection'],
+                'approved_count_guard_partial_scope': snapshot['approvals']['isolated_count_check']}
+               if 'count_guard' in selected else {}))
         child_id = retry_run_id(rid)
         child = c.execute('SELECT * FROM runs WHERE id=?', (child_id,)).fetchone()
         child_job = root / 'jobs' / child_id
@@ -1341,6 +1367,27 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             result.update(target_profile_sha256=None, conversion_configured=False)
         return result
 
+    @app.get('/api/projects/{pid}/prototype-count-checks')
+    def prototype_count_checks(pid: str, request: Request):
+        project(request, pid)
+        try:
+            from .forms_count_guard_selection import describe_count_checks
+            with db() as c:
+                c.execute('BEGIN')
+                sources = current_sources(pid, c)
+                result = describe_count_checks(source_documents(sources))
+                result.update(source_hash=inventory(sources)['source_hash'],
+                    selected_source_set_id=source_history.selected_source_set_id(c, pid))
+            try:
+                result.update(target_profile_sha256=target_hash(), conversion_configured=True)
+            except HTTPException:
+                result.update(target_profile_sha256=None, conversion_configured=False)
+            return Response(json.dumps(result), media_type='application/json', headers={'Cache-Control': 'no-store'})
+        except ImportError:
+            raise HTTPException(503, 'Source-check discovery is not installed. Your files are preserved.') from None
+        except (ValueError, KeyError, TypeError):
+            raise HTTPException(409, 'Select valid Forms XML sources before discovering supported checks. No source was changed.') from None
+
     @app.post('/api/projects/{pid}/prototype-runs', status_code=202)
     def submit_prototype(pid: str, body: PrototypeNewRunInput, request: Request):
         p = project(request, pid)
@@ -1365,7 +1412,10 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     approved_prototype_scope=body.approved_prototype_scope, schema_version=2,
                     metadata_task_policy='same-byte-dsc-identity-metadata-v1',
                     candidate_format_policy='exact-source-envelope-and-item-fact-aliases-v1',
-                    native_input_policy=body.native_input_policy)
+                    native_input_policy=body.native_input_policy,
+                    count_guard_policy=body.count_guard_policy,
+                    count_guard_selection=(body.count_guard_selection.model_dump() if body.count_guard_selection is not None else None),
+                    approved_count_guard_partial_scope=body.approved_count_guard_partial_scope)
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Source approval is missing or changed. Review the exact files, code selection and processing permissions again.') from None
             old = c.execute('SELECT id,state FROM runs WHERE project=? AND source_hash=?', (pid, body.source_hash)).fetchone()
@@ -1399,6 +1449,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 'files': sources, 'prototype': admission['prototype'],
                 'approvals': {'redacted_source': True, 'external_ai': True,
                               'synthetic_prototype': True, 'owner': p['owner'], 'approved_at': now}}
+            if 'count_guard' in admission['prototype']:
+                snapshot['approvals']['isolated_count_check'] = body.approved_count_guard_partial_scope
             raw = json.dumps(snapshot, ensure_ascii=False, allow_nan=False).encode('utf-8')
             if len(raw) > 20_000_000:
                 raise HTTPException(413, 'The selected source version exceeds the prototype job limit.')

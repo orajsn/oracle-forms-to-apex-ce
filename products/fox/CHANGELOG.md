@@ -96,6 +96,58 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.25.0] - 2026-11-16
+
+### [feature] Choose a source-backed check for the generated APEX prototype
+
+Impact: A business user can find a supported check in the selected Forms source,
+see its file/block/button, and explicitly include it in a new native prototype.
+The generated app gets a separate check button; the original action is not
+silently represented as converted.
+
+Change:
+
+- Add read-only, source-bound discovery and an optional creation-only selection.
+  Partial-scope approval starts unchecked and is stored separately from the exact
+  source choice. Saved progress and eligible repair inherit the original choice;
+  an old run cannot acquire new behavior through a retry.
+- Recognize a narrowly supported first `COUNT(0)` predicate that tests matching
+  rows for null/zero values. Generate native APEX validation and a separately
+  scoped check request, using only already-mapped synthetic tables and fields.
+- Require four labelled synthetic cases, exact browser outcomes and independent
+  before/after fixture reads. Missing proof cannot release the new profile's
+  export. Neither the browser check nor its success message performs approval.
+- Keep source lookup bounded to 15 seconds. Refresh, stale responses and failed
+  lookup cannot silently remove an approved check and start ordinary conversion;
+  proceeding without a check is an explicit choice.
+- Use a separate versioned browser runner and versioned renderer closure.
+  Historical profiles, their runner bytes and existing application IDs remain
+  unchanged. Include the preceding draft-download fix.
+
+Delivery: Source implementation; not a hosted-availability claim. The last
+measured lab remains 0.24.0. No new OCI infrastructure, model endpoint, identity
+policy or network rule is part of this increment.
+
+Verification: Focused local API/SQLite, source reconstruction, package/closure
+and browser-boundary regressions; real local Edge against authored responses;
+and SQLcl 26.1.2 connectionless validation of a candidate derived from the
+approved real module. These checks do not establish live Oracle runtime or
+deployment. Local browser tooling differs from the pinned production runner;
+installed-flow testing remains required.
+
+The isolated staged product tree passed 871 tests (seven skips), with no working
+tree overlays or changes to unrelated work. A stale continuation-test response
+was corrected after reproducing the same failure on the previous frozen release;
+its original assertions remain intact. This test-fixture correction does not
+change the product's recovery or unavailable-checkpoint rules.
+
+Remaining: This is an isolated saved-row check, not the complete original button.
+Negative nonzero values pass, as do empty keys or no matching rows. Later source
+logic, unsaved Forms buffers, transaction/exception behavior and business acceptance
+remain separate. Actual JSN fixture creation/runtime, hosted UI download and
+fresh-ID import of the exact downloaded SQL remain acceptance gates. No universal
+Forms conversion or customer-target compatibility guarantee is made.
+
 ## [0.24.3] - 2026-11-15
 
 ### [maintenance] Back up retained development history before the download-fix rollout

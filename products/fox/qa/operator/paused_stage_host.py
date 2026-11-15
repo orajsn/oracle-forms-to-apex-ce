@@ -355,8 +355,6 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
          'INERT_COMPLETED_HOST_BASELINE_REQUIRED')
     producer = 'converter/forms2apex/prototype_runtime_bridge.py'
     need(producer in runtime['sources'], 'INERT_ORIGINAL_PRODUCER_SOURCE_REQUIRED')
-    original = {name: runtime['sources']['qa/' + name]
-                for name in ('run-prototype.mjs', 'lib/contracts.mjs')}
     observed = {}
     for job, value in completed.items():
         need(set(expected[job]) == {'staging', 'qa'} and identities[job] == value['runtime_identity'],
@@ -371,6 +369,12 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
             return parse(raw)
         packet = object_at(stage / 'runtime-request.json')
         request = packet['request']; identity = identities[job]
+        count_profile = request['rendering_spec']['profile_id'] == 'native-blueprint-prototype-count-guard-v1'
+        source_names = (('run-count-guard-v1.mjs', 'lib/contracts.mjs', 'lib/count-guard.mjs')
+                        if count_profile else ('run-prototype.mjs', 'lib/contracts.mjs'))
+        need(all('qa/' + name in runtime['sources'] for name in source_names),
+             'INERT_COMPLETED_ORIGINAL_RUNNER_SOURCE_REQUIRED')
+        original = {name: runtime['sources']['qa/' + name] for name in source_names}
         need(packet['binding'] == identity and hashed(request) == jobs[job]['runtime_request_sha256']
              and packet['producer'] == {'component': 'fox-prototype-runtime-bridge',
                  'code_sha256': runtime['sources'][producer]}, 'INERT_COMPLETED_ORIGINAL_PRODUCER_CHANGED')
@@ -411,12 +415,17 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
         for block in request['rendering_spec']['blocks']:
             checks = (['render', 'report_columns', 'search'] + (['detail_navigation'] if block['native_component'] == 'form' else [])
                       if block['classification'] == 'database' else ['render', 'native_items'])
+            if count_profile and block['source_block_id'] == request['rendering_spec']['count_guard']['source_objects']['owner_block']:
+                checks += ['count_guard_source_bound_fixture', 'count_guard_null_rejected',
+                           'count_guard_zero_rejected', 'count_guard_positive_passed',
+                           'count_guard_negative_nonzero_passed', 'count_guard_unrelated_rows_ignored',
+                           'count_guard_no_approval_request']
             expected_pages.append({'page_id': 2 * block['sequence'] - 1,
                                    'source_block_id': block['source_block_id'], 'checks': checks})
             if block['native_component'] == 'form':
                 expected_pages.append({'page_id': 2 * block['sequence'], 'source_block_id': block['source_block_id'],
                     'checks': ['render', 'native_items', 'create', 'update', 'synthetic_records_accounted'] +
-                    (['additional_required_input_validation'] if request['rendering_spec']['profile_id'] ==
+                    (['additional_required_input_validation'] if count_profile or request['rendering_spec']['profile_id'] ==
                      'native-blueprint-prototype-required-v1' else [])})
         authority = target.get('credential_authority')
         authority_hashes = {'credentials_sha256', 'username_sha256', 'authorization_reference_sha256'}
@@ -426,8 +435,14 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
              and all(authority[key] == packet['target'][key] for key in ('workspace', 'db_name', 'ords_origin'))
              and all(type(authority[key]) is str and re.fullmatch('[a-f0-9]{64}', authority[key])
                      for key in authority_hashes), 'INERT_COMPLETED_BROWSER_CREDENTIAL_BINDING_CHANGED')
+        if count_profile:
+            fixture = request['prior_receipts']['prepare_schema']['count_guard_fixture']
+            need(target.get('count_guard_fixture') == fixture
+                 and hashed(fixture) == identity.get('count_guard_fixture_sha256'),
+                 'INERT_COMPLETED_COUNT_FIXTURE_CHANGED')
         need(set(target) == {'binding', 'spec', 'trace', 'pages', 'credential_authority', 'runner_files', 'code_sha256',
              'image_id', 'data_retention', 'deadline_at_utc', 'request_deadline_at_utc', 'url'}
+             | ({'count_guard_fixture'} if count_profile else set())
              and target['pages'] == expected_pages and target['data_retention'] == 'synthetic_test_rows_retained'
              and target['url'] == packet['target']['ords_origin'] + '/ords/r/forms2apex_poc/' +
                  packet['imported']['application_alias'].lower() + '/'
@@ -448,6 +463,13 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
              and times == sorted(times) and 0 < (times[-1] - times[0]).total_seconds() <= 540,
              'INERT_COMPLETED_HISTORICAL_DEADLINE_CHANGED')
         ledger_names = set(); sequence = 0
+        if count_profile:
+            for case in ('null', 'zero', 'positive', 'negative'):
+                sequence += 1; name = 'count-check-' + str(sequence).zfill(3) + '.json'; ledger_names.add(name)
+                need(object_at(attempt / name) == {'binding': identity, 'case': case,
+                     'fixture_sha256': identity['count_guard_fixture_sha256'], 'request': 'FOX_COUNT_GUARD_CHECK',
+                     'state': 'READ_ONLY_CHECK_ATTEMPT_STARTED_NO_AUTOMATIC_REPLAY'},
+                     'INERT_COMPLETED_COUNT_CHECK_INTENT_CHANGED')
         rows = {row['source_block_id']: row for row in artifacts['retained_rows']}
         for block in request['rendering_spec']['blocks']:
             if block['native_component'] != 'form':
@@ -455,7 +477,7 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
             row = rows[block['source_block_id']]
             required = next((field for field in block['fields']
                              if field['in_edit_form'] and field.get('value_required')), None)
-            if request['rendering_spec']['profile_id'] == 'native-blueprint-prototype-required-v1' and required:
+            if (count_profile or request['rendering_spec']['profile_id'] == 'native-blueprint-prototype-required-v1') and required:
                 sequence += 1; name = 'required-input-' + str(sequence).zfill(3) + '.json'; ledger_names.add(name)
                 need(object_at(attempt / name) == {'binding': identity, 'source_block_id': block['source_block_id'],
                     'source_item_id': required['source_item_id'],
@@ -474,8 +496,8 @@ def completed_host_read(runtime, identities, jobs, receiver, expected):
                      and re.fullmatch('[a-f0-9]{64}', write['intended_values_sha256']),
                      'INERT_COMPLETED_WRITE_INTENT_CHANGED')
         need(object_at(attempt / 'progress.json') == artifacts, 'INERT_COMPLETED_BROWSER_PROGRESS_CHANGED')
-        need(set(first['qa']['files']) == {'target.json', 'launch-intent.json', 'progress.json',
-                 'source/run-prototype.mjs', 'source/lib/contracts.mjs'} | ledger_names
+        need(set(first['qa']['files']) == {'target.json', 'launch-intent.json', 'progress.json'}
+                 | {'source/' + name for name in source_names} | ledger_names
              and set(first['qa']['directories']) == {'source', 'source/lib'}, 'INERT_COMPLETED_BROWSER_EXTRA_OR_MISSING')
         need(first == {'staging': retained_tree(stage_job), 'qa': retained_tree(attempt)},
              'INERT_COMPLETED_HOST_TREE_CHANGED')

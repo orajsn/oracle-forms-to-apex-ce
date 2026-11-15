@@ -9,7 +9,7 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
-## Current checkpoint — 15 November 2026
+## Current checkpoint — 16 November 2026
 
 **Development preview, not a ready end-to-end migration product.**
 
@@ -17,20 +17,21 @@ In plain terms: one approved real Forms module has produced a native APEX
 prototype and server-side SQL export, with explicit omissions and synthetic data.
 The user-facing finish is still incomplete: successful FOX UI download and a
 fresh application import of those exact downloaded bytes are not yet proven.
-The converter/deployment goal is currently **paused**.
+The converter/deployment goal is **active**. Source 0.25.0 adds an explicit,
+source-backed check option; deployment and live acceptance remain separate.
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.24.3 bounded backup-capacity patch, retaining the preceding download/preservation fixes; see the versioned changelog. Publication does not imply activation. |
+| Current software source | 0.25.0 optional source-backed native check, including the preceding download and history-preservation fixes. Publication does not imply activation. |
 | Hosted lab | 0.24.0 remains online. Preparation and runtime workers are held for the guarded upgrade; the strict-output verifier is stopped. The download defect below prevents declaring the full user journey ready. |
 | Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
-| New source increment | 0.24.3 increases fixed backup bounds to preserve growing test history without deletion. Original files, independent hashes, per-file limits and isolated restore remain required. |
-| Deployment checkpoint | 0.24.3 images, release configuration and replacement containers are prepared; the containers were created stopped. A read-only installation plan began before the pause. No new installation seal or service switch is confirmed. |
+| New source increment | Discover one supported check from the exact source button, approve its limited scope and generate a separate native APEX check. Original actions remain explicit remediation. Existing runs cannot be silently upgraded. |
+| Deployment checkpoint | The earlier 0.24.3 pair remains prepared and stopped. Its fresh read-only installation plan completed with existing data preserved; no seal or service switch occurred. A coherent 0.25.0 release still needs packaging and guarded live deployment. |
 | Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
-| Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
-| Source-derived behavior | Native create/edit and required-input rejection were observed with synthetic data. A qualifying source-derived business action is not yet fully proven; human acceptance and full legacy parity are separate. |
+| Local verification | Source-bound planning, real local API/SQLite tests and local browser tests with authored responses cover the new choice. A candidate derived from the approved real module passes SQLcl 26.1.2 validation. These are not live Oracle runtime acceptance. |
+| Source-derived behavior | Earlier native create/edit and required-input rejection were observed with synthetic data. The new saved-row check is implemented and locally compiled, but actual Oracle fixture/runtime proof remains pending. Human acceptance and full legacy parity are separate. |
 | Full real-module acceptance | Still pending: hosted UI download, fresh-ID import/runtime verification of the exact downloaded SQL bytes, and the source-derived business-action proof above. Three-run repeatability follows separately. |
-| Development work | Paused. Documentation updates do not resume conversion, deployment or database work. |
+| Development work | Active, explicitly resumed. The next checkpoint is the connected hosted flow and its exact downloadable SQL, not a test-count milestone. |
 
 ### What the recent versions actually changed
 
@@ -43,12 +44,28 @@ are unchanged. These labels describe the change, not its deployment status.
 | 0.24.1 | `[fix]` output + operations | Correct the draft-download check and preserve completed results during upgrade. | No; included in the pending 0.24.3 package. |
 | 0.24.2 | `[fix]` operations | Accept the two valid stored JSON formats without altering original evidence. | No; included in the pending 0.24.3 package. |
 | 0.24.3 | `[maintenance]` operations | Increase the bounded backup allowance so retained history can be preserved. | Prepared, not activated. No new converter capability or measured speedup. |
+| 0.25.0 | `[feature]` conversion + UI | Select a source-supported check and generate it as a separate native APEX action, with explicit partial scope. | Not yet. Local implementation/compilation is separate from live acceptance. |
 
-On an explicit resume, the next delivery priorities are: make the real run's
+The active delivery priorities are: make the real run's
 **Download APEX** path work in hosted FOX; prove those exact SQL bytes import and
 run as a separate application on the declared target; then close the remaining
 source-derived action gap. Testing supports each change. UI refinements and
 measured performance work follow concrete user-flow bottlenecks, not test counts.
+
+### Optional source check in 0.25.0
+
+When creating a new prototype, choose **Find source checks**. FOX shows the source
+file, module, block and button for a recognized check. Select one and approve its
+partial scope, or explicitly continue without it. A refreshed or failed lookup
+cannot silently remove your intended check and start conversion.
+
+The first supported pattern checks saved synthetic detail rows for missing or
+zero numeric values. The generated APEX button performs that check only. It does
+not approve a record or reproduce the remaining original action. Negative nonzero
+values, an empty grouping value and no matching rows pass this isolated predicate;
+unsaved Forms data and later rules remain outside its scope. FOX requires the
+new profile's passing and rejected runtime cases before releasing its export.
+This source capability is not yet a hosted availability or business-equivalence claim.
 
 Version 0.23.0 addresses the normal schema-index file rejected by the earlier
 startup collector and the global admission rule that held up new projects behind

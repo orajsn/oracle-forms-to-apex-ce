@@ -1,5 +1,5 @@
 """Closed profile routing; profile strings never become import paths."""
-from . import native_blueprint, native_blueprint_required
+from . import native_blueprint, native_blueprint_required, native_blueprint_count_guard
 
 
 def select(spec):
@@ -11,4 +11,7 @@ def select(spec):
     if (spec.get("profile_id") == native_blueprint_required.PROFILE_ID
             and spec["schema_version"] == native_blueprint_required.SCHEMA_VERSION):
         return native_blueprint_required
+    if (spec.get("profile_id") == native_blueprint_count_guard.PROFILE_ID
+            and spec["schema_version"] == native_blueprint_count_guard.SCHEMA_VERSION):
+        return native_blueprint_count_guard
     raise ValueError("PROTOTYPE_PROFILE_UNSUPPORTED")

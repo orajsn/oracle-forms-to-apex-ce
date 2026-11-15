@@ -61,7 +61,8 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
                                 approved_chunk_hashes, target_profile_sha256,
                                 approved_redacted_source, approved_external_ai,
                                 approved_prototype_scope, schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
-                                native_input_policy=None):
+                                native_input_policy=None, count_guard_policy=None,
+                                count_guard_selection=None, approved_count_guard_partial_scope=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
@@ -80,6 +81,11 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
     limit = bound_focus_limit(strategy)
     if native_input_policy is not None:
         strategy['native_input_policy'] = bound_native_input_policy({'native_input_policy': native_input_policy})
+    from .forms_count_guard_selection import prepare_count_guard_choice
+    count_guard = prepare_count_guard_choice(documents, policy=count_guard_policy,
+        selection=count_guard_selection, approved_partial_scope=approved_count_guard_partial_scope)
+    if count_guard is not None:
+        strategy['count_guard'] = count_guard
     plan = build_focus_plan(documents, expected_source_binding=expected_source_binding,
                             approved_chunk_hashes=approved_chunk_hashes, max_owned_objects=limit)
     if metadata_task_policy is not None:

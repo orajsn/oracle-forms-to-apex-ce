@@ -123,6 +123,12 @@ def inspect_continuation(job, snapshot, original, target):
         from .prototype_candidate_format import POLICY
         if selected['candidate_format_policy'] != POLICY: raise OpafError('Unknown continuation candidate format policy.')
         expected['candidate_format_policy']=selected['candidate_format_policy']
+    if 'native_input_policy' in selected:
+        from .forms_native_required_plan import bound_native_input_policy
+        expected['native_input_policy'] = bound_native_input_policy(selected)
+    if 'count_guard' in selected:
+        from .forms_count_guard_selection import bound_count_guard
+        expected['count_guard'] = bound_count_guard(selected)
     manifest = {'source_binding': selected['source_binding'], 'selected_chunk_hashes': selected['approved_chunk_hashes'],
         'files': [{'name': name, 'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)} for name, raw in documents]}
     if (binding != expected or _json(root / 'sources-manifest.json') != manifest
