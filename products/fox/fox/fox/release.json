@@ -1,15 +1,12 @@
 {
-  "version": "0.25.0",
+  "version": "0.25.1",
   "released_on": "2026-11-16",
-  "title": "Choose a source-backed check for a native APEX prototype",
+  "title": "Fix startup checks for the native source-check release",
   "changes": [
-    "Find supported checks in the selected Forms source and show the exact source file, module, block and button.",
-    "Include one check in a new conversion only after explicit partial-scope approval; retain the exact selection through saved progress and supported recovery.",
-    "Generate a separate native APEX check from a proven initial null-or-zero count predicate, without inventing the original approval action.",
-    "Require four source-bound synthetic test cases, exact browser outcomes and before/after row checks before releasing the new profile's export.",
-    "Keep lookup, stale-source, timeout and continue-without-check choices explicit in the business-user interface.",
-    "Preserve older runs and their original browser proof with a separate versioned check-profile runner.",
-    "Include the preceding download correction and bounded history-preservation fixes; deployment remains a separate checked step."
+    "Include the three count-check renderer dependencies in the measured startup source list used to preserve completed prototypes.",
+    "Keep strict rejection of unmeasured startup dependencies; do not bypass preservation checks or alter earlier results.",
+    "Test the exact renderer COPY projection and isolated startup import path, including rejection with the earlier incomplete list.",
+    "Retain the source-backed check, explicit partial-scope choice and preceding download correction from 0.25.0; deployment and live acceptance remain separate."
   ],
   "limitations": [
     "The new check recognizes one narrow, directly proven first count predicate. It is not a general PL/SQL translator or full button conversion.",

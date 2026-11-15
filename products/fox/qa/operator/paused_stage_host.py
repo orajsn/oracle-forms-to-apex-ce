@@ -226,6 +226,8 @@ APP_RENDERER_PY = (
     'forms2apex/__init__.py', 'forms2apex/native_blueprint.py', 'forms2apex/native.py',
     'forms2apex/native_contract.py', 'forms2apex/native_project.py', 'forms2apex/native_schema.py',
     'forms2apex/prototype_package.py', 'forms2apex/native_blueprint_required.py', 'forms2apex/blueprint_profiles.py',
+    'forms2apex/forms_count_guard.py', 'forms2apex/native_blueprint_count_guard.py',
+    'forms2apex/count_guard_fixture.py',
     'fox_source_contract/__init__.py', 'fox_source_contract/intake.py', 'fox_source_contract/native_source.py',
     'fox_source_contract/project_conversion.py', 'defusedxml/__init__.py', 'defusedxml/common.py',
     'defusedxml/ElementTree.py')

@@ -112,6 +112,37 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.25.1] - 2026-11-16
+
+### [fix] Include source-check dependencies in preserved-startup validation
+
+Impact: Prevent the source-check release from being rejected during startup when
+previously completed native prototypes must be preserved. No new conversion
+pattern or business-equivalence claim is introduced.
+
+Change: Register all three count-check renderer modules in the measured startup
+source list. Keep the strict rejection of unmeasured dependencies, original
+results and original application IDs. Add a cross-platform COPY-projection check
+and a regression using the actual closed startup loader, not ordinary imports.
+
+Delivery: Source correction and registered-target offline bundle prepared;
+hosted FOX remains 0.24.0. The 0.25.0 images and stopped candidates are preserved
+but must not be activated. The corrected release requires its own coherent
+cloud images and installation.
+
+Verification: The actual 0.25.0 materialized files fail under the closed startup
+loader. All six new cross-platform cases pass with the correction, including
+pre-fix and individual missing-module rejection. The related clean-source
+regression reports 108 passed and two existing platform/private-fixture skips.
+The integrated corrected release then passes 327 targeted startup, preservation
+and packaging tests, again with two existing skips; all six new cases run.
+Independent review confirmed that only the three declarations and the new
+regression change product behavior. TypeScript and the offline build pass for
+the existing registered APEX 26.1.6 profile. Live startup is unproven.
+
+Remaining: Publish and deploy the corrected release, then prove the real hosted
+FMB journey, native source-check behavior, UI download and exact-file reimport.
+
 ## [0.25.0] - 2026-11-16
 
 ### [feature] Choose a source-backed check for the generated APEX prototype

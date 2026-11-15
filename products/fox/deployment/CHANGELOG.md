@@ -4,6 +4,27 @@ These revisions apply only to independently pinned deployment tools outside the
 measured application bundle. They do not rename or replace a FOX application
 release, image, installation or historical inspection.
 
+## [0.2.5] - 2026-11-16
+
+### [maintenance] Bind deployment to the corrected 0.25.1 startup closure
+
+Impact: Keep the release declaration consistent with the source patch that fixes
+startup validation. This metadata does not add a conversion feature or activate
+the hosted site.
+
+Change: Bind the unchanged transition/cutover tools to the newly measured 0.25.1
+bundle, retaining the existing registered APEX 26.1.6 lab profile. Preserve the
+0.25.0 stopped candidates and their original successful preparation records;
+do not overlay or activate the bundle with the known startup defect.
+
+Verification: The clean corrected source passes 327 targeted startup,
+preservation and packaging tests, with two existing skips. Six exact closed
+startup import cases run without skips. TypeScript and the registered-target
+offline build pass. This is not a live startup or Oracle acceptance result.
+
+Remaining: A new coherent cloud installation, backup/restore, cutover, real-FMB
+UI journey, native source-check runtime, download and exact-file reimport.
+
 ## [0.2.4] - 2026-11-16
 
 ### [maintenance] Versioned renderer and browser closures for FOX 0.25.0

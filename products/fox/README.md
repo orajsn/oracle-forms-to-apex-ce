@@ -17,18 +17,19 @@ In plain terms: one approved real Forms module has produced a native APEX
 prototype and server-side SQL export, with explicit omissions and synthetic data.
 The user-facing finish is still incomplete: successful FOX UI download and a
 fresh application import of those exact downloaded bytes are not yet proven.
-The converter/deployment goal is **active**. Source 0.25.0 adds an explicit,
-source-backed check option; deployment and live acceptance remain separate.
+The converter/deployment goal is **active**. Source 0.25.0 added an explicit,
+source-backed check option. Patch 0.25.1 corrects a startup dependency-list defect
+found before activation; deployment and live acceptance remain separate.
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.25.0 optional source-backed native check, including the preceding download and history-preservation fixes. Publication does not imply activation. |
+| Current software source | 0.25.1 startup dependency correction, retaining the 0.25.0 source-check feature and preceding download fixes. Source publication does not imply activation. |
 | Hosted lab | 0.24.0 remains online. Preparation and runtime workers are held for the guarded upgrade; the strict-output verifier is stopped. The download defect below prevents declaring the full user journey ready. |
 | Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
 | New source increment | Discover one supported check from the exact source button, approve its limited scope and generate a separate native APEX check. Original actions remain explicit remediation. Existing runs cannot be silently upgraded. |
-| Deployment checkpoint | Both 0.25.0 images have been built on the existing JSN VM and passed their preservation checks. Replacement containers are not yet prepared or activated. The earlier 0.24.3 candidates remain stopped and preserved; hosted FOX still serves 0.24.0. |
+| Deployment checkpoint | Both 0.25.0 images and stopped replacements are preserved, but that bundle must not be activated because its exact startup-loader path fails locally. A corrected 0.25.1 bundle is prepared offline for the existing registered APEX 26.1.6 profile. Cloud images, installation and cutover remain pending; hosted FOX still serves 0.24.0. |
 | Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
-| Local verification | Source-bound planning, real local API/SQLite tests and local browser tests with authored responses cover the new choice. A candidate derived from the approved real module passes SQLcl 26.1.2 validation. These are not live Oracle runtime acceptance. |
+| Local verification | The corrected release passes 327 targeted clean-source startup/preservation/package tests, with two existing skips; all six new closed-startup cases run. Earlier source-check API/browser and connectionless SQLcl evidence applies to unchanged conversion code. None proves this release's live Oracle runtime or cutover. |
 | Source-derived behavior | Earlier native create/edit and required-input rejection were observed with synthetic data. The new saved-row check is implemented and locally compiled, but actual Oracle fixture/runtime proof remains pending. Human acceptance and full legacy parity are separate. |
 | Full real-module acceptance | Still pending: hosted UI download, fresh-ID import/runtime verification of the exact downloaded SQL bytes, and the source-derived business-action proof above. Three-run repeatability follows separately. |
 | Development work | Active, explicitly resumed. The next checkpoint is the connected hosted flow and its exact downloadable SQL, not a test-count milestone. |
@@ -45,6 +46,7 @@ are unchanged. These labels describe the change, not its deployment status.
 | 0.24.2 | `[fix]` operations | Accept the two valid stored JSON formats without altering original evidence. | No; included in the pending 0.24.3 package. |
 | 0.24.3 | `[maintenance]` operations | Increase the bounded backup allowance so retained history can be preserved. | Prepared, not activated. No new converter capability or measured speedup. |
 | 0.25.0 | `[feature]` conversion + UI | Select a source-supported check and generate it as a separate native APEX action, with explicit partial scope. | Not yet. Local implementation/compilation is separate from live acceptance. |
+| 0.25.1 | `[fix]` startup | Include the new renderer dependencies in the strict startup checker that preserves earlier prototypes. | No; corrected source and offline lab-target bundle are prepared. |
 
 The active delivery priorities are: make the real run's
 **Download APEX** path work in hosted FOX; prove those exact SQL bytes import and

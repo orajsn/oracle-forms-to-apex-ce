@@ -1,27 +1,29 @@
 {
-  "version": "0.2.4",
-  "tag": "fox-deploy-v0.2.4",
+  "version": "0.2.5",
+  "tag": "fox-deploy-v0.2.5",
   "released_on": "2026-11-16",
   "scope": "deployment-tools-only",
-  "title": "Bind deployment to FOX 0.25.0 versioned source-check closures",
+  "title": "Bind deployment to the corrected FOX 0.25.1 startup closure",
   "tools": {
     "current_pair_transition.py": "8876116e49a424a50eb535f3e4a6384d0a9bd2428129e975bbd271f76ac7fab9",
     "cutover_project_release.py": "75923a902afca7bd1e537b535ac933ca141064fabf6a9855ed117875469eca8e"
   },
   "tested_application_bundle": {
-    "fox_version": "0.25.0",
-    "source_bundle_sha256": "986212386610065b554493cd97d788459b4353f53ce4450c89dc703adcb98714"
+    "fox_version": "0.25.1",
+    "source_bundle_sha256": "564fb1091bc6562405747393118b0388a28b943e1bceeb8a8c91771544a5db03"
   },
   "changes": [
-    "Bind the unchanged controller and cutover tools to the measured FOX 0.25.0 bundle and its versioned renderer and browser closures.",
-    "Keep the original browser runner for historical profiles and require the separate driver, fixture binding and ordered check evidence for the new profile.",
-    "Preserve earlier stopped candidates, original jobs and failed operations. Require a fresh coherent installation, backup and isolated restore before activation."
+    "Bind the unchanged controller and cutover tools to the measured FOX 0.25.1 bundle with its corrected startup dependency projection.",
+    "Retain the existing registered APEX 26.1.6 lab profile, historical runners and conversion rules; no target, identity or network change is introduced.",
+    "Preserve the unactivated 0.25.0 candidates and all original results. Require a new coherent installation, backup and isolated restore before activation."
   ],
   "verification": {
-    "clean_source_tests_passed": 871,
-    "clean_source_tests_skipped": 7,
-    "source_bound_connectionless_sqlcl_validation": true,
-    "local_authored_browser_checks_only": true,
+    "clean_source_tests_passed": 327,
+    "clean_source_tests_skipped": 2,
+    "test_scope": "targeted clean-source startup, preservation and packaging regression",
+    "closed_startup_import_cases": 6,
+    "frontend_typescript_and_offline_build_passed": true,
+    "conversion_and_browser_behavior_code_unchanged": true,
     "live_new_profile_fixtures_verified": false,
     "live_new_profile_runtime_verified": false,
     "live_backup_verified": false,
