@@ -10,6 +10,22 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### 2026-11-15 — Live 0.24.0 conversion checkpoint and download defect
+
+- Record the successful reviewed deployment continuation and active preparation/runtime
+  workers. Earlier failed operations remain failed; their evidence was not replaced.
+- Record the first approved real-module run reaching native APEX generation,
+  authenticated runtime checks and retained SQL/APEXlang export through the hosted flow.
+- Disclose the remaining UI download failure: a required-input status string is
+  incorrectly compared with a boolean. The focused correction passes 209 local
+  checks (5 historical-profile cases skipped) and validates unchanged retained
+  real package bytes. It is not yet deployed or claimed as a successful UI download.
+- Keep exact downloaded-byte fresh-ID import/runtime verification, broader
+  repeatability and human business acceptance explicitly unproven.
+
+Documentation only: no version/tag change, package/receipt rewrite, conversion
+replay, new cloud resource or blanket customer-target compatibility claim.
+
 ### 2026-11-15 — Restored lab checkpoint and non-intrusive monitoring
 
 - Correct the hosted checkpoint: 0.23.2 is online, but preparation/runtime

@@ -16,12 +16,13 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 | Item | Last verified state |
 | --- | --- |
 | Current software source | 0.24.0; see the versioned changelog. Publication does not imply activation. |
-| Hosted lab | 0.23.2 is online. Preparation and runtime workers are temporarily held during the upgrade; the separate strict-output verifier remains stopped. New conversion requests are not demo-ready. |
-| Real hosted conversion | One raw FMB was uploaded and extracted on OCI. Two OPAF mapping sections passed review; the third stopped before review on unsupported query-fact assertions. No APEX output exists for that run yet. |
-| New source increment | 0.24.0 adds an explicit partial-scope omission and same-run continuation for that bounded failure class. Coherent deployment and fresh live review are still required. |
-| Deployment checkpoint | The new pair is prepared but has not started. Cutover stopped before replacing the old application containers; prior HTTPS access was restored with saved jobs unchanged. |
+| Hosted lab | 0.24.0 is online, with preparation and runtime workers active. The separate strict-output verifier remains stopped. The download defect below prevents declaring the full user journey ready. |
+| Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
+| New source increment | 0.24.0 adds explicit partial-scope query omission and same-run continuation. The observed native prototype has five business pages; this is not full legacy-behavior equivalence. |
+| Deployment checkpoint | A reviewed forward continuation completed backup, isolated restore, pair replacement and readiness checks. Earlier failed attempts and saved jobs remain preserved. |
+| Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
 | Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
-| Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
+| Full real-module acceptance | Still pending: successful hosted UI download and fresh-ID import/runtime verification of those exact downloaded SQL bytes. Three-run repeatability follows separately. |
 | Development work | Active, focused on one real FMB reaching a proven SQL download and fresh-ID reimport. Broader repeatability/polish follows separately. |
 
 Version 0.23.0 addresses the normal schema-index file rejected by the earlier
