@@ -4,6 +4,63 @@ Each completed product increment has a semantic version, changelog entry,
 reviewed source commit, relevant verification and a `fox-vX.Y.Z` Git tag.
 Existing CE versions/tags are independent and must not be replaced.
 
+## Make the change visible in Git
+
+Every new FOX commit subject and changelog change heading starts with one primary
+category. These are readable commit labels, not replacements for Git version tags.
+
+| Label | Meaning | What the entry must explain |
+| --- | --- | --- |
+| `[feature]` | A new user capability | What the user can now do. |
+| `[improvement]` | A better existing workflow or conversion result | What becomes clearer, easier or more complete. |
+| `[fix]` | A specific defect corrected | The failing case and corrected behavior. |
+| `[performance]` | A measured speed or resource improvement | Comparable before/after measurements, workload and environment. |
+| `[testing]` | Tests or QA tooling only | The coverage added; explicitly state that no product capability was added. |
+| `[maintenance]` | Deployment, dependencies, backup or operational work | The operational blocker addressed, not a claimed converter feature. |
+| `[docs]` | Documentation or working conventions | What was clarified; no implied runtime change. |
+
+Use `[category] scope: observable change`, for example:
+
+```text
+[improvement] fox-ui: explain missing dependencies and the next action
+[fix] fox-output: allow downloads after a passed required-field check
+[testing] fox-converter: cover malformed Forms packages
+```
+
+These are format examples, not additional shipped features. Keep existing commit
+subjects, dates and version tags unchanged. Older changelog entries may receive
+clearly dated retrospective category labels without rewriting Git history.
+
+## Deliver a user outcome, then show the evidence
+
+- Start an increment with one observable UI/conversion outcome or a specific bug.
+  Finish that slice before opening unrelated improvements or operational tooling.
+- Tests normally accompany the feature/fix commit. A passing test count is evidence,
+  not a feature, conversion result, deployment or performance gain.
+- Maintenance is justified when it blocks that outcome. Name the blocker and the
+  user-facing step it enables; do not present it as new conversion functionality.
+- Reuse valid existing evidence when source, inputs and environment are unchanged.
+  Run targeted regression for changed risks; investigate expired or uncertain
+  outcomes rather than automatically replaying work. Required safety gates remain.
+- Use `[performance]` only with measured results. Raising a capacity limit,
+  selecting a different model or adding tests does not itself prove a speedup.
+
+Each changelog item leads with these fields; detailed logs remain linked evidence:
+
+```text
+### [category] Short outcome
+Impact: What changes for the user, or "Operations only; no new converter feature."
+Change: The specific behavior or implementation changed.
+Delivery: Source published / prepared / deployed, with the actual served version.
+Verification: Focused checks and their scope; measured before/after for performance.
+Remaining: Any unproven behavior or limitation.
+```
+
+Release updates to the user follow the same order: **what changed → where it is
+available → what remains**. Verification details support that summary, not replace it.
+
+## Versioning
+
 - **Minor (0.x.0):** a visible workflow or supported conversion capability.
 - **Patch (0.x.y):** a compatible fix or smaller quality-of-life improvement.
 - **Major:** an intentionally incompatible product contract; explain migration.
@@ -16,7 +73,7 @@ intentionally released separately.
 
 ## Per-increment checklist
 
-1. State the user problem and a concrete UI/conversion acceptance scenario.
+1. State the user problem, primary change category and concrete UI/conversion acceptance scenario.
 2. Implement the smallest connected vertical slice. Preserve old projects,
    source versions, jobs and proof; do not bypass unknown outcomes or acceptance.
 3. Update `fox/fox/release.json`, the frontend package/lock versions and
@@ -26,8 +83,9 @@ intentionally released separately.
 5. Commit only reviewed sanitized task files, push to the agreed repository,
    create/push the unique `fox-vX.Y.Z` tag, then verify the remote commit/tag.
    Never force or move a published version. Fix it in the next increment.
-6. Report version, user-visible changes, verification, source link and actual
-   deployment status. Keep private operational details and credentials private.
+6. Report the user-visible change, version, source link, actual deployment status
+   and remaining gap, followed by concise verification. Keep private operational
+   details and credentials private.
 
 ## Every pushed update has a changelog
 

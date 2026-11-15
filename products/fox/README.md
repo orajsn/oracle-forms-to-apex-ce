@@ -13,17 +13,42 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 **Development preview, not a ready end-to-end migration product.**
 
+In plain terms: one approved real Forms module has produced a native APEX
+prototype and server-side SQL export, with explicit omissions and synthetic data.
+The user-facing finish is still incomplete: successful FOX UI download and a
+fresh application import of those exact downloaded bytes are not yet proven.
+The converter/deployment goal is currently **paused**.
+
 | Item | Last verified state |
 | --- | --- |
 | Current software source | 0.24.3 bounded backup-capacity patch, retaining the preceding download/preservation fixes; see the versioned changelog. Publication does not imply activation. |
 | Hosted lab | 0.24.0 remains online. Preparation and runtime workers are held for the guarded upgrade; the strict-output verifier is stopped. The download defect below prevents declaring the full user journey ready. |
 | Real hosted conversion | The original real-FMB run continued through the UI with explicit query omissions. Mapping/review, SQLcl validation, synthetic schema, new application import, authenticated runtime checks and SQL/APEXlang export completed. Business acceptance remains separate. |
 | New source increment | 0.24.3 increases fixed backup bounds to preserve growing test history without deletion. Original files, independent hashes, per-file limits and isolated restore remain required. |
-| Deployment checkpoint | 0.24.0 is serving. Prepared 0.24.1 and 0.24.2 containers have never started. The 0.24.2 pre-switch inspection stopped at its backup-capacity gate; a new coherent package and actual acceptance are required. |
+| Deployment checkpoint | 0.24.3 images, release configuration and replacement containers are prepared; the containers were created stopped. A read-only installation plan began before the pause. No new installation seal or service switch is confirmed. |
 | Known download defect | FOX expects a boolean where the required-input runtime contract returns a typed status string. The unchanged retained package passes the locally tested correction, but the hosted UI download remains blocked until a coherent patch is deployed. |
 | Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
-| Full real-module acceptance | Still pending: successful hosted UI download and fresh-ID import/runtime verification of those exact downloaded SQL bytes. Three-run repeatability follows separately. |
-| Development work | Active, focused on one real FMB reaching a proven SQL download and fresh-ID reimport. Broader repeatability/polish follows separately. |
+| Source-derived behavior | Native create/edit and required-input rejection were observed with synthetic data. A qualifying source-derived business action is not yet fully proven; human acceptance and full legacy parity are separate. |
+| Full real-module acceptance | Still pending: hosted UI download, fresh-ID import/runtime verification of the exact downloaded SQL bytes, and the source-derived business-action proof above. Three-run repeatability follows separately. |
+| Development work | Paused. Documentation updates do not resume conversion, deployment or database work. |
+
+### What the recent versions actually changed
+
+Categories added retrospectively on 15 November 2026; existing commits and tags
+are unchanged. These labels describe the change, not its deployment status.
+
+| Version | Category / scope | Practical change | Available in the hosted lab? |
+| --- | --- | --- | --- |
+| 0.24.0 | `[feature]` conversion flow | Continue the same run after explicitly accepting the supported query omissions. | Yes; not proof of complete business conversion. |
+| 0.24.1 | `[fix]` output + operations | Correct the draft-download check and preserve completed results during upgrade. | No; included in the pending 0.24.3 package. |
+| 0.24.2 | `[fix]` operations | Accept the two valid stored JSON formats without altering original evidence. | No; included in the pending 0.24.3 package. |
+| 0.24.3 | `[maintenance]` operations | Increase the bounded backup allowance so retained history can be preserved. | Prepared, not activated. No new converter capability or measured speedup. |
+
+On an explicit resume, the next delivery priorities are: make the real run's
+**Download APEX** path work in hosted FOX; prove those exact SQL bytes import and
+run as a separate application on the declared target; then close the remaining
+source-derived action gap. Testing supports each change. UI refinements and
+measured performance work follow concrete user-flow bottlenecks, not test counts.
 
 Version 0.23.0 addresses the normal schema-index file rejected by the earlier
 startup collector and the global admission rule that held up new projects behind

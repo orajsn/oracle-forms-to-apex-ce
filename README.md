@@ -21,7 +21,11 @@ The new download/preservation patch still needs deployment. The pre-switch backu
 capacity check stopped the prior attempt; 0.24.3 increases fixed bounds while
 preserving all history. Successful UI download
 and fresh-ID import/runtime of those exact downloaded bytes remain unfinished;
-business acceptance is separate.
+source-derived business-action proof also remains incomplete. Business acceptance
+is separate. The conversion/deployment goal is currently **paused**.
+Recent release notes now distinguish `[feature]`, `[improvement]`, `[fix]`,
+`[performance]`, `[testing]`, `[maintenance]` and `[docs]`; a test count or
+operations fix is not a claimed new converter feature.
 See the [dated checkpoint](products/fox/README.md#current-checkpoint--15-november-2026),
 [changelog](products/fox/CHANGELOG.md), and
 [retrospective history](products/fox/docs/historical-changelog.md).

@@ -10,6 +10,28 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### [docs] 2026-11-15 — Make product changes and delivery status clear
+
+Impact: Readers can distinguish a user feature, defect fix, performance result,
+test-only change and operational maintenance without interpreting test counts.
+
+- Require primary commit/changelog labels: `[feature]`, `[improvement]`, `[fix]`,
+  `[performance]`, `[testing]`, `[maintenance]` or `[docs]`.
+- Lead release entries with user impact, specific change, delivery state and
+  remaining limitations; verification is supporting evidence.
+- Require comparable measurements for performance claims and targeted testing
+  alongside implementation. Unchanged valid proof is reused, not routinely rerun.
+- Clarify the checkpoint: hosted 0.24.0; published/prepared 0.24.3; goal paused;
+  UI download, exact-file reimport and source-derived business-action proof pending.
+- Add retrospective categories to the recent 0.24.0–0.24.3 entries without changing
+  their original release dates, commits or tags. The recent operations fixes are
+  not advertised as new conversion functionality or measured speedups.
+
+Delivery: Documentation only. No new product capability, runtime version bump,
+deployment, conversion, database action or resumption of the paused goal.
+Verification: Documentation diff/consistency review and a read-only hosted health
+response reporting 0.24.0; not end-to-end conversion acceptance.
+
 ### 2026-11-15 — Live 0.24.0 conversion checkpoint and download defect
 
 - Record the successful reviewed deployment continuation and active preparation/runtime
@@ -76,7 +98,11 @@ labelled as backfill; commit/tag dates and Git history are not rewritten.
 
 ## [0.24.3] - 2026-11-15
 
-### Back up retained development history before the download-fix rollout
+### [maintenance] Back up retained development history before the download-fix rollout
+
+Impact: Operations only; no new converter capability or measured speedup.
+Delivery: Published source; replacement deployment remains incomplete.
+Category added retrospectively on 15 November 2026; original release history unchanged.
 
 - Increase fixed snapshot capacity from 25,000 to 32,768 entries and from
   160 MiB to 256 MiB total. Keep the 64 MiB member and 8 MiB manifest bounds.
@@ -105,7 +131,11 @@ Deployment tool 0.2.3 binds the unchanged controller to this new bundle.
 
 ## [0.24.2] - 2026-11-15
 
-### Preserve each producer's original JSON bytes
+### [fix] Preserve each producer's original JSON bytes
+
+Impact: Correct an upgrade blocker; no new Forms behavior is converted.
+Delivery: Published source, included in the pending 0.24.3 package.
+Category added retrospectively on 15 November 2026; original release history unchanged.
 
 - Correct completed-job preservation for `snapshot.json` and `import.json`:
   the gateway normally adds one trailing newline; the runtime worker does not.
@@ -138,7 +168,11 @@ download and exact-downloaded-byte reimport are not yet claimed.
 
 ## [0.24.1] - 2026-11-15
 
-### Download completed prototypes without discarding their history
+### [fix] Download completed prototypes without discarding their history
+
+Impact: Correct the draft-download gate; this user-visible fix still needs live deployment.
+Delivery: Published source, included in the pending 0.24.3 package; actual UI download unproven.
+Category added retrospectively on 15 November 2026; original release history unchanged.
 
 - Fix the completed-prototype download check: the required-input result uses
   its canonical status strings, while ordinary runtime checks still require
@@ -172,7 +206,11 @@ operation is replayed; business acceptance and full legacy parity are not claime
 
 ## [0.24.0] - 2026-11-15
 
-### Explicit query omissions and same-run continuation
+### [feature] Explicit query omissions and same-run continuation
+
+Impact: Users can explicitly continue a supported partial conversion without silently guessing query rules.
+Delivery: Hosted 0.24.0; complete business behavior is not claimed.
+Category added retrospectively on 15 November 2026; original release history unchanged.
 
 - Recognize only the source-bound, same-block redacted filter and ordering
   assertions that stopped the retained real mapping before review. Reconstruct

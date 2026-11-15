@@ -1,6 +1,6 @@
 # FOX developer orchestration
 
-Updated 14 November 2026. This is a development working agreement, not a FOX
+Updated 15 November 2026. This is a development working agreement, not a FOX
 runtime dependency, a model-access entitlement or an end-to-end readiness claim.
 The lead selects the model and thinking effort for each actual assignment.
 Do not run every model on every task or use maximum effort by default.
@@ -67,8 +67,17 @@ customer source and operational evidence out of public changelogs.
 
 ## Work and pause discipline
 
+- Begin with the user-visible change to deliver, not a test-count target. Name
+  its commit category and the UI/conversion acceptance scenario before assigning work.
 - Lead with the first failing real user-flow step. Reuse deterministic code and
   existing procedures before adding orchestration or new model calls.
+- Keep implementation and its targeted tests in one bounded slice. Separate
+  `[testing]` and `[maintenance]` work honestly from product improvements; neither
+  is a new converter capability by itself. Use `[performance]` only with comparable
+  measured before/after results. Follow the [release labels and format](release-policy.md#make-the-change-visible-in-git).
+- Reuse passing evidence for unchanged code/inputs/environment. Repeat checks when
+  a changed risk, freshness requirement or uncertain outcome requires it, not merely
+  to produce another verification update. Never bypass required safety gates.
 - Delegate only independent work that saves time or adds a useful independent
   check. Small dependent tasks stay with the lead.
 - A pause stops goal execution and its implementation workers. A separately
@@ -76,6 +85,8 @@ customer source and operational evidence out of public changelogs.
 - Publish one reviewed slice with its changelog; keep local tests, publication,
   staged source, active deployment, technical verification and human acceptance
   separate. Preserve unrelated unfinished work.
+- Report what the user can do now, where it is available, and the remaining gap.
+  If a slice is operations-only, say so and identify the user-flow blocker it removes.
 
 These developer models are distinct from the configured OCI/OPAF mapper,
 reviewer and embedding model. Updating this policy does not change those runtime
