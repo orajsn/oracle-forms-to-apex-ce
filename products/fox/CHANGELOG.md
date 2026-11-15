@@ -10,6 +10,22 @@ application version or relabel existing images.
 
 ## Documentation updates
 
+### [docs] 2026-11-16 — Record completed 0.25.0 image builds
+
+Impact: The deployment checkpoint now distinguishes completed image builds from
+prepared containers, activation and a working end-to-end conversion.
+
+Change: Record that both 0.25.0 images were built on the existing JSN VM, with
+original build exits and unchanged-history checks confirmed. The earlier stopped
+candidates and existing site were preserved. No service switch, new OCI resource,
+model call, schema change or import is claimed by this checkpoint.
+
+Delivery: Documentation only; source remains 0.25.0 and the hosted site remains
+0.24.0. Existing version tags and software artifacts are unchanged.
+Verification: Original paired-build records and postguards, not launch messages.
+Remaining: Prepare the replacement containers, complete the guarded upgrade,
+then prove the real hosted conversion, download and exact-file reimport.
+
 ### [docs] 2026-11-15 — Make product changes and delivery status clear
 
 Impact: Readers can distinguish a user feature, defect fix, performance result,
