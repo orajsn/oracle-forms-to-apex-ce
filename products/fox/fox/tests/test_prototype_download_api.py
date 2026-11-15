@@ -26,12 +26,22 @@ def generated(client, configured, monkeypatch):
             receipt = super().run_stage(stage, request)
             receipt.update(status='COMPLETE', business_behavior_accepted=False)
             return receipt
+    class MetadataSyntheticOpaf(SyntheticOpaf):
+        def invoke(self,role,request):
+            # Consume authored design fields but retain the complete real task
+            # envelope, including the already-shipped metadata supplement.
+            task=request if role==PROFILE['mapper'] else {
+                key:request[key] for key in ('request','candidate','candidate_sha256')}
+            output,proof=super().invoke(role,task)
+            self.calls[-1]=(self.calls[-1][0],deepcopy(request))
+            proof['request_sha256']=canonical_hash(request)
+            return output,proof
     from fox.prototype_project_routes import source_documents
     selected = snapshot['prototype']
     result = run_prototype_pipeline(job, source_documents(snapshot['files']),
         project_id=pid, project_name=snapshot['project_name'],
         expected_source_binding=selected['source_binding'], approved_chunk_hashes=selected['approved_chunk_hashes'],
-        approved_policy_id=selected['approved_policy_id'], opaf_client=SyntheticOpaf(),
+        approved_policy_id=selected['approved_policy_id'], opaf_client=MetadataSyntheticOpaf(),
         profile=deepcopy(PROFILE), target_profile_loader=lambda: deepcopy(TARGET),
         processing_approval_check=lambda _: True, converter_adapter=CompleteSyntheticConverter(), focus_schema_version=selected['schema_version'])
     assert result['status'] == 'APEX_GENERATED'

@@ -131,6 +131,8 @@ def _authority_descriptor(bundle, *, encoded):
                                                for row in bundle['files'])
     screen_format = partition_format and any(type(row) is dict and row.get('path') == 'epochs/epoch-000006/epoch-record.json'
                                             for row in bundle['files'])
+    omission_format = not epoch_format and any(type(row) is dict and row.get('path') == 'redacted-query-omission.json'
+                                               for row in bundle['files'])
     path_format = _AUTHORITY_PATH if epoch_format else _LEGACY_AUTHORITY_PATH
     rows, names, total = [], [], 0
     for row in bundle["files"]:
@@ -139,6 +141,7 @@ def _authority_descriptor(bundle, *, encoded):
               "PROTOTYPE_AUTHORITY_FILE_FIELDS_INVALID")
         name = row["path"]
         _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)
+              or omission_format and name in {'redacted-query-omission.json', 'assessment.json'}
               or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))
               or container_format and (name in _CONTAINER_FIXED_PATHS or _CONTAINER_FOCUS_PATH.fullmatch(name))
               or partition_format and (name in _PARTITION_FIXED_PATHS or _PARTITION_FOCUS_PATH.fullmatch(name))

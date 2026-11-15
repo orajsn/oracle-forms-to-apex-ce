@@ -80,6 +80,15 @@ class PrototypeValidatePreclaimInput(PrototypeContinuationInput):
     expected_receiver_witness_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
 
 
+class PrototypeQueryOmissionInput(PrototypeContinuationInput):
+    model_config = {'extra': 'forbid'}
+    expected_terminal_closure_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_raw_candidate_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_candidate_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    expected_omission_receipt_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    approved_query_omission: StrictBool
+
+
 def source_documents(sources):
     documents = []
     for source in sources:
@@ -104,7 +113,7 @@ def configured_target():
 def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                                     admission_allowed, target_reader=configured_target,
                                     installation_projection=None, download_client_factory=None,
-                                    fresh_admission_allowed=None):
+                                    fresh_admission_allowed=None, query_omission_admission=None):
     def target_hash():
         try:
             envelope = target_reader()
@@ -170,6 +179,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                         raise OpafError('Prototype owner, source selection or run is no longer current.')
                     from .prototype_mapping_epochs import validate_epoch_chain
                     validate_epoch_chain(job, snapshot, original, c)
+                    from . import prototype_query_omission_continuation as omission
+                    omission.validate_record(job, snapshot, original, c)
                 target = target_reader()
                 if target['target_profile_sha256'] != snapshot['prototype']['target_profile_sha256']:
                     raise OpafError('Prototype target changed.')
@@ -515,7 +526,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         except (*recovery_errors, sqlite3.Error):
             raise HTTPException(409, 'Continuation was not queued: checkpoint approval or durable state could not be verified. Original outcomes remain preserved; uncertain operations were not replayed.') from None
 
-    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False, review_correction=False, dsc_identity_repair=False, candidate_format_continuation=False):
+    def epoch_context(c, pid, rid, owner, *, existing_sealed_five=False, review_correction=False, dsc_identity_repair=False, candidate_format_continuation=False, query_omission=False):
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
         from .prototype_mapping_recovery import RUN_ID
         from .prototype_mapping_epochs import inspect_next_epoch, SCOPE, STRATEGY, NUMBER
@@ -577,6 +588,24 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             if table in tables and c.execute('SELECT 1 FROM ' + table + ' WHERE ' + column + '=? LIMIT 1', (rid,)).fetchone():
                 raise ValueError('Later verification or acceptance work conflicts with this epoch.')
         from . import prototype_context_screen_epoch as screen
+        if query_omission:
+            from . import prototype_query_omission_continuation as omission
+            plan, before, child, artifacts = omission.inspect(job,snapshot,original,target['target_profile'],c)
+            if read_prototype_snapshot(job)[1] != original:
+                raise ValueError('Query omission source changed.')
+            projection = {'schema_version':1,'scope':omission.SCOPE,'project_id':pid,'run_id':rid,'id':rid,
+                'state':run['state'],'source_hash':snapshot['source_hash'],'source_binding':selected['source_binding'],
+                'selected_source_set_id':snapshot['selected_source_set_id'],
+                'target_profile_sha256':selected['target_profile_sha256'],
+                'approved_chunk_hashes':dict(selected['approved_chunk_hashes']),**plan,
+                'checkpoint_sha256':omission.checkpoint(before,plan),
+                'terminal_closure_sha256':canonical_hash(before),'eligible':child is None,
+                'continuation_recorded':child is not None,'unstarted_focus_count':plan['remaining_focus_count'],
+                'first_next_operation':'reviewer','next_action':'confirm_query_omission' if child is None else 'open_run',
+                'reason':'Continue this partial prototype without the original query filter and sorting. '
+                    'A fresh reviewer checks the explicit omissions; completed mapping is not repeated.' if child is None else
+                    'The omission decision is already recorded. Open the same run; no operation was repeated.'}
+            return projection,snapshot,original,(plan,artifacts),before,child,run
         if candidate_format_continuation:
             from . import prototype_candidate_continuation as candidate_format
             from . import prototype_dsc_identity_repair as dsc
@@ -970,6 +999,76 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         except HTTPException: raise
         except (*recovery_errors,sqlite3.Error):
             raise HTTPException(409,'Saved draft validation was not queued: exact current approval or retained evidence changed. No uncertain operation was repeated.') from None
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/redacted-query-omission')
+    def query_omission_plan(pid: str, rid: str, request: Request):
+        p = project(request,pid)
+        try:
+            with db() as c:
+                c.execute('BEGIN')
+                projection = epoch_context(c,pid,rid,p['owner'],query_omission=True)[0]
+            return Response(json.dumps(projection),media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'This run does not have a safely recoverable redacted query checkpoint. No work was restarted.') from None
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/redacted-query-omission')
+    def confirm_query_omission(pid: str, rid: str, body: PrototypeQueryOmissionInput, request: Request):
+        p = project(request,pid)
+        from . import prototype_query_omission_continuation as omission, prototype_mapping_epochs as epochs
+        try:
+            with db() as c:
+                c.execute('BEGIN IMMEDIATE')
+                projection,snapshot,original,data,before,child,run = epoch_context(c,pid,rid,p['owner'],query_omission=True)
+                if (body.checkpoint_sha256 != projection['checkpoint_sha256']
+                        or any(getattr(body,'expected_'+key) != projection[key] for key in
+                            ('terminal_closure_sha256','raw_candidate_sha256','candidate_sha256','omission_receipt_sha256'))
+                        or body.source_hash != projection['source_hash'] or body.source_binding != projection['source_binding']
+                        or body.expected_current_source_set_id != projection['selected_source_set_id']
+                        or body.target_profile_sha256 != projection['target_profile_sha256']
+                        or body.approved_chunk_hashes != projection['approved_chunk_hashes']
+                        or not all(v is True for v in (body.approved_redacted_source,body.approved_external_ai,
+                            body.approved_prototype_scope,body.approved_query_omission))):
+                    raise ValueError('Exact retained checkpoint and explicit partial-scope approval are required.')
+                result = {'schema_version':1,'id':rid,'run_id':rid,'project_id':pid,
+                    'state':run['state'] if child else 'QUEUED','conversion_profile':PROFILE_ID,
+                    'continued':True,'continuation_recorded':True,'next_action':'open_run','business_behavior_accepted':False}
+                if child:
+                    return Response(json.dumps(result),status_code=200,media_type='application/json',headers={'Cache-Control':'no-store'})
+                admission_check = None
+                if query_omission_admission is not None:
+                    admission_check = query_omission_admission(c,project_id=pid,source_hash=snapshot['source_hash'],
+                        target_profile_sha256=projection['target_profile_sha256'],run_id=rid,
+                        snapshot_sha256=hashlib.sha256(original).hexdigest())
+                    if not callable(admission_check) or admission_check() is not True:
+                        raise ValueError('Omission isolation could not be rechecked.')
+                elif not admission_allowed(c,excluded_stopped_job_id=rid):
+                    raise HTTPException(429,'Other unresolved work blocks continuation. The saved mapping is preserved.')
+                plan,artifacts = data
+                now = time.time(); job = root/'jobs'/rid
+                record = {'schema_version':1,'scope':omission.SCOPE,'job_id':rid,'project_id':pid,
+                    'snapshot_sha256':hashlib.sha256(original).hexdigest(),'source_hash':snapshot['source_hash'],
+                    'source_binding':projection['source_binding'],'target_profile_sha256':projection['target_profile_sha256'],
+                    'owner':p['owner'],'approved_at':now,'approvals':dict(omission.APPROVALS),
+                    'before_files':before,'plan':plan,'checkpoint_sha256':projection['checkpoint_sha256']}
+                artifacts.materialize()
+                epochs.save(job/'prototype-pipeline'/omission.RECORD,record,True)
+                if (job/'source-snapshot.json').read_bytes() != original:
+                    raise ValueError('Source changed before queueing.')
+                if admission_check is not None:
+                    additions={'prototype-pipeline/'+name:value for name,value in artifacts.files.items()}
+                    additions['prototype-pipeline/'+omission.RECORD]=record
+                    if admission_check(expected_own_additions=additions) is not True:
+                        raise ValueError('Omission isolation changed before queueing.')
+                changed = c.execute("UPDATE runs SET state='QUEUED',message=?,updated=? WHERE id=? AND state='ATTENTION' AND artifact IS NULL",
+                    ('Reviewing an explicit partial prototype; original query filter and sorting are not implemented.',now,rid))
+                if changed.rowcount != 1: raise ValueError('Run changed before queueing.')
+                c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
+                    (p['owner'],omission.EVENT,omission.event_id(rid,record),now))
+            return Response(json.dumps(result),status_code=202,media_type='application/json',headers={'Cache-Control':'no-store'})
+        except HTTPException: raise
+        except (*recovery_errors,sqlite3.Error):
+            raise HTTPException(409,'The omission decision was not queued: source, approval or saved evidence changed. No uncertain operation was repeated.') from None
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/candidate-format-continuation')
     def candidate_format_plan(pid: str, rid: str, request: Request):

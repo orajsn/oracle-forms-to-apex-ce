@@ -141,6 +141,9 @@ def _closure(job, *, initial=False, phase=None, record=None, known_focuses=None)
     from . import prototype_candidate_continuation as candidate_format
     if candidate_format.present(job/'prototype-pipeline'):
         pipeline_files.add(candidate_format.RECORD)
+    from . import prototype_query_omission_continuation as omission
+    if omission.present(job/'prototype-pipeline'):
+        pipeline_files.add(omission.RECORD)
     from . import prototype_preclaim_continuation as preclaim
     if preclaim.present(job/'prototype-pipeline'):
         pipeline_files.update({preclaim.RECORD,preclaim.ATTEMPT})
@@ -464,6 +467,9 @@ def _converter_phase(job, snapshot, original, stage, request):
     job = Path(job)
     record = _validated_epoch_record(job, snapshot, original)
     if record is None:
+        from . import prototype_query_omission_continuation as omission
+        if omission.present(job/'prototype-pipeline'):
+            return omission.converter_phase(job,snapshot,original,stage,request)
         return None  # Preserve historical jobs without epoch two.
     from .prototype_pipeline import CONVERTER_STAGES, _check_converter_receipt, authorize_prototype_request
     if type(stage) is not str or stage not in CONVERTER_STAGES:
@@ -539,6 +545,7 @@ def reconstruct(job, snapshot, original, target):
     if selected['schema_version'] == 2: binding['max_owned_objects'] = 32
     if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
     if 'candidate_format_policy' in selected: binding['candidate_format_policy']=selected['candidate_format_policy']
+    if 'native_input_policy' in selected: binding['native_input_policy']=selected['native_input_policy']
     same(read(root / 'binding.json'), binding)
     same(read(root / 'packet.json'), packet)
     same(read(root / 'sources-manifest.json'), {'source_binding': selected['source_binding'],
@@ -735,6 +742,9 @@ def active_focus(root, packet, plan, request, target, previous, *, runtime=None)
 
 
 def _dispatch_active_focus(root, packet, plan, request, target, previous, *, runtime=None):
+    from . import prototype_query_omission_continuation as omission
+    if omission.present(root):
+        return omission.active_focus(root, packet, plan, request, target, previous, runtime=runtime)
     from . import prototype_candidate_continuation as candidate_format
     if candidate_format.present(root):
         candidate_format.validate_technical_record(root,packet,plan,target)

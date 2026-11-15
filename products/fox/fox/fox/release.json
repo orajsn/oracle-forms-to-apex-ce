@@ -1,8 +1,12 @@
 {
-  "version": "0.23.2",
+  "version": "0.24.0",
   "released_on": "2026-11-15",
-  "title": "Register the protected startup preservation reader",
+  "title": "Continue a partial prototype with explicit query omissions",
   "changes": [
+    "Offer a source-bound same-run continuation when two masked query clauses were incorrectly asserted as proven facts.",
+    "Explain that the original filter and sorting are not implemented, retain the original response and require explicit partial-scope approval.",
+    "Review the derived mapping independently without repeating completed mapper calls; retain normal SQLcl, import, runtime and export gates.",
+    "For this exact consented continuation, observe unrelated stopped projects read-only instead of replaying them or requiring their cleanup; unknown and active work remains blocking.",
     "Bind the required startup preservation reader in new release manifests and exercise the same closed loader used on the server.",
     "Recognize only independently measured current-pair service launchers during guarded startup; native and unknown workers remain blocking.",
     "Allow a fresh project after stopped prototype history only when a current read-only converter observation establishes protocol isolation.",
@@ -11,6 +15,7 @@
     "Keep source approvals, review, target validation, runtime checks and business acceptance separate."
   ],
   "limitations": [
+    "The new omission route supports only the exact same-block redacted filter and ordering failure class before its reviewer starts. It does not recover hidden values or claim equivalent query behavior.",
     "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
     "Server-side preparation must be configured and tested by the operator; a source release does not enable it.",
     "This hosted preparation route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
@@ -20,8 +25,7 @@
     "Inert startup preservation grants no retry, execution, closure or acceptance. Mixed stages require a proven runtime candidate and one runtime target; not every unresolved boundary is supported. Actual host compatibility and coherent deployment remain separate gates.",
     "A recorded validation continuation that returns to ATTENTION still requires operator reconciliation; refreshing the page does not restart it.",
     "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
-    "APEX generated, technical checks passed and business acceptance remain separate.",
-    "A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
+    "APEX generated, technical checks passed and business acceptance remain separate. A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence.",
     "Fresh-project isolation requires the supported single-converter process and a genuinely new project. It does not attest arbitrary manual processes, authorize old retries or prove a completed conversion."
   ]
 }

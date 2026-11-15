@@ -15,10 +15,11 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 | Item | Last verified state |
 | --- | --- |
-| Current software source | 0.23.2; see the versioned changelog. Publication does not imply activation. |
-| Hosted lab | 0.22.8 was restored with HTTPS and unchanged data after the failed 0.23.1 attempt. Preparation/runtime workers remain held for the corrected upgrade. |
-| Hosted candidate state | The 0.23.1 attempt stopped at a protected startup check. The 0.23.2 source-registration fix needs a new coherent deployment. |
-| Local verification | Fresh-admission, converter-isolation and startup/metadata suites passed with the limitations recorded in the changelog. This is not live conversion acceptance. |
+| Current software source | 0.24.0; see the versioned changelog. Publication does not imply activation. |
+| Hosted lab | 0.23.2 is online in native-prototype mode. Raw-FMB preparation and runtime workers are active; the separate strict-output verifier remains stopped. |
+| Real hosted conversion | One raw FMB was uploaded and extracted on OCI. Two OPAF mapping sections passed review; the third stopped before review on unsupported query-fact assertions. No APEX output exists for that run yet. |
+| New source increment | 0.24.0 adds an explicit partial-scope omission and same-run continuation for that bounded failure class. Coherent deployment and fresh live review are still required. |
+| Local verification | Source-bound transformation, local API/worker/provenance tests and simulated UI checks pass as recorded in the changelog. These are not live Oracle conversion acceptance. |
 | Full real-module acceptance | Still pending: authenticated runtime behavior, conventional APEX SQL download, exact-byte fresh-ID reimport, and three repeatable recorded runs. |
 | Development work | Active, focused on one real FMB reaching a proven SQL download and fresh-ID reimport. Broader repeatability/polish follows separately. |
 
@@ -27,7 +28,7 @@ startup collector and the global admission rule that held up new projects behind
 unrelated stopped runs. The new route preserves old failures and asks the converter
 for a fresh read-only protocol observation. It does not restart old imports or
 change their status to make a new project pass. Actual hosted acceptance of the
-new route is still pending; the last verified hosted version remains 0.22.8.
+new route has reached real hosted raw intake and mapping on 0.23.2, not a completed export.
 
 Version 0.23.1 corrects the startup observer's attribution of the two normal
 service launchers. It does not exempt the Forms worker or bypass idle checks.
@@ -35,6 +36,13 @@ Version 0.23.2 registers a reader missing from the protected startup manifest
 and tests that exact loader path. Neither fix is proof of a completed conversion.
 The separately versioned [deployment tools](deployment/CHANGELOG.md) now allow
 bounded HTTPS warm-up without changing the frozen 0.23.2 application bundle.
+
+Version 0.24.0 offers **Continue with query omissions** when a saved mapping
+incorrectly asserted a redacted filter and ordering as proven facts. It keeps the
+same run and original response, states what is not implemented, requires explicit
+approval, and sends the derived partial design to an independent reviewer. It
+does not guess masked values, bypass technical checks or represent a complete
+business conversion. See [query omission continuation](docs/query-omission-continuation.md).
 
 The lab reference target is **APEX 26.1.6 with SQLcl 26.1.2.0**. This is not a
 compatibility guarantee for another database, APEX patch or customer tenancy.

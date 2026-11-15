@@ -31,6 +31,51 @@ This is a documentation-only update: no software-version bump, deployment,
 conversion, test replay or new runtime acceptance claim. Historical entries are
 labelled as backfill; commit/tag dates and Git history are not rewritten.
 
+## [0.24.0] - 2026-11-15
+
+### Explicit query omissions and same-run continuation
+
+- Recognize only the source-bound, same-block redacted filter and ordering
+  assertions that stopped the retained real mapping before review. Reconstruct
+  the source/focus, retain the original claims, and derive explicit unresolved
+  omissions with actionable questions; do not change the source-fact whitelist.
+- Add a business-user choice to continue a partial prototype without that query
+  behavior. Require the three processing approvals and a separate omission
+  approval. Check this option before unrelated legacy recovery routes.
+- Preserve completed mapping/review calls, require a fresh independent review,
+  and continue the same run. Bind the decision, original/derived evidence and
+  review into worker, converter-authority and download reconstruction.
+- Reject stale source/target/checkpoint, missing consent, unknown or out-of-order
+  work and competing operations. Preserve the existing validation/import/runtime
+  gates and distinguish output from business acceptance.
+- Isolate other projects' stopped prototype history for this exact consented
+  omission continuation using authenticated, nonce-bound read-only converter
+  observations. Recheck rows, ledgers, owners, sources and target in the same
+  transaction. Do not change fresh submission, general retry admission or old jobs.
+- Include the already-admitted required-input policy when reconstructing a
+  saved mapping binding. No immutable snapshot or old policy is rewritten.
+- Adapt older UI test fixtures to the new read-only omission probe and keep the
+  modeled conversion-state harness separate from its browser-tested progress child.
+- Update the public checkpoint: hosted 0.23.2 has passed raw-FMB preparation and
+  reached real OPAF mapping; full conversion and package acceptance remain pending.
+
+Verification: 95 pure-helper cases, 443 boundary/regression cases, 101
+native regressions and 18 connected local API/worker/authority cases passed.
+Provider and Oracle replies in local tests are authored. A read-only check of
+the actual saved real mapping passed pure derivation with original files intact
+and no new model call. Simulated UI/TypeScript checks passed, including explicit
+consent, stale responses, mismatched evidence and unknown-submit protection.
+Older format/preclaim browser fixtures and the modeled conversion-state suite
+also pass after those fixture corrections. A broader historical repair matrix
+was stopped after exceeding the focused run window; it is not counted as a pass.
+An intermediate wider run exposed stale authored-provider fixtures, a Windows
+test-path limit and a transport-path allowance that was too broad. The follow-up
+corrects the fixtures, uses a shorter test root and limits the new paths to omission
+descriptors; the failed run remains separate. Actual read-only converter observations also
+confirm the existing other-project boundaries without queueing or replaying work.
+The hosted runtime remains 0.23.2. Fresh live review, SQLcl/import/runtime/export,
+exact-downloaded-package reimport and human acceptance are not established.
+
 ## [0.23.2] - 2026-11-15
 
 ### Register the protected startup preservation reader

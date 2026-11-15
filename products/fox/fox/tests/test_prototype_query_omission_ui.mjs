@@ -1,0 +1,51 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+
+test('query omission requires explicit approvals and stays on the saved run', {skip:process.env.FOX_UI_BROWSER!=='1',timeout:90000}, async()=>{
+ const root=fileURLToPath(new URL('../',import.meta.url)),require=createRequire(import.meta.url),runtime=createRequire(path.join(process.env.FOX_TEST_NODE_MODULES,'../package.json'));
+ const {chromium}=runtime('playwright'),{build}=require('esbuild'),out=path.resolve(process.env.FOX_TEST_EVIDENCE_DIR);await mkdir(out,{recursive:true});
+ const h='a'.repeat(64),b='b'.repeat(64),t='c'.repeat(64),run='fox-'+'e'.repeat(20),chunks={unit:h};
+ const plan={schema_version:1,scope:'fox-prototype-redacted-query-omission-continuation-v1',project_id:'p',run_id:run,id:run,state:'ATTENTION',source_hash:h,source_binding:b,selected_source_set_id:'ss',target_profile_sha256:t,approved_chunk_hashes:chunks,eligible:true,continuation_recorded:false,next_action:'confirm_query_omission',business_behavior_accepted:false,reason:'Query omission available.',checkpoint_sha256:h,terminal_closure_sha256:h,raw_candidate_sha256:h,candidate_sha256:h,omission_receipt_sha256:h,focus_id:'focus',completed_focus_count:2,unstarted_focus_count:3,remaining_focus_count:3,first_next_operation:'reviewer',repeated_mapper_calls:0,fresh_reviewer_calls:1,omissions:['Original query filter is not implemented.','Original query sorting is not implemented.']};
+ const assessment={source_hash:h,source_binding:b,selected_source_set_id:'ss',target_profile_sha256:t,conversion_configured:true,source_count:1,code_unit_count:1,chunks:[{id:'unit',sha256:h,bytes:1}],scope_notice:'Prototype scope'};
+ const code=`import React from 'react';import{createRoot}from'react-dom/client';import Prototype from './web/PrototypeConversion';import './web/style.css';import './web/projectWorkbench.css';const root=createRoot(document.getElementById('root'));window.renderTest=(project='p',hash='${h}',state='ATTENTION')=>root.render(<div className="fox-workbench"><Prototype projectId={project} source={{project_id:project,source_hash:hash,selected_source_set_id:'ss'}} activeRun={{id:'${run}',project_id:project,source_hash:hash,state}} busy={false} unknownOutcome={false} hasRun={true} execute={async fn=>{try{window.actionResult=await fn()}catch{window.actionResult={status:'unknown'}}return false}} onRefresh={async()=>({status:'confirmed'})}/></div>);window.renderTest();`;
+ const built=await build({stdin:{contents:code,resolveDir:root,loader:'tsx'},bundle:true,write:false,outfile:'preview.js',format:'iife',platform:'browser',logLevel:'silent'}),browser=await chromium.launch({channel:'msedge',headless:true});
+ try{const page=await browser.newPage({viewport:{width:1440,height:900}});let reply=plan,mode='ok',posts=0,body,legacy=0,pending,release;const probes=[];
+  await page.route('**/*',async route=>{const url=route.request().url();if(url==='http://localhost/')return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});if(url.endsWith('/prototype-assessment'))return route.fulfill({json:assessment});if(url.endsWith('/redacted-query-omission')){if(route.request().method()==='GET'){probes.push('omission');if(mode==='delay'){pending?.();await new Promise(resolve=>{release=resolve;});}return mode==='network'?route.abort('failed'):mode==='error'?route.fulfill({status:401,json:{detail:'Unauthorized'}}):mode==='fallback'?route.fulfill({status:409,json:{detail:'Other plan'}}):route.fulfill({json:reply});}posts++;body=route.request().postDataJSON();if(mode==='unknown')return route.abort('failed');return route.fulfill({json:{id:run,run_id:run,project_id:'p',schema_version:1,state:'QUEUED',conversion_profile:'native-blueprint-prototype-v1',continued:true,continuation_recorded:true,next_action:'open_run',business_behavior_accepted:false}});}if(url.endsWith('/validate-preclaim-continuation')){probes.push('legacy');legacy++;return route.fulfill({status:403,json:{detail:'Legacy reached'}});}return route.abort();});
+  const boot=async()=>{await page.goto('http://localhost/');await page.addStyleTag({content:built.outputFiles.find(f=>f.path.endsWith('.css')).text});await page.addScriptTag({content:built.outputFiles.find(f=>f.path.endsWith('.js')).text});};
+  const check=async()=>{await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByText('Query omission available.').waitFor();};
+  await boot();await check();assert.equal(legacy,0);await page.getByRole('button',{name:'Review prototype scope'}).click();await page.getByText('Prototype scope',{exact:true}).waitFor();
+  const action=page.getByRole('button',{name:'Continue with query omissions'});assert.equal(await action.isDisabled(),true);assert.equal(await page.getByLabel(/^unit ·/).isDisabled(),true);
+  await page.screenshot({path:path.join(out,'omission-desktop.png'),fullPage:true});await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(out,'omission-narrow.png'),fullPage:true});
+  assert.equal(await page.getByText(/generation, technical verification and business acceptance are separate/).count(),1);
+  const consent=page.getByRole('group',{name:'Confirm before processing'}).getByRole('checkbox');
+  assert.equal(await consent.count(),3);
+  for(const box of await consent.all()){assert.equal(await box.isChecked(),false);await box.check();assert.equal(await action.isDisabled(),true);}await page.getByLabel(/I explicitly approve/).check();assert.equal(await action.isEnabled(),true);
+  for(const box of await consent.all()){await box.uncheck();assert.equal(await action.isDisabled(),true);await box.check();}
+  await action.click();await page.getByText(/Check the existing run status/).waitFor();assert.equal(posts,1);assert.deepEqual(body,{source_hash:h,source_binding:b,expected_current_source_set_id:'ss',target_profile_sha256:t,approved_chunk_hashes:chunks,approved_redacted_source:true,approved_external_ai:true,approved_prototype_scope:true,checkpoint_sha256:h,expected_terminal_closure_sha256:h,expected_raw_candidate_sha256:h,expected_candidate_sha256:h,expected_omission_receipt_sha256:h,approved_query_omission:true});
+  await page.waitForFunction(()=>window.actionResult?.status==='confirmed');assert.match((await page.evaluate(()=>window.actionResult)).message,/Generation, technical verification and business acceptance remain separate/);
+  reply={...plan,eligible:false,continuation_recorded:true,next_action:'open_run'};await boot();await check();assert.equal(await action.count(),0);assert.equal(legacy,0);
+  reply={...plan,fresh_reviewer_calls:0};await boot();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(legacy,0);
+  mode='error';await boot();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(legacy,0);
+  mode='network';await boot();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(legacy,0);
+  mode='fallback';await boot();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(legacy,1);
+  assert.deepEqual(probes.slice(-2),['omission','legacy']);
+  // A plan may not authorize processing for a different source/hash or assessment.
+  mode='ok';
+  for(const invalid of [{source_hash:b},{checkpoint_sha256:'not-a-hash'},{approved_chunk_hashes:{unit:b}},{source_binding:h},{target_profile_sha256:h},{business_behavior_accepted:true}]){
+   reply={...plan,...invalid};await boot();await page.getByRole('button',{name:'Review prototype scope'}).click();await page.getByText('Prototype scope',{exact:true}).waitFor();await page.getByRole('button',{name:'Check repair plan'}).click();await page.getByRole('alert').waitFor();assert.equal(await action.count(),0);assert.equal(posts,1);assert.equal(legacy,1);
+  }
+  // Requests started in one project/source must not populate the new view.
+  reply=plan;
+  for(const changed of [['other-project',h],['p',b]]){
+   mode='delay';await boot();const entered=new Promise(resolve=>{pending=resolve;});await page.getByRole('button',{name:'Check repair plan'}).click();await entered;await page.evaluate(args=>window.renderTest(...args),changed);await page.getByRole('button',{name:'Check repair plan'}).waitFor();release();await page.waitForResponse(r=>r.url().endsWith('/redacted-query-omission'));await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));assert.equal(await page.getByText('Query omission available.',{exact:true}).count(),0);assert.equal(await action.count(),0);assert.equal(posts,1);
+  }
+  // Losing the POST response must consume the dispatch locally, not offer replay.
+  mode='unknown';await boot();await check();await page.getByRole('button',{name:'Review prototype scope'}).click();await page.getByText('Prototype scope',{exact:true}).waitFor();for(const box of await consent.all())assert.equal(await box.isChecked(),false);assert.equal(await page.getByLabel(/I explicitly approve/).isChecked(),false);for(const box of await consent.all())await box.check();await page.getByLabel(/I explicitly approve/).check();await action.evaluate(button=>{button.click();button.click();});await page.waitForFunction(()=>window.actionResult?.status==='unknown');assert.equal(posts,2);assert.equal(await action.count(),0);assert.equal(await page.getByRole('button',{name:'Check repair plan'}).isDisabled(),true);await page.getByText(/Check the existing run status/).waitFor();
+  await page.evaluate(hash=>window.renderTest('p',hash,'PROCESSING'),h);await page.evaluate(hash=>window.renderTest('p',hash,'ATTENTION'),h);assert.equal(posts,2);assert.equal(await action.count(),0);assert.equal(await page.getByRole('button',{name:'Check repair plan'}).isDisabled(),true);
+  await page.screenshot({path:path.join(out,'unknown-post-no-replay.png'),fullPage:true});
+ }finally{await browser.close();}
+});

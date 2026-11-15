@@ -17,7 +17,14 @@ from test_prototype_pipeline import SyntheticOpaf, SyntheticConverter, PROFILE, 
 
 class ConfusedMapper(SyntheticOpaf):
     def invoke(self, role, request):
-        output, invocation = super().invoke(role, request)
+        # The authored reviewer consumes its original three-field contract, but
+        # retained provenance must bind the complete current request, including
+        # deterministic metadata supplements supplied by the pipeline.
+        authored = request if role == PROFILE['mapper'] else {
+            key: request[key] for key in ('request', 'candidate', 'candidate_sha256')}
+        output, invocation = super().invoke(role, authored)
+        self.calls[-1] = self.calls[-1][0], deepcopy(request)
+        invocation['request_sha256'] = canonical_hash(request)
         if role == PROFILE['mapper'] and len([name for name, _ in self.calls if name == 'mapper']) == 6:
             unit = request['code_units'][0]
             output['blueprint']['claims'] = [{'id': 'behavior-six', 'source_object_id': unit['id'],
@@ -55,12 +62,23 @@ def continuation(client, monkeypatch):
     body.update(expected_current_source_set_id=assessment['selected_source_set_id'],
         approved_chunk_hashes={row['id']: row['sha256'] for row in assessment['chunks']},
         approved_redacted_source=True, approved_external_ai=True, approved_prototype_scope=True)
-    queued = c.post(f'/api/projects/{pid}/prototype-runs', json=body)
+    # This is a retained pre-metadata/candidate-format-policy checkpoint, not a
+    # newly admitted current-policy run. Build its original admission through
+    # the real validator; do not rewrite the snapshot or relax recovery guards.
+    from fox import prototype_project_routes
+    prepare = prototype_project_routes.prepare_prototype_admission
+    def legacy_admission(documents, **kwargs):
+        kwargs.update(metadata_task_policy=None, candidate_format_policy=None)
+        return prepare(documents, **kwargs)
+    with monkeypatch.context() as old:
+        old.setattr(prototype_project_routes, 'prepare_prototype_admission', legacy_admission)
+        queued = c.post(f'/api/projects/{pid}/prototype-runs', json=body)
     assert queued.status_code == 202, queued.text
     rid = queued.json()['id']
     job = root / 'jobs' / rid
     root.chmod(0o700)
     snapshot = json.loads((job / 'source-snapshot.json').read_bytes())
+    assert not {'metadata_task_policy', 'candidate_format_policy'} & snapshot['prototype'].keys()
     model, converter = ConfusedMapper(), SyntheticConverter()
     with monkeypatch.context() as old:
         # Create the old released failure faithfully; no candidate is repaired

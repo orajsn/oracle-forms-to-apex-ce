@@ -237,6 +237,15 @@ def _scoped_review_index(checkpoints, plan):
             for path in sorted((checkpoints/request['focus_id']).iterdir()):
                 if path.is_symlink() or not path.is_file(): raise OpafError('Unknown candidate provenance member.')
                 files.append({'path':path.relative_to(checkpoints).as_posix(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        from . import prototype_query_omission_continuation as omission
+        if omission.present(checkpoints):
+            record, _ = omission.technical(checkpoints,packet,plan,target)
+            names = {omission.RECORD, *{n[len('prototype-pipeline/'):] for n in record['before_files']
+                if n.startswith('prototype-pipeline/')}}
+            existing = {row['path'] for row in files}
+            for name in sorted(names - existing):
+                path = checkpoints / name
+                files.append({'path':name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
         return {'schema_version':3,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
             'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
     if epoch is not None:
@@ -577,10 +586,17 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     views = []
     from . import prototype_candidate_continuation as candidate_format
     from . import prototype_preclaim_continuation as preclaim
+    from . import prototype_query_omission_continuation as omission
     if preclaim.present(checkpoints):
         target = (target_profile_loader() if target_profile_loader is not None else
                   _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
         views = preclaim.retained_views(checkpoints,packet,plan,target)
+        candidates = [view['candidate'] for view in views]
+        reviews = [view['checked'] for view in views]
+    elif omission.present(checkpoints):
+        target = (target_profile_loader() if target_profile_loader is not None else
+                  _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
+        views = omission.retained_views(checkpoints,packet,plan,target)
         candidates = [view['candidate'] for view in views]
         reviews = [view['checked'] for view in views]
     elif candidate_format.present(checkpoints):

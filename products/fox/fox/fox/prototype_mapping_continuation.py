@@ -29,7 +29,10 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
     from . import prototype_preclaim_continuation as preclaim
     preclaimed = preclaim.present(job/'prototype-pipeline')
+    from . import prototype_query_omission_continuation as omission
+    omitted = omission.present(job/'prototype-pipeline')
     if not recorded and not database.exists() and not database.is_symlink():
+        if omitted: raise OpafError('Query omission requires its durable owner database.')
         if preclaimed: raise OpafError('Validation continuation requires its durable owner database.')
         if (job / 'mapping-epochs').exists() or (job / 'prototype-pipeline' / 'epochs').exists():
             raise OpafError('Epoch proof cannot fall back to an unrecorded legacy run.')
@@ -37,6 +40,7 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     if database.is_symlink() or not database.is_file():
         raise OpafError('Continuation database is missing or unsafe.')
     with sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True) as connection:
+        omission.validate_record(job, snapshot, original, connection, phase=phase)
         from .prototype_preclaim_continuation import entry_phase
         phase = entry_phase(job,snapshot,original,connection,phase)
         rows = connection.execute('SELECT owner,object_id,created FROM events WHERE action=? AND '

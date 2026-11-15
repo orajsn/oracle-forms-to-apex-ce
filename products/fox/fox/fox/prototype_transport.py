@@ -64,13 +64,14 @@ def read_isolation_witness(client, job_id, challenge):
     return value
 
 
-def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partition_epoch=False, screen_epoch=False):
+def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partition_epoch=False, screen_epoch=False, query_omission=False):
     """Exact inert epoch two/three paths, mirrored by the private receiver."""
     from .prototype_clause_proof import JSON_FILES
     if type(name) is not str or '\\' in name or ':' in name:
         return False
     if name in {*_ROOT_FILES, 'assessment.json'} or re.fullmatch(r'sources/source-00[0-3]\.xml', name):
         return True
+    if name == 'redacted-query-omission.json': return query_omission and not clause_epoch
     if screen_epoch and name == 'candidate-format-continuation.json': return True
     pieces = name.split('/')
     basic = {*_FOCUS_FILES, 'mapper-intent.json', 'reviewer-intent.json', 'mapper-resolved.json', 'mapper-resolution.json',
@@ -188,7 +189,8 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
         container_epoch = clause_epoch and 'epochs/epoch-000004/epoch-record.json' in names
         partition_epoch = container_epoch and 'epochs/epoch-000005/epoch-record.json' in names
         screen_epoch = partition_epoch and 'epochs/epoch-000006/epoch-record.json' in names
-        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch, container_epoch=container_epoch, partition_epoch=partition_epoch, screen_epoch=screen_epoch) for name in names):
+        query_omission = not clause_epoch and 'redacted-query-omission.json' in names
+        if any(not _epoch_authority_member(name, clause_epoch=clause_epoch, container_epoch=container_epoch, partition_epoch=partition_epoch, screen_epoch=screen_epoch, query_omission=query_omission) for name in names):
             raise OpafError('Prototype authority provenance path is not an inert allowed member.')
     else:
         names.extend(f'{focus}/{name}' for focus in focuses for name in _FOCUS_FILES)

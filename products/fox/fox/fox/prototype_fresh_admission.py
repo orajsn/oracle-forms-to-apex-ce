@@ -1,7 +1,8 @@
 """Isolate stopped prototype history for a new project, never authorize its replay.
 
-Only fresh submission calls this inside its existing BEGIN IMMEDIATE. Legacy
-verification/retry admission is unchanged. Converter observations describe the
+Fresh submission and a separate exact query-omission continuation call their
+own entry points inside BEGIN IMMEDIATE. Legacy verification/retry admission is
+unchanged. Converter observations describe the
 fixed single-process protocol, not arbitrary host processes or a maintenance
 lease. Maintenance ingress draining and its data rechecks remain separate.
 """
@@ -234,6 +235,96 @@ def prepare_fresh_admission(*, root, connection, recovery, project_id, source_ha
     except OpafError as error:
         if error.status_code in (423,429,503):
             raise FreshPrototypeAdmissionError('The converter is busy or unavailable. Try again shortly; no new run was started.',503) from None
+        raise FreshPrototypeAdmissionError() from None
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,RuntimeError,sqlite3.Error):
+        raise FreshPrototypeAdmissionError() from None
+
+
+class QueryOmissionAdmissionRead(FreshAdmissionRead):
+    """Other-project isolation is not permission to retry any of those jobs."""
+    def __init__(self, *args, own_id, own, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.own_id, self.own = own_id, own
+
+    def __call__(self, *, expected_own_additions=None):
+        try:
+            self._recheck()
+            _need(_no_ledger(self.connection,self.own_id))
+            owner=self.connection.execute('SELECT owner FROM projects WHERE id=?',(self.project_id,)).fetchone()
+            _need(owner is not None and owner[0]==self.own['owner']
+                  and read_prototype_snapshot(self.own['job'])[1]==self.own['raw'])
+            current=preclaim_tree(self.own['job']);before=self.own['tree']
+            if expected_own_additions is None:
+                _need(current==before)
+            else:
+                from . import prototype_query_omission_continuation as omission, prototype_mapping_epochs as epochs
+                record_name='prototype-pipeline/'+omission.RECORD
+                _need(type(expected_own_additions)is dict and record_name in expected_own_additions)
+                record=expected_own_additions[record_name]
+                focus=record['plan']['focus_id']
+                _need(type(focus)is str and re.fullmatch(r'focus-[a-f0-9]{24}',focus))
+                names={record_name,*{'prototype-pipeline/'+focus+'/'+name for name in
+                    ('projection-candidate.json','projection-receipt.json','reviewer-request.json')}}
+                _need(set(expected_own_additions)==names and not names.intersection(before['files'])
+                      and current['namespace']==before['namespace'] and current['directories']==before['directories']
+                      and set(current['files'])==set(before['files'])|names
+                      and all(current['files'][name]==value for name,value in before['files'].items()))
+                for name,value in expected_own_additions.items():
+                    epochs.same(epochs.read(epochs._safe_path(self.own['job'],name)),value)
+            return True
+        except FreshPrototypeAdmissionError: raise
+        except (OSError,ValueError,TypeError,KeyError,AttributeError,RuntimeError,sqlite3.Error):
+            raise FreshPrototypeAdmissionError() from None
+
+
+def prepare_query_omission_admission(*, root, connection, recovery, project_id, source_hash,
+                                    run_id, snapshot_sha256, witness_reader, target_check):
+    """Called only AFTER the omission route validates its exact plan and consents.
+
+This reads other-project isolation; it cannot requeue, create a new run, or
+authorize the selected checkpoint. The route and worker retain that authority.
+"""
+    try:
+        root=Path(root).absolute();recovery._transaction(connection)
+        _need(_PROJECT.fullmatch(project_id) and _JOB.fullmatch(run_id) and _sha(source_hash)
+              and _sha(snapshot_sha256) and root.resolve()==root and not root.is_symlink()
+              and not (root/'jobs').is_symlink())
+        _need(not connection.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name IN ('runs','events') LIMIT 1").fetchone())
+        rows=_rows(connection);ledgers=_ledger_rows(connection);row=rows.get(run_id)
+        _need(row is not None and row['project']==project_id and row['source_hash']==source_hash
+              and row['state']=='ATTENTION' and row['artifact'] is None
+              and [r['id'] for r in rows.values() if r['project']==project_id]==[run_id]
+              and _no_ledger(connection,run_id))
+        _need(not any(r['state'] in ('QUEUED','PROCESSING') for r in rows.values()),
+              'Another conversion is active. This saved run was not restarted.',429)
+        own=_prototype(root,connection,row)
+        _need(own is not None and hashlib.sha256(own['raw']).hexdigest()==snapshot_sha256)
+        saved={};target_sha=None
+        for job_id in recovery._job_ids(connection):
+            if job_id==run_id: continue
+            other=rows.get(job_id);_need(other is not None and other['project']!=project_id)
+            pin=None
+            if other['state'] in ('ATTENTION','GENERATED') and other['artifact'] is None:
+                pin=_prototype(root,connection,other)
+                if pin is not None: _need(_no_ledger(connection,job_id))
+            if pin is None:
+                _need(recovery._eligibility(connection,job_id)['blocks_admission'] is False)
+                continue
+            challenge=secrets.token_hex(32)
+            expected_target=target_check();_need(_sha(expected_target))
+            _need(target_sha is None or target_sha==expected_target);target_sha=expected_target
+            witness=witness_reader(job_id,challenge)
+            _need(target_check()==expected_target)
+            _match_witness(witness,row=other,saved=pin,challenge=challenge,execution_target_sha256=expected_target)
+            saved[job_id]=pin
+        check=QueryOmissionAdmissionRead(connection,recovery,root,project_id,source_hash,rows,ledgers,
+            saved,target_check,target_sha,own_id=run_id,own=own)
+        check()
+        return check
+    except FreshPrototypeAdmissionError: raise
+    except OpafError as error:
+        if error.status_code in (423,429,503):
+            raise FreshPrototypeAdmissionError('The converter is busy or unavailable. No saved work was restarted.',503) from None
         raise FreshPrototypeAdmissionError() from None
     except (OSError,ValueError,TypeError,KeyError,AttributeError,RuntimeError,sqlite3.Error):
         raise FreshPrototypeAdmissionError() from None
