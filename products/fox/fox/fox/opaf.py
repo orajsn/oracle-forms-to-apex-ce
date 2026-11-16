@@ -379,14 +379,20 @@ def run_job(job: Path):
 
 
 class ConverterClient:
-    def __init__(self,base_url,token,*,projection=_NO_FRESH_PROJECTION):
+    def __init__(self,base_url,token,*,projection=_NO_FRESH_PROJECTION,direct_preview_port=None):
         """Use the legacy endpoint unless an explicit valid fresh P is supplied.
 
         P selects configuration only. It grants no startup, storage adoption,
         target write or migration/retirement authority. Existing callers keep
         the exact original 8091 contract; explicit None is not a fallback.
         """
-        if projection is _NO_FRESH_PROJECTION:
+        if direct_preview_port is not None:
+            if (projection is not _NO_FRESH_PROJECTION or type(direct_preview_port) is not int
+                    or not 1024 <= direct_preview_port <= 65535 or direct_preview_port == 8091
+                    or base_url != 'http://127.0.0.1:' + str(direct_preview_port)):
+                raise OpafError('Direct preview requires its separate exact loopback converter port.')
+            self._port = direct_preview_port
+        elif projection is _NO_FRESH_PROJECTION:
             url=urlsplit(base_url)
             if url.scheme!='http' or url.hostname!='127.0.0.1' or url.port!=8091 or url.path not in ('','/') or url.query or url.fragment or url.username:
                 raise OpafError('Converter must use the configured VM loopback endpoint.')
@@ -419,7 +425,7 @@ class ConverterClient:
                 timeout = {'validate': 1080, 'prepare_schema': 2400, 'import': 4800,
                            'verify_runtime': 3600, 'export': 3600}[stage[1]]
             elif method == 'POST' and re.fullmatch(
-                    r'/fox/prototype/jobs/fox-[a-f0-9]{20}/continue-validation', path):
+                    r'/fox/prototype/jobs/fox-[a-f0-9]{20}/(?:continue-validation|validation-retry)', path):
                 timeout = 1080
             elif method == 'GET' and re.fullmatch(
                     r'/fox/prototype/jobs/fox-[a-f0-9]{20}/isolation-witness\?challenge=[a-f0-9]{64}',path):

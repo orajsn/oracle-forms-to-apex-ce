@@ -35,12 +35,15 @@ def execution_target(profile):
         'database': {'db_name', 'session_user', 'parsing_schema'},
         'apex': {'workspace', 'workspace_id', 'ords_origin', 'ords_base_path'},
         'sqlcl': {'saved_connection'},
-        'tested_versions': {'apex', 'sqlcl', 'apexlang_mmd', 'opaf'},
     }.items():
         item = profile[name]
         if (type(item) is not dict or set(item) != fields
                 or any(type(value) is not str or not value or len(value) > 2048 for value in item.values())):
             raise ValueError('Incomplete execution destination')
+    versions = profile['tested_versions']
+    if (type(versions) is not dict or not {'apex', 'sqlcl', 'apexlang_mmd'} <= versions.keys()
+            or any(type(versions[k]) is not str or not versions[k] for k in ('apex', 'sqlcl', 'apexlang_mmd'))):
+        raise ValueError('Incomplete execution versions')
     scope = profile['scope']
     if (profile['active'] is not True or scope['data_mode'] != 'synthetic_test_only'
             or scope['existing_resources_only'] is not True
@@ -65,13 +68,16 @@ def _unique(pairs):
 
 
 class PrototypeAuthorityClient:
-    def __init__(self, settings, *, authority_url, authority_origin, timeout=DEFAULT_AUTHORITY_TIMEOUT_SECONDS):
+    def __init__(self, settings, *, authority_url, authority_origin, timeout=DEFAULT_AUTHORITY_TIMEOUT_SECONDS, allow_loopback_http=False):
         # These arguments come only from trusted startup, never an MCP/request.
         url = urlsplit(authority_url)
         origin = urlsplit(authority_origin)
-        if (url.scheme != 'https' or not url.hostname or url.port not in (None, 443)
+        loopback = (allow_loopback_http is True and url.scheme == 'http'
+                    and url.hostname == '127.0.0.1' and url.port is not None and 1 <= url.port <= 65535)
+        if (type(allow_loopback_http) is not bool
+                or not (loopback or url.scheme == 'https' and url.hostname and url.port in (None, 443))
                 or url.path != AUTHORITY_PATH or url.query or url.fragment or url.username or url.password
-                or authority_origin != 'https://' + url.netloc
+                or authority_origin != url.scheme + '://' + url.netloc
                 or origin.path or origin.query or origin.fragment
                 or any(c.isspace() for c in authority_url + authority_origin)
                 or type(timeout) not in (int, float) or not 0 < timeout <= MAX_AUTHORITY_TIMEOUT_SECONDS):
@@ -81,6 +87,7 @@ class PrototypeAuthorityClient:
                 or any(ord(c) < 33 or ord(c) > 126 for c in token)):
             raise ValueError('Existing converter bearer token required')
         self.settings, self.url, self.origin, self.timeout = settings, url, authority_origin, timeout
+        self.loopback = loopback
 
     def __call__(self, request):
         return self._call(request)
@@ -91,22 +98,31 @@ class PrototypeAuthorityClient:
             raise RuntimeError('PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY')
         return self._call(request, record_sha256=record_sha256)
 
-    def _call(self, request, *, record_sha256=None):
+    def authorize_validation_retry(self,request,record_sha256):
+        if type(record_sha256) is not str or len(record_sha256)!=64 or any(c not in '0123456789abcdef' for c in record_sha256):
+            raise RuntimeError('PROTOTYPE_CURRENT_AUTHORITY_UNAVAILABLE_NO_RETRY')
+        return self._call(request,record_sha256=record_sha256,validation_retry=True)
+
+    def _call(self, request, *, record_sha256=None, validation_retry=False):
         try:
             if not isinstance(request, dict):
                 raise ValueError('Request must be an object')
             raw = _bytes(request if record_sha256 is None else {'schema_version':1,
-                'scope':'fox-prototype-preclaim-authorize-request-v1',
+                'scope':('fox-prototype-validation-retry-authorize-request-v1' if validation_retry else 'fox-prototype-preclaim-authorize-request-v1'),
                 'request':request,'record_sha256':record_sha256})
             if len(raw) > MAX_REQUEST_BYTES:
                 raise ValueError('Authority request oversized')
-            expected_target = _hash(execution_target(runtime_preflight.bound_target_profile(self.settings)))
+            profile = runtime_preflight.bound_target_profile(self.settings)
+            if self.loopback and 'design_provider' not in profile:
+                raise ValueError('Loopback requires a direct OCI preview target')
+            expected_target = _hash(execution_target(profile))
             # http.client bypasses HTTP(S)_PROXY environment entirely, does not
             # follow redirects, and performs no automatic application retry.
-            connection = http.client.HTTPSConnection(self.url.hostname, 443,
-                context=ssl.create_default_context(), timeout=self.timeout)
+            connection = (http.client.HTTPConnection('127.0.0.1', self.url.port, timeout=self.timeout)
+                if self.loopback else http.client.HTTPSConnection(self.url.hostname, 443,
+                    context=ssl.create_default_context(), timeout=self.timeout))
             try:
-                connection.request('POST', AUTHORITY_PATH if record_sha256 is None else PRECLAIM_AUTHORITY_PATH, body=raw, headers={
+                connection.request('POST', AUTHORITY_PATH if record_sha256 is None or validation_retry else PRECLAIM_AUTHORITY_PATH, body=raw, headers={
                     'Authorization': 'Bearer ' + self.settings.bearer_token, 'Origin': self.origin,
                     'Content-Type': 'application/json', 'Accept': 'application/json'})
                 response = connection.getresponse()
@@ -123,7 +139,7 @@ class PrototypeAuthorityClient:
                       'source_binding', 'target_profile_sha256', 'execution_target_sha256'}
             if record_sha256 is not None: fields.add('record_sha256')
             if (not isinstance(value, dict) or set(value) != fields or type(value['schema_version']) is not int
-                    or value['schema_version'] != 1 or value['scope'] != (RESPONSE_SCOPE if record_sha256 is None else PRECLAIM_RESPONSE_SCOPE)
+                    or value['schema_version'] != 1 or value['scope'] != ('fox-prototype-current-validation-retry-authority-v1' if validation_retry else RESPONSE_SCOPE if record_sha256 is None else PRECLAIM_RESPONSE_SCOPE)
                     or record_sha256 is not None and value.get('record_sha256') != record_sha256
                     or value['request_sha256'] != _hash(request)
                     or any(value[key] != request[key] for key in ('job_id', 'project_id', 'source_binding'))

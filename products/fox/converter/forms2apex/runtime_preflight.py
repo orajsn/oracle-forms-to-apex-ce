@@ -64,11 +64,17 @@ def bound_target_profile(settings) -> dict:
         'apex_workspace': profile['apex']['workspace'],
         'apex_parsing_schema': profile['database']['parsing_schema'],
         'sqlcl_connection_name': profile['sqlcl']['saved_connection'],
+    }
+    if 'design_provider' in profile:
+        roles = profile['design_provider']['roles']
+        values.update(generator_model=roles['mapper']['model'], reviewer_model=roles['reviewer']['model'])
+    else:
+        values.update({
         'generator_model': profile['opaf']['roles']['mapper']['model'],
         'reviewer_model': profile['opaf']['roles']['reviewer']['model'],
         'opaf_mapper_workflow_id': profile['opaf']['roles']['mapper']['workflow_id'],
         'opaf_reviewer_workflow_id': profile['opaf']['roles']['reviewer']['workflow_id'],
-    }
+        })
     for field, expected in values.items():
         if getattr(settings, field, None) != expected:
             raise TargetProfileError(f'Target settings mismatch: {field}')

@@ -136,6 +136,13 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                                     admission_allowed, target_reader=configured_target,
                                     installation_projection=None, download_client_factory=None,
                                     fresh_admission_allowed=None, query_omission_admission=None):
+    from .prototype_direct_container import attach_routes as attach_container_routes
+    attach_container_routes(app, root=root, db=db, project_owner=project, current_sources=current_sources,
+        admission_allowed=admission_allowed, target_reader=target_reader, input_model=PrototypeContinuationInput)
+    from .prototype_validation_retry import attach_routes as attach_validation_retry
+    attach_validation_retry(app, root=root, db=db, project_owner=project, current_sources=current_sources,
+        admission_allowed=admission_allowed, target_reader=target_reader, input_model=PrototypeContinuationInput,
+        installation_projection=installation_projection)
     def target_hash():
         try:
             envelope = target_reader()

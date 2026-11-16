@@ -181,6 +181,38 @@ _DEPLOYABLE_TARGET_PROFILES = {
 }
 
 
+DIRECT_PROFILE_ID = 'jsn-native-project-2616-oci-genai-v1'
+
+
+def _direct_target(value):
+    """Separate reviewed SQLcl destination from configurable direct model roles."""
+    if not isinstance(value, dict) or 'design_provider' not in value:
+        return None
+    try:
+        config = value['design_provider']
+        expected_config = {'schema_version': 1, 'provider': 'oci_genai',
+            'authentication': 'instance_principal',
+            'endpoint': 'https://inference.generativeai.us-ashburn-1.oci.oraclecloud.com',
+            'roles': config['roles']}
+        _exact(config, expected_config, 'design_provider')
+        if set(config['roles']) != {'mapper', 'reviewer'}:
+            raise ValueError()
+        for name, role in config['roles'].items():
+            if (type(role) is not dict or set(role) != {'model', 'prompt_version'}
+                    or not isinstance(role['model'], str)
+                    or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}', role['model'])
+                    or role['prompt_version'] != 'fox-focus-' + name + '-v1'):
+                raise ValueError()
+        expected = json.loads(json.dumps(_PROFILE_JSN_PROJECT_2616))
+        expected.pop('opaf', None)
+        del expected['tested_versions']['opaf']
+        expected.update(profile_id=DIRECT_PROFILE_ID, design_provider=config)
+        _exact(value, expected, 'direct_target')
+        return json.loads(_canonical_bytes(value))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise TargetProfileError('Direct design target differs from the approved JSN destination or provider contract') from None
+
+
 class TargetProfileError(ValueError):
     """A bounded error that does not repeat supplied values or credentials."""
 
@@ -241,6 +273,8 @@ def validate_target_profile(value: dict) -> dict:
         raise TargetProfileError('Target profile must be a JSON object')
     if value.get('active') is not True:
         raise TargetProfileError('Inactive target profiles cannot connect or authorize execution')
+    direct = _direct_target(value)
+    if direct is not None: return direct
     digest = _digest(value)
     approved = _DEPLOYABLE_TARGET_PROFILES.get(digest)
     if approved is None:
@@ -260,6 +294,8 @@ def validate_historical_target_profile(value: dict) -> dict:
     fetching OPAF or silently applying today's different deployment settings.
     """
     if not isinstance(value,dict):raise TargetProfileError('Historical target profile must be a JSON object')
+    direct = _direct_target(value)
+    if direct is not None: return direct
     digest=_digest(value)
     known=_KNOWN_HISTORICAL_PROFILES.get(digest)
     if known is None or _digest(known)!=digest:
@@ -353,7 +389,10 @@ def _verify_preflight(profile, observed, *, now, include_model_environment):
         raise TargetProfileError('Preflight evidence is stale; collect new read-only observations')
     if age < -MAX_FUTURE_SKEW_SECONDS:
         raise TargetProfileError('Preflight evidence is in the future beyond allowed clock skew')
-    oci, database, apex, opaf = (profile[key] for key in ('oci', 'database', 'apex', 'opaf'))
+    if include_model_environment and 'design_provider' in profile:
+        raise TargetProfileError('Direct inference evidence is checked separately from target preflight')
+    oci, database, apex = (profile[key] for key in ('oci', 'database', 'apex'))
+    opaf = profile.get('opaf')
     expected = {
         'schema_version': 1,
         'trust_boundary': TRUST_BOUNDARY,
@@ -373,17 +412,20 @@ def _verify_preflight(profile, observed, *, now, include_model_environment):
             'workspace_schema_mapping_count': 1, 'https_reachable': True,
         },
         'sqlcl': profile['sqlcl'],
+        'versions': profile['tested_versions'],
+    }
+    if include_model_environment:
+        expected.update({
         'opaf': {
             'base_url': opaf['base_url'], 'certificate_sha256': opaf['certificate_sha256'],
             'model_authentication': opaf['model_authentication'],
             'version_number': opaf['version_number'], 'build_id': opaf['build_id'],
             'roles': {role: {**value, 'published': True} for role, value in opaf['roles'].items()},
         },
-        'versions': profile['tested_versions'],
-    }
+        })
     versions = profile['tested_versions']
     if not include_model_environment:
-        del expected['opaf']
+        expected.pop('opaf', None)
         versions = {key: versions[key] for key in ('apex', 'sqlcl', 'apexlang_mmd')}
         expected['versions'] = versions
     _exact(observed, expected, 'preflight')

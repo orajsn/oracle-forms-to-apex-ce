@@ -17,6 +17,7 @@ from .forms_focus import build_focus_plan
 from .forms_understanding_packet import local_packet
 from .native_pipeline import _save_once
 from .opaf import OpafError, canonical_hash, parse_model_message
+from .design_provider import roles as provider_roles, invocation_id
 from .prototype_admission import bound_focus_limit
 from .prototype_claim_resolution import resolved_mapper, resolve_claim_owners
 from .prototype_focus_projection import (STRATEGY, source_fact_gate, fact_diagnostics,
@@ -540,7 +541,7 @@ def reconstruct(job, snapshot, original, target):
         raise OpafError('Epoch full focus plan changed.')
     binding = {'schema_version': selected['schema_version'], 'job_id': job.name, 'project_id': snapshot['project_id'],
         'project_name': snapshot['project_name'], 'source_binding': selected['source_binding'],
-        'focus_plan_sha256': selected['focus_plan_sha256'], 'profile_sha256': canonical_hash(target['opaf']['roles']),
+        'focus_plan_sha256': selected['focus_plan_sha256'], 'profile_sha256': canonical_hash(provider_roles(target)),
         'approved_policy_id': selected['approved_policy_id']}
     if selected['schema_version'] == 2: binding['max_owned_objects'] = 32
     if 'metadata_task_policy' in selected: binding['metadata_task_policy']=selected['metadata_task_policy']
@@ -568,7 +569,7 @@ def _role(directory, name, payload, target, identity, runtime=None):
     if runtime is None:
         for suffix in ('.json', '-intent.json', '-target.json'): read(directory / (name + suffix))
     output, invocation = invoke(directory, name, runtime['opaf_client'] if runtime else None,
-        target['opaf']['roles'][name], payload, identity,
+        provider_roles(target)[name], payload, identity,
         runtime['target_profile_loader'] if runtime else None,
         runtime['processing_approval_check'] if runtime else None,
         runtime['approval_context'] if runtime else None)
@@ -629,7 +630,7 @@ def _inspect_next_epoch(job, snapshot, original, target, db):
             review, reviewer = _role(directory, 'reviewer', {'request': request, 'candidate': candidate,
                 'candidate_sha256': canonical_hash(candidate)}, target, identity)
             checked = _review(request, candidate, review, directory)
-            if not checked['approved_structured_design'] or mapper['room_id'] == reviewer['room_id']:
+            if not checked['approved_structured_design'] or invocation_id(mapper) == invocation_id(reviewer):
                 raise OpafError('Epoch prefix is not independently approved.')
             same(read(directory / 'review-receipt.json'), checked)
             diagnostics = fact_diagnostics(packet, request, candidate)
@@ -751,6 +752,9 @@ def _dispatch_active_focus(root, packet, plan, request, target, previous, *, run
     from . import prototype_candidate_continuation as candidate_format
     if candidate_format.present(root):
         candidate_format.validate_technical_record(root,packet,plan,target)
+    from . import prototype_direct_container as direct_container
+    if direct_container.present(root):
+        return direct_container.active_focus(root, packet, plan, request, target, previous, runtime=runtime)
     record = technical_record(root)
     from . import prototype_clause_epoch as clause
     from . import prototype_container_epoch as container
@@ -796,6 +800,11 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
             if not enabled(root,request,raw): raise
             candidate,evidence = normalize_remaining(root,request,raw,owner_candidate,owner_receipt)
             gate = source_fact_gate(packet,request,candidate)
+        if evidence is None:
+            from .prototype_direct_container import initial
+            from .design_provider import is_direct
+            candidate, evidence = initial(packet, request, candidate, original, write=write, direct=is_direct(target))
+            if evidence is not None: gate = source_fact_gate(packet, request, candidate)
         if evidence is not None:
             save(original/'projection-candidate.json',candidate,write)
             save(original/'projection-receipt.json',evidence,write)
@@ -881,7 +890,7 @@ def _active_focus(root, packet, plan, request, target, previous, record, prefix,
                 return {'review_request': payload, 'candidate':candidate, 'format_evidence':format_evidence}
             return {'review_request':payload}
         review, reviewer = _role(directory, 'reviewer', payload, target, identity, runtime)
-    if mapper['room_id'] == reviewer['room_id']:
+    if invocation_id(mapper) == invocation_id(reviewer):
         raise OpafError('Active version requires an independent reviewer invocation.')
     from .prototype_candidate_continuation import independent_reviewer
     independent_reviewer(previous,mapper,reviewer,evidence)

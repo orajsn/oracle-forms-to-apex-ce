@@ -186,6 +186,33 @@ def conversion_configuration(*, installation_projection=_NO_INSTALLATION_PROJECT
     if installation_projection is not _NO_INSTALLATION_PROJECTION:
         check('FRESH_PROJECT_PROFILE', profile == PROJECT_PROFILE,
               'Fresh installations require the native project conversion profile.')
+    if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai':
+        from .prototype_job import load_prototype_profile
+        try:
+            from .design_provider import direct_config
+            target = load_prototype_profile(os.environ['FOX_PROTOTYPE_PROFILE_FILE'])['target_profile']
+            direct_config(target)
+            configured = True
+        except (KeyError, OSError, ValueError, RuntimeError, ImportError):
+            configured = False
+        check('DIRECT_DESIGN_PROFILE', configured, 'Configure the approved OCI design and execution target profile.')
+        credential = os.getenv('FOX_CONVERTER_CREDENTIAL_FILE', '')
+        check('CONVERTER_CREDENTIAL_FILE', bool(credential) and Path(credential).is_file(),
+              'Mount the protected converter credential file.')
+        from .opaf import ConverterClient
+        try:
+            from .prototype_job import direct_converter_options
+            options = direct_converter_options() if installation_projection is _NO_INSTALLATION_PROJECTION else {'projection': installation_projection}
+            ConverterClient(os.getenv('FOX_CONVERTER_URL', ''), '', **options)
+            converter_ready = True
+        except (ValueError, RuntimeError):
+            converter_ready = False
+        check('INTERNAL_CONVERTER', converter_ready, 'Configure the internal converter endpoint.')
+        check('DIRECT_PROJECT_PROFILE', profile == PROJECT_PROFILE, 'Select the project conversion profile.')
+        return {'conversion_profile': profile, 'conversion_configured': all(item['ready'] for item in checks),
+                'configured_project_schema_versions': [1, 2], 'configuration_checks': checks,
+                'design_provider': 'oci_genai',
+                'configuration_scope': 'Configuration only; inference and technical gates run during approved prototype processing.'}
     if profile in {NATIVE_PROFILE, PROJECT_PROFILE}:
         from .opaf import ConverterClient, load_native_profile
         try:
@@ -621,7 +648,7 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                                'Conversion is not configured for this deployment.' if not configured else None)},
                 'local_preparation': {'enabled': enable_local_preparation},
             }
-            p['processing_notice'] = ('Conversion uses embedded OPAF and the configured AI provider. '
+            p['processing_notice'] = (('Conversion uses direct OCI Generative AI for design and independent review. ' if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai' else 'Conversion uses embedded OPAF and the configured AI provider. ') +
                 'Only source approved for that processing route may be submitted. '
                 'Do not upload credentials or production records; generated test data is synthetic.')
             from .project_run_status import is_project_run, project_run_status, historical_native_run_status
@@ -1112,8 +1139,9 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         raise ValueError('Prototype authority requires an explicit enabled setting.')
     attach_prototype_authority(app, root=root, db=db, enabled=authority_mode == '1',
         profile_path=os.getenv('FOX_PROTOTYPE_PROFILE_FILE') or None,
-        credential_path=os.getenv('FOX_OPAF_CREDENTIAL_FILE') or None,
-        allowed_origin=origin)
+        credential_path=(os.getenv('FOX_CONVERTER_CREDENTIAL_FILE') if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai'
+                         else os.getenv('FOX_OPAF_CREDENTIAL_FILE')) or None,
+        allowed_origin=origin, allow_loopback_http=os.getenv('FOX_DIRECT_LOOPBACK_AUTHORITY') == '1')
     from .hosted_forms_routes import attach_hosted_forms_routes
     attach_hosted_forms_routes(app, db=db, project=project, current_sources=current_sources)
     if enable_local_preparation:

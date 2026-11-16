@@ -1,6 +1,8 @@
 # Install the FOX development preview
 
-This source snapshot has two different routes. Windows local preparation and
+For the isolated direct OCI route in FOX0.26.0, use the [direct preview guide](direct-oci-preview.md). It includes a prebuilt-UI/offline-wheel package and explicit existing Oracle prerequisites. Clean package startup and complete conversion acceptance are separate.
+
+The preceding OPAF source snapshot has two different routes. Windows local preparation and
 assessment can run independently. Connected conversion uses the guarded JSN lab
 adapter; a supported fresh customer installer is not yet complete. The CE
 repository's root `install.py` installs the CE skill, not FOX.

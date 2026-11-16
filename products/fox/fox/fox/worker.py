@@ -48,8 +48,8 @@ def process_one(db,root:Path,*,installation_projection=_NO_INSTALLATION_PROJECTI
         if prototype:
             # A separate explicit profile, not permission to widen historical
             # native-project gates or submit this source to a legacy workflow.
-            if os.environ.get('FOX_RUN_ADAPTER') != 'embedded-opaf':
-                raise RuntimeError('Prototype conversion requires the explicit embedded adapter.')
+            if os.environ.get('FOX_RUN_ADAPTER') not in ('embedded-opaf', 'oci-genai'):
+                raise RuntimeError('Prototype conversion requires an explicitly configured design adapter.')
             if ((job/'native-project-pipeline').exists() or (job/'native-project-pipeline').is_symlink()
                     or 'native_project' in snapshot):
                 raise RuntimeError('Prototype source identity conflicts with a retained native-project job.')
@@ -107,6 +107,8 @@ def process_one(db,root:Path,*,installation_projection=_NO_INSTALLATION_PROJECTI
             else:
                 run_native_project_job(job, installation_projection=projection)
             result=None
+        elif adapter == 'oci-genai':
+            raise RuntimeError('Direct OCI inference requires an explicitly approved prototype run.')
         elif adapter == 'embedded-opaf':
             from .opaf import run_job
             run_job(job)

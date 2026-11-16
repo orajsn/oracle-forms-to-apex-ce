@@ -108,7 +108,7 @@ def _checked_installation_projection(values, installation_projection=_NO_INSTALL
     try:
         projection = validate_projection(installation_projection)
         if (values.get('FOX_CONVERSION_PROFILE') != PROFILE_ID
-                or values.get('FOX_RUN_ADAPTER') != 'embedded-opaf'
+                or values.get('FOX_RUN_ADAPTER') not in ('embedded-opaf', 'oci-genai')
                 or values.get('FOX_CONVERTER_URL') != projection['converter_endpoint']):
             raise FreshProjectionError('FRESH_PROJECT_TRANSPORT_MISMATCH')
     except FreshProjectionError:

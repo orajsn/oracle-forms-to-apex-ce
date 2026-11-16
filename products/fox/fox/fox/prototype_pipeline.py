@@ -44,7 +44,8 @@ from .forms_native_required_plan import build_native_plan, bound_native_input_po
 from .forms_count_guard_selection import bound_count_guard, selected_source_rule
 from .forms_understanding_packet import local_packet
 from .native_pipeline import _json, _save_once, _sync
-from .opaf import OpafError, canonical_hash, validate_model_environment
+from .opaf import OpafError, canonical_hash
+from .design_provider import roles as provider_roles, validate_roles, invocation_id, valid_invocation_identity, validate_environment as validate_model_environment
 
 CONVERTER_STAGES = ('validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
@@ -225,7 +226,7 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
                                   'request_sha256': binding['request_sha256']}) is not True:
         raise OpafError('Fresh source-bound external-processing approval is required.')
     target = target_profile_loader()
-    if target.get('opaf', {}).get('roles', {}).get(name) != role:
+    if provider_roles(target).get(name) != role:
         raise OpafError('Prototype role differs from its approved target profile.')
     _save_once(directory / (name + '-target.json'), target)
     environment = client.observe_environment(role, identity, role_name=name, target_profile=target)
@@ -235,7 +236,7 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
     try:
         output, invocation = client.invoke(role, request)
         if (invocation.get('request_sha256') != binding['request_sha256']
-                or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}', invocation.get('room_id', ''))
+                or not valid_invocation_identity(invocation)
                 or not _SHA.fullmatch(invocation.get('response_sha256', ''))):
             raise OpafError('Prototype invocation is not bound to the actual model request.')
         validate_model_environment(environment, target, name, identity, invocation)
@@ -256,9 +257,9 @@ def _review_index(checkpoints, plan):
 
 def _policy_roles(binding, target):
     """New-policy reconstruction retains the original role trust boundary."""
-    roles=target['opaf']['roles']
-    if (canonical_hash(roles)!=binding.get('profile_sha256')
-            or roles['mapper']['workflow_id'].upper()==roles['reviewer']['workflow_id'].upper()):
+    roles=provider_roles(target)
+    validate_roles(roles)
+    if canonical_hash(roles)!=binding.get('profile_sha256'):
         raise OpafError('Candidate format authority requires the exact independently executed roles.')
 
 
@@ -270,7 +271,10 @@ def _scoped_review_index(checkpoints, plan):
     format_policy = binding.get('candidate_format_policy')
     if 'candidate_format_policy' in binding and format_policy != FORMAT_POLICY:
         raise OpafError('Unknown immutable candidate format policy.')
-    if epoch is None and format_policy is not None:
+    from .design_provider import is_direct
+    first_target = read(checkpoints/plan['requests'][0]['focus_id']/'mapper-target.json')
+    direct = is_direct(first_target)
+    if epoch is None and (format_policy is not None or direct):
         packet = _artifact_json(checkpoints/'packet.json')
         target = read(checkpoints/plan['requests'][0]['focus_id']/'mapper-target.json')
         _policy_roles(binding,target)
@@ -291,6 +295,15 @@ def _scoped_review_index(checkpoints, plan):
             for name in sorted(names - existing):
                 path = checkpoints / name
                 files.append({'path':name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        if direct:
+            from . import prototype_direct_container as container
+            extra = [checkpoints/'assessment.json']
+            if container.present(checkpoints): extra.extend(sorted((checkpoints/container.PREFIX).iterdir()))
+            for path in extra:
+                if path.is_symlink() or not path.is_file(): raise OpafError('Unsafe container provenance.')
+                files.append({'path':path.relative_to(checkpoints).as_posix(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+            return {'schema_version':4,'direct_container_policy':container.POLICY,'source_binding':plan['source_binding'],
+                'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
         return {'schema_version':3,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
             'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
     if epoch is not None:
@@ -408,8 +421,10 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
     from .prototype_mapping_epochs import technical_record, active_focus
     epoch = technical_record(checkpoints)
     views = []
+    from .design_provider import is_direct
+    original_target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
     for focus in plan['requests']:
-        if epoch is not None or binding.get('candidate_format_policy') is not None:
+        if epoch is not None or binding.get('candidate_format_policy') is not None or is_direct(original_target):
             target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
             if binding.get('candidate_format_policy') is not None: _policy_roles(binding,target)
             view = active_focus(checkpoints, packet, plan, focus, target, views)
@@ -428,9 +443,9 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
             {'request': focus, 'candidate': candidate, 'candidate_sha256': canonical_hash(candidate)},
             identity, None, None, None)
         roles = {name: _json(child / (name + '.json'))['binding']['role'] for name in ('mapper', 'reviewer')}
+        validate_roles(roles)
         if (canonical_hash(roles) != binding['profile_sha256']
-                or mapper['workflow_id'].upper() == reviewer['workflow_id'].upper()
-                or mapper['room_id'] == reviewer['room_id']):
+                or invocation_id(mapper) == invocation_id(reviewer)):
             raise OpafError('Prototype authority requires the exact independently executed roles.')
         checked = forms_design_review.validate_design_review(focus, candidate, review)
         if not checked['approved_structured_design'] or _json(child / 'review-receipt.json') != checked:
@@ -543,11 +558,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         source_binding=expected_source_binding)
     count_guard = _saved_count_guard(job, requested=count_guard, documents=documents,
         project_id=project_id, project_name=project_name, source_binding=expected_source_binding)
-    if (not isinstance(profile, dict) or any(not isinstance(profile.get(name), dict)
-            for name in ('mapper', 'reviewer'))
-            or any(not isinstance(profile[name].get('workflow_id'), str) for name in ('mapper', 'reviewer'))
-            or profile['mapper'].get('workflow_id', '').upper() == profile['reviewer'].get('workflow_id', '').upper()):
-        raise OpafError('Prototype requires separately configured mapper and reviewer workflows.')
+    validate_roles(profile)
     packet = local_packet(documents)
     if (job/'source-snapshot.json').is_file():
         # This is the immutable source snapshot, not a small native checkpoint.
@@ -722,6 +733,13 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
             receipt = converter_adapter.recover_stage(stage, request)
             if receipt is None:
                 if pending.exists():
+                    from . import prototype_validation_retry as validation_retry
+                    if stage == 'validate' and validation_retry.present(job):
+                        receipt = _check_converter_receipt(stage,request,converter_adapter.retry_validation(request))
+                        _save_once(complete,receipt)
+                        prior[stage] = receipt
+                        facts['sqlcl_validated'] = True
+                        continue
                     if stage == 'validate' and preclaim.present(checkpoints):
                         try:
                             receipt = converter_adapter.continue_validation(request)

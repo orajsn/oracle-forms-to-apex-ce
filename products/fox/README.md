@@ -9,7 +9,26 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
-## Current checkpoint — 16 November 2026
+## Direct OCI preview — 16 November 2026
+
+FOX0.26.0 adds direct OCI Generative AI design and independent review to the
+existing prototype flow. OPAF remains optional. See the [direct preview guide](docs/direct-oci-preview.md)
+for configuration, external prerequisites and offline packaging.
+
+This is a new isolated-preview implementation. It does not resume the cleared
+OPAF deployment work or authorize public cutover. The first hosted real-FMB
+acceptance run is in progress. Generation, exact-download import/runtime proof
+and human business acceptance remain separate.
+
+The package has passed a clean offline dependency installation and API startup
+smoke check without old operational history. That check is not a completed
+Oracle conversion or a fresh customer-target installation.
+
+## Historical OPAF checkpoint — 16 November 2026
+
+The following records the preceding OPAF line. Its active-work statements are
+historical and do not govern the isolated direct OCI preview.
+
 
 **Development preview, not a ready end-to-end migration product.**
 

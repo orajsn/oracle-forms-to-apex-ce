@@ -101,7 +101,7 @@ def _authority_json(raw):
     return result
 
 
-def _authority_descriptor(bundle, *, encoded):
+def _authority_descriptor(bundle, *, encoded, review_index=None):
     keys = {"schema_version", "scope", "job_id", "source_binding", "source_authority", "files", "manifest_sha256"}
     _need(type(bundle) is dict and set(bundle) == keys, "PROTOTYPE_AUTHORITY_BUNDLE_FIELDS_INVALID")
     _need(type(bundle["schema_version"]) is int and bundle["schema_version"] == 1
@@ -134,6 +134,16 @@ def _authority_descriptor(bundle, *, encoded):
     omission_format = not epoch_format and any(type(row) is dict and row.get('path') == 'redacted-query-omission.json'
                                                for row in bundle['files'])
     path_format = _AUTHORITY_PATH if epoch_format else _LEGACY_AUTHORITY_PATH
+    if encoded:
+        selected = [r for r in bundle['files'] if type(r) is dict and r.get('path')=='review-index.json']
+        if len(selected)==1:
+            encoded_index=selected[0].get('content_base64')
+            _need(type(encoded_index) is str and len(encoded_index)<=27_000_000,'PROTOTYPE_AUTHORITY_INDEX_INVALID')
+            try: review_index=_authority_json(base64.b64decode(encoded_index,validate=True))
+            except (ValueError,binascii.Error): raise RuntimeError('PROTOTYPE_AUTHORITY_INDEX_INVALID') from None
+    direct_format = (type(review_index) is dict and type(review_index.get('schema_version')) is int
+        and review_index['schema_version']==4
+        and review_index.get('direct_container_policy')=='source-form-container-retention-v1')
     rows, names, total = [], [], 0
     for row in bundle["files"]:
         _need(type(row) is dict and set(row) == ({"path", "sha256", "bytes", "content_base64"} if encoded
@@ -141,7 +151,9 @@ def _authority_descriptor(bundle, *, encoded):
               "PROTOTYPE_AUTHORITY_FILE_FIELDS_INVALID")
         name = row["path"]
         _need(type(name) is str and (name in _AUTHORITY_ROOT_FILES or path_format.fullmatch(name)
-              or omission_format and name in {'redacted-query-omission.json', 'assessment.json'}
+              or direct_format and name == 'assessment.json'
+              or direct_format and re.fullmatch(r'container-review/(?:correction|request|candidate|projection|reviewer|reviewer-intent|reviewer-target|reviewer-metadata-task|review-receipt)\.json', name)
+              or omission_format and name in {'redacted-query-omission.json','assessment.json'}
               or clause_format and (name in _CLAUSE_FIXED_PATHS or _CLAUSE_FOCUS_PATH.fullmatch(name))
               or container_format and (name in _CONTAINER_FIXED_PATHS or _CONTAINER_FOCUS_PATH.fullmatch(name))
               or partition_format and (name in _PARTITION_FIXED_PATHS or _PARTITION_FOCUS_PATH.fullmatch(name))
@@ -186,7 +198,10 @@ def _check_authority_members(descriptor, members):
               "PROTOTYPE_AUTHORITY_SOURCE_BYTES_CHANGED")
         expected.add(name)
     focuses = set()
-    if index.get('schema_version') in (2,3):
+    if index.get('schema_version') in (2,3,4):
+        if index.get('schema_version') == 4:
+            _need(index.get('direct_container_policy') == 'source-form-container-retention-v1',
+                  'PROTOTYPE_CONTAINER_POLICY_INVALID')
         if index.get('schema_version') == 3:
             _need(binding.get('candidate_format_policy') == index.get('candidate_format_policy') ==
                 'exact-source-envelope-and-item-fact-aliases-v1','PROTOTYPE_CANDIDATE_FORMAT_POLICY_INVALID')
@@ -314,7 +329,9 @@ class PrototypeGateway:
             if not manifest_path.exists() and not manifest_path.is_symlink():
                 return None
             manifest = read_object(manifest_path)
-            descriptor = _authority_descriptor(manifest, encoded=False)
+            index_path=target/'review-index.json'
+            index=read_object(index_path) if index_path.is_file() and not index_path.is_symlink() else None
+            descriptor = _authority_descriptor(manifest, encoded=False, review_index=index)
             _need(descriptor["job_id"] == job_id and not target.is_symlink(), "PROTOTYPE_AUTHORITY_JOB_MISMATCH")
             if not target.exists():
                 return None
@@ -481,7 +498,9 @@ class PrototypeGateway:
     def _check_prior(self, root, request):
         for stage, supplied in request["prior_receipts"].items():
             path = root / (stage + ".json")
-            _need(read_object(path) == supplied, "PROTOTYPE_PRIOR_RECEIPT_MISMATCH")
+            from .prototype_validation_retry import local_effective
+            original_request = {**request, 'prior_receipts': {key: request['prior_receipts'][key] for key in STAGES[:STAGES.index(stage)]}}
+            _need(local_effective(root,stage,original_request) == supplied, "PROTOTYPE_PRIOR_RECEIPT_MISMATCH")
             _need(supplied.get("status") == "COMPLETE", "PROTOTYPE_PRIOR_STAGE_NOT_PASSED")
             original = {**request, "prior_receipts": {key: request["prior_receipts"][key]
                         for key in STAGES[:STAGES.index(stage)]}}
@@ -638,6 +657,14 @@ class PrototypeGateway:
                 execute_sql=lambda commands: self._sql(root, commands), fresh_check=check)
         return result
 
+    def validation_retry_witness(self,job_id):
+        from .prototype_validation_retry import witness
+        with _LOCK: return witness(self,job_id)
+
+    def retry_validation(self,request,witness,record_sha256):
+        from .prototype_validation_retry import retry
+        with _LOCK: return retry(self,deepcopy(request),deepcopy(witness),record_sha256)
+
     def run_stage(self, stage, request):
         return self._run_stage(stage, request)
 
@@ -777,7 +804,8 @@ class PrototypeGateway:
                   "PROTOTYPE_STAGE_REQUEST_CHANGED")
             _need(read_object(root / (stage + "-intent.json")) == {"request_sha256": digest(request)},
                   "PROTOTYPE_STAGE_INTENT_CHANGED")
-            receipt = read_object(path)
+            from .prototype_validation_retry import local_effective
+            receipt = local_effective(root,stage,request)
             self._check_receipt(stage, request, receipt)
             if stage == "verify_runtime":
                 from .prototype_release import validate_runtime_receipt
@@ -833,7 +861,8 @@ class PrototypeGateway:
                       "PROTOTYPE_STAGE_REQUEST_CHANGED")
                 _need(read_object(root / (stage + "-intent.json")) == {"request_sha256": digest(historical)},
                       "PROTOTYPE_STAGE_INTENT_CHANGED")
-                receipt = read_object(root / (stage + ".json"))
+                from .prototype_validation_retry import local_effective
+                receipt = local_effective(root,stage,historical)
                 self._check_receipt(stage, historical, receipt)
                 _need(type(receipt) is dict and receipt.get("status") == "COMPLETE",
                       "PROTOTYPE_PACKAGE_STAGE_INCOMPLETE")

@@ -8,6 +8,19 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.26.0] - 2026-11-16
+
+Preview under verification.
+
+### [feature] Direct OCI design and independent review
+Impact: Operators can select direct OCI Generative AI for the existing FOX prototype flow.
+Change: Add configurable instance-principal design/review roles and provider-specific request evidence; retain OPAF compatibility and deterministic source, target, rendering and SQLcl checks. Add an isolated loopback launcher, runtime factory and archive builder containing the prebuilt UI and offline wheels.
+The same-run continuation can retain a source-proven form container after a new independent review, or recheck one definitively failed connectionless validation after an explicit owner approval. Original model calls and failed validation artifacts remain preserved.
+
+Delivery: Implementation branch; no public cutover or release tag.
+Verification: Acceptance evidence is being collected; no completed hosted conversion is claimed by this entry.
+Remaining: Complete hosted upload, extraction, approved-source processing, UI SQL download, exact-file fresh-ID import and runtime proof; human business acceptance stays separate.
+
 ## Documentation updates
 
 ### [docs] 2026-11-16 — Record completed 0.25.0 image builds

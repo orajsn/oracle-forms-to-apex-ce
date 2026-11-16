@@ -119,6 +119,22 @@ def attach_prototype_routes(mcp, gateway, settings):
         except (ValueError, TypeError, RuntimeError, OSError, KeyError):
             return JSONResponse({'error': 'Validation continuation is unconfirmed. Reconcile retained evidence without replay.'}, status_code=409)
 
+    @mcp.custom_route('/fox/prototype/jobs/{job_id}/validation-retry', methods=['GET','POST'], include_in_schema=False)
+    async def validation_retry(request):
+        if not authorized(request): return JSONResponse({'error':'Unauthorized'},status_code=401)
+        try:
+            job_id=request.path_params['job_id']; validate_job_id(job_id)
+            if request.method=='GET':
+                result=await asyncio.to_thread(gateway.validation_retry_witness,job_id)
+            else:
+                value=await body(request,2_020_000)
+                if (type(value) is not dict or set(value)!={'request','witness','record_sha256'}
+                        or value['request'].get('job_id')!=job_id): raise ValueError()
+                result=await asyncio.to_thread(gateway.retry_validation,value['request'],value['witness'],value['record_sha256'])
+            return JSONResponse(result,headers={'Cache-Control':'no-store'})
+        except (ValueError,TypeError,RuntimeError,OSError,KeyError,OverflowError):
+            return JSONResponse({'error':'Validation retry requires reconciliation. Original failures remain preserved; no uncertain operation was replayed.'},status_code=409)
+
     @mcp.custom_route('/fox/prototype/jobs/{job_id}/stages/{stage}', methods=['POST', 'GET'], include_in_schema=False)
     async def stage(request):
         if not authorized(request):

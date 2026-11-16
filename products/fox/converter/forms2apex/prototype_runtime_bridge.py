@@ -41,6 +41,8 @@ _ARTIFACT = re.compile(r"runtime-evidence/[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.(?:js
 _CONTEXT = {REQUEST, CLAIM, RESULT, RECEIPT, "snapshot.json", "candidate-apexlang.zip",
             "validate.json", "prepare_schema.json", "import.json", "verify_runtime-request.json",
             "verify_runtime-intent.json"}
+from .prototype_validation_retry import FILES as _RETRY_FILES
+_CONTEXT.update(_RETRY_FILES)
 
 
 def need(value, code):
@@ -262,7 +264,12 @@ def validate_packet(packet):
 def check_retained(io, packet):
     request, job = packet["request"], packet["request"]["job_id"]
     for stage, receipt in request["prior_receipts"].items():
-        need(object_bytes(io.read(job, stage + ".json", MAX_JSON)) == receipt,
+        from .prototype_validation_retry import effective
+        original = {**request, 'prior_receipts': {key:request['prior_receipts'][key] for key in ('validate','prepare_schema','import')[:('validate','prepare_schema','import').index(stage)]}}
+        def read(name,json):
+            raw=io.read(job,name,20_000_000)
+            return object_bytes(raw) if json else raw
+        need(effective(read,lambda name:io.exists(job,name),stage,original) == receipt,
              "PROTOTYPE_BRIDGE_RETAINED_PRIOR_CHANGED")
     need(object_bytes(io.read(job, "snapshot.json", MAX_JSON)) == packet["artifact_binding"],
          "PROTOTYPE_BRIDGE_RETAINED_SNAPSHOT_CHANGED")

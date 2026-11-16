@@ -4,6 +4,7 @@ This is not clause recovery or format normalization. The original model output
 is retained, the omitted behavior is unresolved, and a fresh reviewer must
 approve the derived partial design before normal technical gates can proceed.
 """
+from .design_provider import roles as provider_roles
 from copy import deepcopy
 import hashlib
 import math
@@ -109,7 +110,7 @@ def _technical(root, packet, plan, target):
             or record['project_id'] != binding['project_id'] or record['source_binding'] != plan['source_binding']
             or record['target_profile_sha256'] != canonical_hash(target)
             or binding['focus_plan_sha256'] != canonical_hash(plan)
-            or binding['profile_sha256'] != canonical_hash(target['opaf']['roles'])):
+            or binding['profile_sha256'] != canonical_hash(provider_roles(target))):
         _fail()
     epochs._descriptors(record['before_files'])
     epochs._before_unchanged(root, {n[len('prototype-pipeline/'):]: d

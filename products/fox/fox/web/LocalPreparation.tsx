@@ -322,7 +322,7 @@ export function LocalPreparationView({state,busy,onSelect,onPrepare,onAssess,onR
    <p className="subtle">Up to {capabilities.maxFiles} files · {capabilities.maxFileBytes/MiB} MB/file · {capabilities.maxSelectedBytes/MiB} MB selected. Prepared readable output must fit 5 MB/file and 25 MB total.</p>
    <label className="button secondary upload-button">Choose local source files<input aria-label="Choose local source files" type="file" multiple accept={[...capabilities.readableFormats,...capabilities.nativeFormats].join(',')} disabled={locked||job?.state==='RUNNING'||state.uncertain} onChange={event=>{onSelect(Array.from(event.target.files||[]));event.target.value='';}}/></label>
    {state.selected.length>0&&<ul>{state.selected.map(file=><li key={file.name}>{file.name} ({file.size.toLocaleString()} bytes)</li>)}</ul>}
-   {capabilities.formsAssessmentAvailable&&<><p className="subtle">Assessment stays local. It does not add sources to the current project or run OPAF.</p>
+   {capabilities.formsAssessmentAvailable&&<><p className="subtle">Assessment stays local. It does not add sources to the current project or send it for AI processing.</p>
     <button type="button" disabled={!onAssess||locked||!state.selected.length||job?.state==='RUNNING'||state.uncertain} onClick={onAssess}>Extract and assess locally</button></>}
    <button type="button" className={capabilities.formsAssessmentAvailable?'secondary':undefined} disabled={locked||!state.selected.length||job?.state==='RUNNING'||state.uncertain} onClick={onPrepare}>Prepare locally</button>
   </>}

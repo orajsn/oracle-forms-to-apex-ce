@@ -1,25 +1,18 @@
 {
-  "version": "0.25.1",
+  "version": "0.26.0",
   "released_on": "2026-11-16",
-  "title": "Fix startup checks for the native source-check release",
+  "title": "Direct OCI Generative AI preview",
   "changes": [
-    "Include the three count-check renderer dependencies in the measured startup source list used to preserve completed prototypes.",
-    "Keep strict rejection of unmeasured startup dependencies; do not bypass preservation checks or alter earlier results.",
-    "Test the exact renderer COPY projection and isolated startup import path, including rejection with the earlier incomplete list.",
-    "Retain the source-backed check, explicit partial-scope choice and preceding download correction from 0.25.0; deployment and live acceptance remain separate."
+    "Use direct OCI Generative AI for separate design and review, with configurable models and instance-principal authentication.",
+    "Retain genuine provider and request evidence alongside source approvals, deterministic rendering and SQLcl checks.",
+    "Keep OPAF available as an optional compatible provider.",
+    "Package the built UI and offline dependencies for an isolated preview."
   ],
   "limitations": [
-    "The new check recognizes one narrow, directly proven first count predicate. It is not a general PL/SQL translator or full button conversion.",
-    "The check reads saved synthetic detail rows. Empty grouping values and no matching rows pass; negative nonzero values are not rejected. Unsaved Forms buffers, later statements, exception handling and approval remain unconverted.",
-    "The source/API/UI and connectionless SQLcl checks do not prove installed fixture creation, actual Oracle browser behavior or a successful hosted download. Live acceptance remains pending.",
-    "The new omission route supports only the exact same-block redacted filter and ordering failure class before its reviewer starts. It does not recover hidden values or claim equivalent query behavior.",
-    "Historical review validation retains its byte-pinned implementation. Scoped reuse does not grant permission; wait allowances do not guarantee completion. Unknown outcomes require reconciliation, not automatic retry.",
-    "Server-side preparation requires operator configuration and testing. The hosted route accepts one FMB per request; MMB, OLB and PLL require the separate supported preparation route.",
-    "The focused prototype profile, current authority endpoint and private browser worker require explicit operator configuration and live checks.",
-    "The retained real-file run has completed OPAF review, APEX import, authenticated runtime checks and server-side SQL export on the lab target. UI download and exact-downloaded-byte fresh-ID import remain pending until the patch is deployed and exercised.",
-    "Any changed candidate requires its own independent review; a saved review is reusable only for the exact reconstructed candidate it approved.",
-    "Inert startup preservation grants no retry, execution, closure or acceptance. Mixed stages require a proven runtime candidate and one runtime target; not every unresolved boundary is supported. Actual host compatibility and coherent deployment remain separate gates.",
-    "Technical identifiers are retained; redaction receipts are not complete PII certification or processing permission.",
-    "APEX generated, technical checks passed and business acceptance remain separate. A prototype export does not prove clean-schema reimport, customer-target compatibility or business equivalence."
+    "Preview acceptance is in progress; source changes do not establish hosted conversion or runtime success.",
+    "Only explicitly approved redacted source may be processed by the selected provider.",
+    "Generated APEX, technical verification and human business acceptance remain separate facts.",
+    "Oracle Forms, Java, SQLcl, an authorized compatible target and runtime browser prerequisites are external dependencies.",
+    "Partial prototypes explicitly omit unsupported behavior and use synthetic data. Uncertain imports require reconciliation and are never automatically repeated."
   ]
 }

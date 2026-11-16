@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "profile_id": "jsn-native-project-2616-oci-genai-v1",
+  "active": true,
+  "scope": {
+    "conversion_profile": "native-table-form-v1",
+    "data_mode": "synthetic_test_only",
+    "supported_operations": [
+      "query",
+      "insert",
+      "update"
+    ],
+    "customer_deployment_authorized": false,
+    "existing_resources_only": true,
+    "project_mapping": {
+      "native_project_schema_versions": [
+        1,
+        2
+      ],
+      "storage_mapping_scope": "fox-project-storage-v1",
+      "module_execution_scope": "fox-project-module-execution-v2"
+    }
+  },
+  "oci": {
+    "compartment_id": "ocid1.compartment.oc1..aaaaaaaa2q5aelkapmt5mhumvxadcynq5chez2faeucy5plefhy3ylmahtba",
+    "database_id": "ocid1.autonomousdatabase.oc1.iad.anuwcljrc7x6gxiapkxouj7emfbelvnvompwjcpoxx5vg727cegjsqkbp4rq",
+    "instance_id": "ocid1.instance.oc1.iad.anuwcljtc7x6gxic5w37qsyp3rst64betkt4uk2pdcrtmy3okspcpbv77qea",
+    "region": "us-ashburn-1"
+  },
+  "database": {
+    "db_name": "ASZ8EQWFM8UNCA2_JSNF2APEX",
+    "session_user": "FORMS2APEX_POC",
+    "parsing_schema": "FORMS2APEX_POC"
+  },
+  "apex": {
+    "workspace": "FORMS2APEX_POC",
+    "workspace_id": "9009446931169094",
+    "ords_origin": "https://asz8eqwfm8unca2-jsnf2apex.adb.us-ashburn-1.oraclecloudapps.com",
+    "ords_base_path": "/ords"
+  },
+  "sqlcl": {
+    "saved_connection": "F2A_APEX"
+  },
+  "tested_versions": {
+    "apex": "26.1.6",
+    "sqlcl": "26.1.2.0",
+    "apexlang_mmd": "26.1.0+3102"
+  },
+  "design_provider": {
+    "schema_version": 1,
+    "provider": "oci_genai",
+    "endpoint": "https://inference.generativeai.us-ashburn-1.oci.oraclecloud.com",
+    "authentication": "instance_principal",
+    "roles": {
+      "mapper": {
+        "model": "xai.grok-4.3",
+        "prompt_version": "fox-focus-mapper-v1"
+      },
+      "reviewer": {
+        "model": "xai.grok-4.3",
+        "prompt_version": "fox-focus-reviewer-v1"
+      }
+    }
+  }
+}

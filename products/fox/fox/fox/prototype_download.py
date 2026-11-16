@@ -5,6 +5,8 @@ reimport is performed here. Missing or uncertain retained proof blocks download.
 """
 from __future__ import annotations
 
+from .design_provider import roles as provider_roles
+
 import hashlib
 from pathlib import Path
 import re
@@ -56,7 +58,7 @@ def _retained_export_request(job, snapshot, target):
             or binding.get('metadata_task_policy') != selected.get('metadata_task_policy')
             or binding.get('candidate_format_policy') != selected.get('candidate_format_policy')
             or binding.get('approved_policy_id') != selected['approved_policy_id']
-            or binding.get('profile_sha256') != canonical_hash(target['target_profile']['opaf']['roles'])
+            or binding.get('profile_sha256') != canonical_hash(provider_roles(target['target_profile']))
             or manifest.get('files') != expected_files
             or manifest.get('selected_chunk_hashes') != selected['approved_chunk_hashes']):
         raise OpafError('Prototype output differs from its approved source snapshot.')

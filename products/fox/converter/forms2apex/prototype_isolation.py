@@ -209,7 +209,10 @@ def observe(gateway, job_id, challenge):
              and read_object(root / (prior + '-intent.json')) == {'request_sha256': digest(historical)})
         allowed |= {prior + '-request.json', prior + '-intent.json'}
         if prior != stage or exported:
-            receipt = read_object(root / (prior + '.json'))
+            from .prototype_validation_retry import local_effective, PREFIX as RETRY_PREFIX, FILES as RETRY_FILES
+            receipt = local_effective(root,prior,historical)
+            if prior=='validate' and (root/RETRY_PREFIX).exists():
+                allowed.update(RETRY_FILES)
             gateway._check_receipt(prior, historical, receipt)
             need(receipt.get('schema_version') == 1 and receipt.get('scope') == 'fox-prototype-converter-receipt-v1'
                  and receipt.get('status') == 'COMPLETE')
@@ -277,7 +280,12 @@ def observe(gateway, job_id, challenge):
     allowed |= historical_recovery(root, request, binding, before)
     need({p.name for p in root.iterdir()} <= allowed)
     for path in root.iterdir():
-        if path.name == 'runtime-evidence' or path.name.startswith('.import-capture-'):
+        from .prototype_validation_retry import PREFIX as RETRY_PREFIX, LOG as RETRY_LOG
+        if path.name==RETRY_PREFIX:
+            identity(path,True)
+            need({p.name for p in path.iterdir()}=={'intent.json','receipt.json','validation.log'})
+            for child in path.iterdir(): identity(child)
+        elif path.name == 'runtime-evidence' or path.name.startswith('.import-capture-'):
             need(path.is_dir())
         else:
             identity(path)  # Every other marker/output must be a regular singleton.
@@ -292,8 +300,13 @@ def observe(gateway, job_id, challenge):
     for log in (request['prior_receipts']['validate']['validation']['log'],
                 request['prior_receipts']['import']['log']):
         path = Path(log)
-        need(path.parent == root and path.name in allowed
-             and before.get('prototype-converter/' + path.name, {}).get('sha256') is not None)
+        from .prototype_validation_retry import LOG as RETRY_LOG
+        if path==root/RETRY_LOG:
+            need(before.get('prototype-converter/'+RETRY_LOG,{}).get('sha256')==
+                request['prior_receipts']['validate']['validation_log_sha256'])
+        else:
+            need(path.parent == root and path.name in allowed
+                 and before.get('prototype-converter/' + path.name, {}).get('sha256') is not None)
     profile = (gateway.target_profile_loader(gateway.settings) if callable(gateway.target_profile_loader)
                else runtime_preflight.bound_target_profile(gateway.settings))
     if packet is not None:

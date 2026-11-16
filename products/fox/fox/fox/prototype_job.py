@@ -19,6 +19,7 @@ import re
 import tempfile
 
 from . import forms_native_plan
+from .design_provider import is_direct, direct_config, roles as provider_roles
 from .forms_native_required_plan import bound_native_input_policy
 from .native_pipeline import _save_once, _sync
 from .opaf import ConverterClient, OpafClient, OpafError, canonical_hash
@@ -133,6 +134,11 @@ def load_prototype_profile(path):
                 or target['scope']['existing_resources_only'] is not True
                 or target['scope']['customer_deployment_authorized'] is not False):
             raise ValueError()
+        if is_direct(target):
+            direct_config(target)
+            from forms2apex.target_profile import validate_target_profile
+            validate_target_profile(target)
+            return envelope
         roles = target['opaf']['roles']
         if not isinstance(roles, dict) or set(roles) != {'mapper', 'reviewer'}:
             raise ValueError()
@@ -171,6 +177,19 @@ def _save_result(job, result):
         temporary.unlink(missing_ok=True)
 
 
+def direct_converter_options():
+    """Trusted direct-preview startup only; no legacy endpoint broadening."""
+    if os.getenv('FOX_DIRECT_LOOPBACK_AUTHORITY') != '1':
+        return {}
+    if os.getenv('FOX_RUN_ADAPTER') != 'oci-genai':
+        raise OpafError('Direct preview transport requires the direct OCI adapter.')
+    from .installation import converter_port
+    port = converter_port(os.environ.get('FOX_CONVERTER_URL', ''))
+    if port == 8091:
+        raise OpafError('Direct preview must use a separate converter listener.')
+    return {'direct_preview_port': port}
+
+
 def _configuration(approved_target_sha256, *, installation_projection=None):
     """Existing guarded clients/credential source, only at authorized execution."""
     from .prototype_read_scope import forbid_execution
@@ -183,23 +202,32 @@ def _configuration(approved_target_sha256, *, installation_projection=None):
                 raise OpafError('Prototype processing target changed; fresh source-owner approval is required.')
             return envelope['target_profile']
         target = target_loader()  # Validate approval/public metadata before secret access.
-        credential_path = Path(os.environ['FOX_OPAF_CREDENTIAL_FILE'])
+        direct = is_direct(target)
+        if direct != (os.getenv('FOX_RUN_ADAPTER') == 'oci-genai'):
+            raise OpafError('Design provider differs from the explicitly selected run adapter.')
+        credential_key = 'FOX_CONVERTER_CREDENTIAL_FILE' if direct else 'FOX_OPAF_CREDENTIAL_FILE'
+        credential_path = Path(os.environ[credential_key])
         if credential_path.is_symlink() or not credential_path.is_file() or credential_path.stat().st_size > 65_536:
             raise ValueError()
         credentials = json.loads(credential_path.read_text(encoding='utf-8'))
         if any(not isinstance(credentials.get(key), str) or not credentials[key]
-               for key in ('username', 'password', 'converter_token')):
+               for key in (('converter_token',) if direct else ('username', 'password', 'converter_token'))):
             raise ValueError()
         if installation_projection is None:
             if os.getenv('FOX_INSTALLATION_MODE') == 'fresh':
                 raise OpafError('Fresh prototype transport requires its admitted installation projection.')
-            gateway = ConverterClient(os.environ['FOX_CONVERTER_URL'], credentials['converter_token'])
+            gateway = ConverterClient(os.environ['FOX_CONVERTER_URL'], credentials['converter_token'],
+                                      **(direct_converter_options() if direct else {}))
         else:
             gateway = ConverterClient(os.environ['FOX_CONVERTER_URL'], credentials['converter_token'],
                                       projection=installation_projection)
-        client = OpafClient(target['opaf']['base_url'], credentials['username'], credentials['password'],
-                            target['opaf']['certificate_sha256'])
-        return {'profile': deepcopy(target['opaf']['roles']), 'opaf_client': client,
+        if direct:
+            from .oci_genai import OciGenAiClient
+            client = OciGenAiClient(target)
+        else:
+            client = OpafClient(target['opaf']['base_url'], credentials['username'], credentials['password'],
+                                target['opaf']['certificate_sha256'])
+        return {'profile': deepcopy(provider_roles(target)), 'opaf_client': client,
                 'gateway': gateway, 'target_profile_loader': target_loader}
     except (KeyError, ValueError, TypeError, AttributeError, OSError):
         raise OpafError('Prototype workflow configuration or protected execution credentials are unavailable.') from None
@@ -254,6 +282,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
             phase = converter_phase(job, snapshot, raw, stage, request)
             still_approved(phase=phase)
             return transport.run_stage(stage, request)
+        def retry_validation(self,request):
+            still_approved()
+            return transport.retry_validation(request)
         def continue_validation(self,request):
             from .prototype_mapping_epochs import converter_phase
             phase=converter_phase(job,snapshot,raw,'validate',request)

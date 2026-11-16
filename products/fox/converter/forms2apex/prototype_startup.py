@@ -5,11 +5,11 @@ from .prototype_authority_client import PrototypeAuthorityClient
 from .prototype_gateway import PrototypeGateway
 
 
-def build_prototype_gateway(settings, *, authority_url, authority_origin, runtime_verifier=None):
+def build_prototype_gateway(settings, *, authority_url, authority_origin, runtime_verifier=None, allow_loopback_http=False):
     if runtime_verifier is not None and not callable(runtime_verifier):
         raise ValueError('Explicit runtime verifier must be callable')
     authorizer = PrototypeAuthorityClient(settings, authority_url=authority_url,
-                                          authority_origin=authority_origin)
+                                          authority_origin=authority_origin, allow_loopback_http=allow_loopback_http)
     return PrototypeGateway(settings, authorize=authorizer, runtime_verifier=runtime_verifier)
 
 
@@ -20,6 +20,9 @@ def configured_prototype_gateway(settings, *, runtime_verifier=None, environ=Non
         return None
     if enabled != '1':
         raise ValueError('FOX_PROTOTYPE_AUTHORITY_ENABLED must explicitly be 1')
+    loopback = env.get('FOX_DIRECT_LOOPBACK_AUTHORITY', '')
+    if loopback not in ('', '0', '1'):
+        raise ValueError('FOX_DIRECT_LOOPBACK_AUTHORITY must explicitly be 1')
     bridge = env.get('FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED', '')
     if bridge not in ('', '0', '1'):
         raise ValueError('FOX_PROTOTYPE_RUNTIME_BRIDGE_ENABLED must explicitly be 1')
@@ -32,4 +35,4 @@ def configured_prototype_gateway(settings, *, runtime_verifier=None, environ=Non
     return build_prototype_gateway(settings,
         authority_url=env.get('FOX_PROTOTYPE_AUTHORITY_URL', ''),
         authority_origin=env.get('FOX_PROTOTYPE_AUTHORITY_ORIGIN', ''),
-        runtime_verifier=runtime_verifier)
+        runtime_verifier=runtime_verifier, allow_loopback_http=loopback == '1')

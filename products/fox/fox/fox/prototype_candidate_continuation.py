@@ -97,9 +97,11 @@ def independent_reviewer(previous, mapper, reviewer, evidence):
         value=pending.pop()
         if type(value) is dict:
             if type(value.get('room_id')) is str: rooms.add(value['room_id'])
+            if value.get('provider') == 'oci_genai': rooms.add(value['request_id'])
             pending.extend(value.values())
         elif type(value) is list: pending.extend(value)
-    if reviewer['room_id'] in rooms: _fail()
+    from .design_provider import invocation_id
+    if invocation_id(reviewer) in rooms: _fail()
 
 
 def _derive(job, snapshot, original, target, epoch, *, index=None):

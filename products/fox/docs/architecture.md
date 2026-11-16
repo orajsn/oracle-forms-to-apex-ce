@@ -8,7 +8,7 @@ React/TypeScript workbench ── Python API ── private project/source/run s
     │                              │
     │                      persistent background queue
     │                              │
-Local preparation           embedded OPAF mapper → independent reviewer
+Local preparation           selected design provider → independent reviewer
 (Oracle tooling)                   │
     │                       internal bearer-authenticated MCP
 Readable approved source           │
@@ -22,6 +22,16 @@ Readable approved source           │
                                    │
                             exact output package → human business review
 ```
+
+## Direct OCI provider
+
+The focused prototype worker selects `design_provider` for direct OCI calls or
+retains the original OPAF workflow path. Separate versioned mapper/reviewer
+prompts run through configurable models. Direct records retain OCI request IDs,
+model versions and request/response hashes; they do not fabricate OPAF room or
+workflow identities. Source consent and SQLcl target authority remain separate.
+No OPAF repository or embedding service is needed for direct mode. See the
+[preview guide](direct-oci-preview.md).
 
 ## Components
 
@@ -67,7 +77,7 @@ Five internal MCP interfaces remain: `inspect_forms_job`, `generate_apex_draft`,
 `validate_apex_draft`, `import_validated_draft`, `get_job_status`. They are not
 public browser endpoints. A configured model URL does not establish readiness.
 
-The current lab uses OCI instance-principal model authentication with separate
+The direct preview uses the OCI Python inference SDK with instance-principal authentication and separate
 mapper/reviewer invocations. Approved redacted source is the AI boundary; no
 standalone Codex session is part of the business-user runtime. Local embeddings
 have no external key/endpoint. Regional/model availability must be revalidated

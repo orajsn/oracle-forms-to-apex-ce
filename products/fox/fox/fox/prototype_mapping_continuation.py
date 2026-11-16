@@ -31,7 +31,13 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     preclaimed = preclaim.present(job/'prototype-pipeline')
     from . import prototype_query_omission_continuation as omission
     omitted = omission.present(job/'prototype-pipeline')
+    from . import prototype_direct_container as direct_container
+    corrected = direct_container.present(job/'prototype-pipeline') or (job/direct_container.OWNER_RECORD).exists()
+    from . import prototype_validation_retry as validation_retry
+    retried = validation_retry.present(job)
     if not recorded and not database.exists() and not database.is_symlink():
+        if retried: raise OpafError('Validation retry requires its durable owner database.')
+        if corrected: raise OpafError('Container correction requires its durable owner database.')
         if omitted: raise OpafError('Query omission requires its durable owner database.')
         if preclaimed: raise OpafError('Validation continuation requires its durable owner database.')
         if (job / 'mapping-epochs').exists() or (job / 'prototype-pipeline' / 'epochs').exists():
@@ -40,6 +46,8 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     if database.is_symlink() or not database.is_file():
         raise OpafError('Continuation database is missing or unsafe.')
     with sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True) as connection:
+        validation_retry.validate_owner(job, snapshot, original, connection)
+        direct_container.validate_owner(job, snapshot, original, connection)
         omission.validate_record(job, snapshot, original, connection, phase=phase)
         from .prototype_preclaim_continuation import entry_phase
         phase = entry_phase(job,snapshot,original,connection,phase)

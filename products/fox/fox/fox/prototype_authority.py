@@ -5,6 +5,8 @@ Origin middleware; enabling it requires explicit trusted startup configuration.
 """
 from __future__ import annotations
 
+from .design_provider import roles as provider_roles
+
 import asyncio
 import hmac
 import json
@@ -42,12 +44,15 @@ def execution_target(profile):
         'database': {'db_name', 'session_user', 'parsing_schema'},
         'apex': {'workspace', 'workspace_id', 'ords_origin', 'ords_base_path'},
         'sqlcl': {'saved_connection'},
-        'tested_versions': {'apex', 'sqlcl', 'apexlang_mmd', 'opaf'},
     }.items():
         item = profile[name]
         if (type(item) is not dict or set(item) != fields
                 or any(type(value) is not str or not value or len(value) > 2048 for value in item.values())):
             raise ValueError('Incomplete execution destination')
+    versions = profile['tested_versions']
+    if (type(versions) is not dict or not {'apex', 'sqlcl', 'apexlang_mmd'} <= versions.keys()
+            or any(type(versions[k]) is not str or not versions[k] for k in ('apex', 'sqlcl', 'apexlang_mmd'))):
+        raise ValueError('Incomplete execution versions')
     scope = profile['scope']
     if (profile['active'] is not True or scope['data_mode'] != 'synthetic_test_only'
             or scope['existing_resources_only'] is not True
@@ -76,11 +81,14 @@ def _json(raw):
                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
 
 
-def _origin(value):
+def _origin(value, *, allow_loopback_http=False):
     if not isinstance(value, str):
         raise ValueError('Exact HTTPS authority origin required')
     url = urlsplit(value)
-    if (url.scheme != 'https' or not url.hostname or url.port not in (None, 443)
+    loopback = (allow_loopback_http is True and url.scheme == 'http'
+                and url.hostname == '127.0.0.1' and url.port is not None and 1 <= url.port <= 65535)
+    if (type(allow_loopback_http) is not bool
+            or not (loopback or url.scheme == 'https' and url.hostname and url.port in (None, 443))
             or url.username or url.password or url.path or url.query or url.fragment
             or any(c.isspace() for c in value) or value != value.rstrip('/')):
         raise ValueError('Exact HTTPS authority origin required')
@@ -208,7 +216,7 @@ def _authorize_current(root, db, profile_path, request, *, preclaim_record_sha25
     if binding_path.is_symlink() or not binding_path.is_file() or binding_path.stat().st_size > 65_536:
         raise ValueError('Retained binding unavailable')
     binding = _json(binding_path.read_bytes())
-    if (binding.get('profile_sha256') != canonical_hash(envelope['target_profile']['opaf']['roles'])
+    if (binding.get('profile_sha256') != canonical_hash(provider_roles(envelope['target_profile']))
             or binding.get('focus_plan_sha256') != snapshot['prototype']['focus_plan_sha256']
             or binding.get('metadata_task_policy') != snapshot['prototype'].get('metadata_task_policy')
             or binding.get('candidate_format_policy') != snapshot['prototype'].get('candidate_format_policy')):
@@ -249,15 +257,32 @@ def authorize_preclaim_current(root,db,profile_path,request,record_sha256):
     return {**result,'scope':PRECLAIM_RESPONSE_SCOPE,'record_sha256':record_sha256}
 
 
+def authorize_validation_retry_current(root,db,profile_path,request,record_sha256):
+    from . import prototype_validation_retry as retry
+    if type(record_sha256) is not str or not re.fullmatch('[a-f0-9]{64}',record_sha256): raise ValueError()
+    result=authorize_current(root,db,profile_path,request)
+    job=Path(root)/'jobs'/request['job_id']
+    snapshot,original=read_prototype_snapshot(job)
+    with db() as connection:
+        connection.execute('PRAGMA query_only=ON')
+        record=retry.validate_owner(job,snapshot,original,connection)
+    if (record is None or canonical_hash(record)!=record_sha256 or record['request']!=request
+            or _json((job/retry.INTENT).read_bytes())!={'request_sha256':canonical_hash(request),
+                'record_sha256':record_sha256,'witness_sha256':canonical_hash(record['witness'])}): raise ValueError()
+    return {**result,'scope':'fox-prototype-current-validation-retry-authority-v1','record_sha256':record_sha256}
+
+
 def attach_prototype_authority(app, *, root, db, enabled=False, profile_path=None,
-                               credential_path=None, allowed_origin=None):
+                               credential_path=None, allowed_origin=None, allow_loopback_http=False):
     """Attach only when opted in. No credential reads at import/disabled startup."""
     if enabled is not True:
         return False
-    origin = _origin(allowed_origin)
+    origin = _origin(allowed_origin, allow_loopback_http=allow_loopback_http)
     if not profile_path or not credential_path:
         raise ValueError('Explicit authority profile and protected credential paths required')
-    _profile(profile_path)
+    envelope = _profile(profile_path)
+    if allow_loopback_http and 'design_provider' not in envelope['target_profile']:
+        raise ValueError('Loopback authority requires an explicit direct OCI preview target')
 
     @app.post(AUTHORITY_PATH, include_in_schema=False)
     async def authorize(request: Request):
@@ -296,6 +321,9 @@ def attach_prototype_authority(app, *, root, db, enabled=False, profile_path=Non
                         or value['scope']!='fox-prototype-preclaim-authorize-request-v1'):
                     raise ValueError('Invalid preclaim authority envelope')
                 result=await asyncio.to_thread(authorize_preclaim_current,root,db,profile_path,value['request'],value['record_sha256'])
+            elif isinstance(value,dict) and value.get('scope')=='fox-prototype-validation-retry-authorize-request-v1':
+                if set(value)!={'schema_version','scope','request','record_sha256'} or type(value['schema_version']) is not int or value['schema_version']!=1: raise ValueError()
+                result=await asyncio.to_thread(authorize_validation_retry_current,root,db,profile_path,value['request'],value['record_sha256'])
             else:
                 result = await asyncio.to_thread(authorize_current, root, db, profile_path, value)
             return JSONResponse(result, headers=headers)

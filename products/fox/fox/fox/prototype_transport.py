@@ -28,7 +28,7 @@ import re
 import zipfile
 
 from .intake import SECRETS
-from .native_pipeline import _json, _save_once
+from .native_pipeline import _json, _save_once, _sync
 from .opaf import ConverterClient, OpafError, canonical_hash
 from .prototype_pipeline import (CONVERTER_STAGES, _check_converter_receipt,
                                  authorize_prototype_request)
@@ -69,6 +69,8 @@ def _epoch_authority_member(name, *, clause_epoch, container_epoch=False, partit
     from .prototype_clause_proof import JSON_FILES
     if type(name) is not str or '\\' in name or ':' in name:
         return False
+    from .prototype_direct_container import member
+    if member(name): return True
     if name in {*_ROOT_FILES, 'assessment.json'} or re.fullmatch(r'sources/source-00[0-3]\.xml', name):
         return True
     if name == 'redacted-query-omission.json': return query_omission and not clause_epoch
@@ -180,7 +182,7 @@ def build_authority_bundle(job: Path, request: dict) -> dict:
     focuses = [row['focus_id'] for row in review_index['focuses']]
     if len(focuses) != len(set(focuses)) or any(not _FOCUS.fullmatch(focus) for focus in focuses):
         raise OpafError('Prototype authority focus index is invalid.')
-    if review_index.get('schema_version') in (2,3):
+    if review_index.get('schema_version') in (2,3,4):
         names.extend(row['path'] for row in review_index['provenance_files'])
         names = sorted(set(names))
         # Evidence source code is archive-only, never converter transport.
@@ -332,6 +334,11 @@ class PrototypeHttpConverterAdapter:
         value = self._get(self.path + '/stages/' + stage)
         if value is None:
             return None
+        from . import prototype_validation_retry as retry
+        if stage == 'validate' and retry.present(self.job) and value.get('status') == 'FAILED':
+            record = _json(self.job/retry.RECORD)
+            if canonical_hash(value) == record['witness']['failed_receipt_sha256']:
+                return None  # known original failure; only explicit attempt2 may run
         return _check_converter_receipt(stage, request, value)
 
     def validate_preclaim_witness(self,request):
@@ -379,3 +386,28 @@ class PrototypeHttpConverterAdapter:
         validate_generated_package(raw, request=request, export_receipt=export_receipt)
         authorize_prototype_request(self.job, request)
         return raw
+
+    def validation_retry_witness(self):
+        return self._get(self.path+'/validation-retry')
+
+    def retry_validation(self,request):
+        from . import prototype_validation_retry as retry
+        from .prototype_read_scope import forbid_execution
+        forbid_execution()
+        record=_json(self.job/retry.RECORD)
+        if record['request']!=request: raise OpafError('Validation retry request changed.')
+        witness=self.validation_retry_witness()
+        if witness!=record['witness']: raise OpafError('Failed validation witness changed.')
+        binding={'request_sha256':canonical_hash(request),'record_sha256':canonical_hash(record),
+                 'witness_sha256':canonical_hash(witness)}
+        with (self.job/retry.INTENT).open('xb') as stream:
+            stream.write(json.dumps(binding,sort_keys=True).encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+        _sync(self.job)
+        try:
+            value=self.client.request('POST',self.path+'/validation-retry',
+                {'request':request,'witness':witness,'record_sha256':canonical_hash(record)})
+            return _check_converter_receipt('validate',request,value)
+        except Exception:
+            raise OpafError('Second validation result is uncertain or failed; reconcile without replay.') from None
