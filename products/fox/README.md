@@ -11,6 +11,12 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Export-only preview — 17 November 2026
 
+Patch0.27.1 gives saved-output GET checks a bounded90-second allowance after an
+actual valid readiness request took28.9seconds and the30-second UI budget proved
+too tight under concurrent work. This corrects premature UI aborts; it is not a
+claim that backend computation became faster. Preparation remains bounded at
+180seconds and unknown outcomes are checked through GET, not repeated POSTs.
+
 FOX0.27.0 makes the default new UI conversion a downloadable **APEXlang ZIP**:
 reviewed design -> deterministic native rendering -> SQLcl `/nolog` format
 validation -> package. No target database connection, schema creation, app import,

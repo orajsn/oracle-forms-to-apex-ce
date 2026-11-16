@@ -1,8 +1,9 @@
 {
-  "version": "0.27.0",
+  "version": "0.27.1",
   "released_on": "2026-11-17",
-  "title": "Export-only APEX packages and faster provider setup",
+  "title": "Allow slow saved-package readiness checks to finish",
   "changes": [
+    "Allow up to 90 seconds for saved-package GET checks while retaining the existing 180-second preparation budget, source binding and no-automatic-retry behavior.",
     "Generate and download a reviewed, offline-format-validated APEXlang ZIP without database import, browser tests or reimport as delivery gates.",
     "Prepare a separate format-only package from an eligible saved design without repeating model calls or changing the original run and its failures.",
     "Show declared compatibility, generated MMD, prerequisites, omissions and recorded AI-request timings in the workbench.",

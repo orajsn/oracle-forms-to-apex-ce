@@ -8,6 +8,21 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.1] - 2026-11-17
+
+### [fix] Avoid premature saved-output readiness aborts
+Impact: A valid saved-design package check has enough time to finish in the UI.
+Change: Increase only the saved-package GET allowance from30 to90seconds. The
+preparation POST remains180seconds; no retry, source/proof relaxation or backend
+cache change is introduced.
+Verification: The isolated preview returned an actual eligible readiness result
+in28.9seconds, while the initial browser check hit its30-second budget. Browser
+regression checks the90-second GET and180-second POST timers, retains unknown-
+outcome GET reconciliation, and the frontend builds with matching release metadata.
+Delivery: Source patch; private-preview acceptance follows the reviewed commit.
+Remaining: Backend proof-reconstruction optimization needs a separately tested
+read scope. A longer timeout is a reliability fix, not a measured speedup.
+
 ## [0.27.0] - 2026-11-17
 
 ### [feature] Deliver format-validated APEXlang without target-database gates
