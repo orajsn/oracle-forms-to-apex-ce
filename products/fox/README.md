@@ -11,12 +11,21 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Export-only preview — 17 November 2026
 
+Patch 0.27.3 reduces repeated saved-output proof reconstruction for initial-direct
+runs. On the same OCI host and retained input, two alternating samples per version
+measured a median **14.88 seconds before / 2.53 seconds after** (82.99% reduction).
+This measures one saved-candidate step, not complete UI loading, model inference
+or total conversion. Proof outputs and original files were identical. Reuse ends
+with the read operation; owner/source checks and offline validation still run.
+
 Patch 0.27.2 keeps the download action near the package summary and collapses long
 omission lists by default, without removing any report content. An isolated
 hosted 0.27.1 check has now prepared and downloaded a real retained Forms-derived
 package through the UI. The exact whole downloaded ZIP passed connectionless
 SQLcl validation; its native files and original run evidence were unchanged.
 This is format-only acceptance, not public cutover or business acceptance.
+The isolated 0.27.2 desktop/mobile check also passed, with all 366 report entries
+available and the exact same package bytes downloaded without another preparation.
 
 Patch0.27.1 gives saved-output GET checks a bounded90-second allowance after an
 actual valid readiness request took28.9seconds and the30-second UI budget proved

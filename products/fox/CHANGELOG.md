@@ -8,6 +8,32 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.3] - 2026-11-17
+
+### [performance] Reconstruct saved-output proofs once per read
+Impact: Eligible initial-direct saved runs spend less time rebuilding the same
+proof while checking or downloading a retained APEX package.
+Change: Reuse exact packet/plan/target derivations only within one saved-candidate
+read. Pin the complete original job at entry and exit, return detached copies,
+bound retained values, and reject cross-job/thread/task or execution reuse. Fresh
+owner/source/profile checks, compiler checks and existing epoch behavior remain.
+Delivery: Reviewed source increment; private-preview API/UI acceptance and public
+cutover are separate. No model, database, compiler or preparation replay was used
+for the performance benchmark.
+Verification: Two alternating samples per variant on the same OCI host and
+retained input: baseline 14.854949/14.899097 seconds, new 2.545773/2.515461 seconds.
+Median 14.877023 -> 2.530617 seconds, an 82.99% reduction for this step; repeated
+baseline reconstruction fell from 12 to 1. Request/adoption outputs and candidate
+bytes were identical, with original job files unchanged. Local focused regression:
+180 passed, 4 Windows symlink skips. Actual Linux focused checks: 33 passed, no
+skips. Independent review cleared the repaired sibling-directory invalidation.
+The integrated delivery/performance rerun passed 80 tests with 4 Windows symlink
+skips; release consistency, TypeScript and frontend build checks also passed.
+Remaining: This is one retained saved-candidate workload, not end-to-end UI,
+fresh model inference or universal conversion performance. Six setup errors in
+an unchanged historical shared fixture remain documented; its failure was also
+reproduced using the original modules and was not counted as a passing test.
+
 ## [0.27.2] - 2026-11-17
 
 ### [fix] Keep package download visible with large gap reports
@@ -21,6 +47,9 @@ with 300 remediation rows, desktop/mobile layouts, keyboard expansion, complete
 report text, stale-link clearing and unchanged request budgets. Lead visual
 inspection and independent diff review passed. No backend or package bytes change.
 Delivery: UI source patch; isolated-preview visual acceptance follows publication.
+Subsequent isolated acceptance: real desktop/mobile checks passed, including all
+366 expandable report entries and an identical redownload without preparation.
+Original run files and public services remained unchanged.
 
 ## [0.27.1] - 2026-11-17
 

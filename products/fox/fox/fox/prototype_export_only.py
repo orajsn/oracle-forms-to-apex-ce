@@ -102,6 +102,8 @@ def package_configuration(approved_target_sha256, *, installation_projection=Non
     from .prototype_job import load_prototype_profile
     from .prototype_read_scope import forbid_execution
     forbid_execution()
+    from .prototype_initial_direct_read_scope import forbid_execution as forbid_initial_direct_execution
+    forbid_initial_direct_execution()
     _sqlcl_path()  # Discover missing compiler before any charged design calls.
     try:
         profile_path = Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE'])
@@ -167,6 +169,8 @@ def _raw(path):
 
 def validate_offline(raw, directory):
     """Real SQLcl /nolog syntax validation; never connects to Oracle."""
+    from .prototype_initial_direct_read_scope import forbid_execution
+    forbid_execution()
     from forms2apex.sqlcl import validate_apexlang
     files, sqlcl = _members(raw), _sqlcl_path()
     directory = Path(directory)
@@ -443,6 +447,12 @@ def retained_package(job, snapshot, target):
 
 def saved_candidate(job, snapshot, original, target, run):
     """Reconstruct a legacy candidate without executing or rewriting its old run."""
+    from .prototype_initial_direct_read_scope import initial_direct_read_scope
+    with initial_direct_read_scope(job, target['target_profile']):
+        return _saved_candidate(job, snapshot, original, target, run)
+
+
+def _saved_candidate(job, snapshot, original, target, run):
     from .prototype_job import validate_prototype_snapshot
     from .prototype_pipeline import authorize_prototype_request, _artifact_json
     from forms2apex.blueprint_profiles import select

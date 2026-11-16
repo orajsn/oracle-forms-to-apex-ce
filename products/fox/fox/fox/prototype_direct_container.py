@@ -82,6 +82,12 @@ def _baseline(root, packet, plan, target):
 
 def derive(root, packet, plan, target):
     """Reconstruct exact baseline and sole structural conflict, with no effects."""
+    from .prototype_initial_direct_read_scope import optional_proof
+    return optional_proof(root, canonical_hash({'packet': packet, 'plan': plan, 'target': target}),
+                          lambda: _derive(root, packet, plan, target))
+
+
+def _derive(root, packet, plan, target):
     from .forms_focus_merge import merge_focus_blueprints
     views = _baseline(root, packet, plan, target)
     replacements = []
@@ -191,6 +197,9 @@ def validate_owner(job, snapshot, original, connection):
 
 def active_focus(root, packet, plan, request, target, previous, *, runtime=None):
     """Preserve original calls; permit only the separate new reviewer."""
+    if runtime is not None:
+        from .prototype_initial_direct_read_scope import forbid_execution
+        forbid_execution()
     record, views, index, candidate, projection = derive(root, packet, plan, target)
     if _json(root / TECHNICAL) != record:
         raise OpafError('Container correction technical lineage changed.')
