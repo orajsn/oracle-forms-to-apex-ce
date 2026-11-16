@@ -17,6 +17,10 @@ measured a median **14.88 seconds before / 2.53 seconds after** (82.99% reductio
 This measures one saved-candidate step, not complete UI loading, model inference
 or total conversion. Proof outputs and original files were identical. Reuse ends
 with the read operation; owner/source checks and offline validation still run.
+The final private-preview UI check passed with the same downloaded package.
+Observed readiness was about 18.0 seconds versus 45.5 seconds on the prior build;
+download was 4.9 versus 30.2 seconds. These individual runs are not guaranteed
+response times. The existing public service has not been switched.
 
 Patch 0.27.2 keeps the download action near the package summary and collapses long
 omission lists by default, without removing any report content. An isolated

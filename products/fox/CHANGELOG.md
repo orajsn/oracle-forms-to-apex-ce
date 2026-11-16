@@ -10,6 +10,17 @@ application version or relabel existing images.
 
 ## [0.27.3] - 2026-11-17
 
+### [docs] Record subsequent private-preview acceptance
+Impact: Distinguish the shipped source benchmark from observed hosted behavior.
+Change: Record the final private-preview check of the same prepared package.
+Verification: Observed readiness was approximately 18.0 seconds versus 45.5 seconds
+on the preceding build; download was 4.9 versus 30.2 seconds. These are individual
+UI observations, not a controlled throughput test or guaranteed response times.
+The downloaded package hash was unchanged; no preparation, model or database
+operation was replayed. Original run evidence and public services were preserved.
+Delivery: Documentation-only follow-up on 17 November 2026. Software remains
+0.27.3; the private preview is verified, while public routing remains unchanged.
+
 ### [performance] Reconstruct saved-output proofs once per read
 Impact: Eligible initial-direct saved runs spend less time rebuilding the same
 proof while checking or downloading a retained APEX package.
