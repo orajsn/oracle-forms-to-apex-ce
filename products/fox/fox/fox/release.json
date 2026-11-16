@@ -1,18 +1,20 @@
 {
-  "version": "0.26.0",
-  "released_on": "2026-11-16",
-  "title": "Direct OCI Generative AI preview",
+  "version": "0.27.0",
+  "released_on": "2026-11-17",
+  "title": "Export-only APEX packages and faster provider setup",
   "changes": [
-    "Use direct OCI Generative AI for separate design and review, with configurable models and instance-principal authentication.",
-    "Retain genuine provider and request evidence alongside source approvals, deterministic rendering and SQLcl checks.",
-    "Keep OPAF available as an optional compatible provider.",
-    "Package the built UI and offline dependencies for an isolated preview."
+    "Generate and download a reviewed, offline-format-validated APEXlang ZIP without database import, browser tests or reimport as delivery gates.",
+    "Prepare a separate format-only package from an eligible saved design without repeating model calls or changing the original run and its failures.",
+    "Show declared compatibility, generated MMD, prerequisites, omissions and recorded AI-request timings in the workbench.",
+    "Remove duplicated OPAF setup requests and reuse a freshly pinned TLS connection within each prepared role call when the server supports keepalive.",
+    "Keep direct OCI and legacy OPAF evidence compatible, and give SQLcl batch scripts an explicit EOF input pipe."
   ],
   "limitations": [
-    "Preview acceptance is in progress; source changes do not establish hosted conversion or runtime success.",
+    "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
     "Only explicitly approved redacted source may be processed by the selected provider.",
-    "Generated APEX, technical verification and human business acceptance remain separate facts.",
-    "Oracle Forms, Java, SQLcl, an authorized compatible target and runtime browser prerequisites are external dependencies.",
-    "Partial prototypes explicitly omit unsupported behavior and use synthetic data. Uncertain imports require reconciliation and are never automatically repeated."
+    "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
+    "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",
+    "The primary new output is an APEXlang ZIP with synthetic supporting SQL and explicit omissions, not a conventional database-derived SQL export.",
+    "Measured local protocol-count reductions are not a claimed cloud-model speedup. Dependency-sensitive mapping remains serial; unknown model outcomes are never automatically repeated."
   ]
 }

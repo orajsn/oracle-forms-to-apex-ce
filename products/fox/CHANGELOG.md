@@ -8,6 +8,74 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.0] - 2026-11-17
+
+### [feature] Deliver format-validated APEXlang without target-database gates
+Impact: New UI conversions can finish at a downloadable native APEXlang ZIP.
+Change: Add immutable export-only delivery, genuine SQLcl `/nolog` validation,
+supporting synthetic SQL, compatibility/MMD information, prerequisites and explicit
+omissions. Schema preparation, app import, browser tests and reimport are not
+required by this route; old jobs keep their original behavior and checks.
+Delivery: Reviewed implementation branch; isolated hosted acceptance/public
+cutover and a release tag are separate milestones.
+Verification: Connected synthetic API/worker/download checks, desktop/mobile
+browser scenarios and real connectionless SQLcl validation. A valid real-derived
+package passed; deliberately invalid APEXlang was rejected despite process exit0.
+Remaining: Hosted authenticated new/saved package download acceptance, a complete
+fresh-customer installer/profile and business behavior assessment. No universal
+import or behavior guarantee is made.
+
+### [improvement] Reuse a saved design without repeating model calls
+Impact: An eligible inactive older run can provide a separately prepared
+format-only package even when optional runtime work stopped later.
+Change: Add owner/source/candidate-bound readiness, explicit preparation and
+separate output/download routes. Original job files, status, database row and
+failure evidence remain unchanged. Deliveries and advisory timings live outside
+the original job tree. Compiler-log integrity is checked on reuse and download.
+Verification: Positive, idempotent, stale/tampered, missing-review, wrong-owner,
+active-run and invalid-compiler scenarios; explicit UI action and read-only
+reconciliation after unknown responses. No new paid model or target operation
+was used for these checks.
+
+### [performance] Reduce OPAF setup work and expose request timings
+Impact: Fewer setup round trips on the optional OPAF path and clearer timing
+information for both OPAF and direct OCI calls.
+Change: Observe the environment once per prepared role invocation, keep intent
+before the single POST, reuse a freshly pinned connection within that role when
+supported, and retain non-sensitive monotonic timings outside sealed evidence.
+Verification: Controlled client/transport tests reduce seven HTTP requests and
+seven TLS connections to five requests and one connection with keepalive. With
+server-close responses, five separately pinned connections are used. One POST
+and no uncertain-call retry are preserved. These are modeled protocol counts,
+not a measured cloud latency or throughput improvement. Direct SDK client reuse
+already existed and is not counted as a new gain.
+Remaining: Comparable live latency measurements, prompt/focus tuning and safe
+dependency-aware concurrency; model identities/limits were not changed.
+
+### [fix] Make SQLcl batch input non-interactive on Windows
+Impact: Offline validation no longer inherits an invalid console/NUL input handle.
+Change: Supply an explicit empty input pipe to batch SQLcl scripts.
+Verification: Focused SQLcl regressions and actual valid/invalid connectionless
+compiler runs. No Oracle import or database connection was requested.
+
+### [fix] Report package readiness independently of legacy execution
+Impact: Setup/session readiness no longer says a database gateway is required
+for the default project package flow.
+Change: Add pure package-configuration reporting while preserving legacy
+execution admission and its checks. A package-ready session does not authorize
+a legacy target operation.
+Verification: Focused API regressions, including package readiness without
+gateway credentials and refusal of a legacy execution request with no new run.
+
+### [maintenance] Add a lean isolated export-preview launcher
+Impact: An operator can run the package API and optional Forms worker without
+the legacy converter/runtime processes.
+Change: Add a separate launcher using the existing instance lock, private UI
+credentials and temporary storage; preserve the old launcher. Include the new
+export-only guide in the clean distribution. No public routing or cloud
+infrastructure change is performed by this source increment.
+Verification: Local and non-root Linux launcher tests, not a live deployment.
+
 ## [0.26.0] - 2026-11-16
 
 Preview under verification.

@@ -14,6 +14,7 @@ from test_source_history_api import no_external_actions
 def prepare(client, monkeypatch, files=None):
     c, root, pid, _, _ = client
     monkeypatch.setenv('FOX_CONVERSION_PROFILE', PROJECT_PROFILE)
+    monkeypatch.setenv('FOX_DEFAULT_DELIVERY_MODE', 'legacy')  # This module tests the retained legacy project flow.
     files = pair() + pair('BETA', 'FOX_NATIVE_BETA') if files is None else files
     uploaded = c.post(f'/api/projects/{pid}/sources', files=[
         ('files', (item['name'], item['text'].encode())) for item in files])

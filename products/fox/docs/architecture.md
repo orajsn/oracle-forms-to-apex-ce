@@ -8,20 +8,24 @@ React/TypeScript workbench ── Python API ── private project/source/run s
     │                              │
     │                      persistent background queue
     │                              │
-Local preparation           selected design provider → independent reviewer
+Supported Forms extraction  selected design provider → independent reviewer
 (Oracle tooling)                   │
-    │                       internal bearer-authenticated MCP
+    │                              │
 Readable approved source           │
                             deterministic native renderer
                                    │
-                            SQLcl validation gate
+                            SQLcl /nolog format validation
                                    │
-                            guarded synthetic schema + unique import/export
+                            APEXlang ZIP + compatibility + gaps
                                    │
-                            developer-only runtime verification
-                                   │
-                            exact output package → human business review
+                            user download and later manual import
 ```
+
+This is the0.27 export-only path. Import/schema/runtime/reimport automation remains
+in the separate legacy/lab path and retains its original checks. The new path
+does not construct that gateway or reinterpret its results. Saved format-only
+deliveries and advisory telemetry are stored outside original job trees.
+See [export-only package contracts](export-only-packages.md).
 
 ## Direct OCI provider
 

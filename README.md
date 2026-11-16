@@ -14,22 +14,18 @@ This repository contains two related projects:
 | CE Workbench | This README | A Codex-assisted assessment and POC skill. |
 | FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
 
-FOX's current software source is **0.25.0**; its last verified hosted lab is
-**0.24.0**. One approved real-FMB run has reached reviewed native APEX generation,
-authenticated runtime checks and retained SQL export with explicit query omissions.
-Source 0.25.0 adds a business-user choice to include one supported source check
-as a separate native APEX action, with explicit partial scope. It includes the
-preceding download/preservation fixes but still needs guarded deployment.
-Successful UI download
-and fresh-ID import/runtime of those exact downloaded bytes remain unfinished;
-source-derived business-action proof also remains incomplete. Business acceptance
-is separate. The conversion/deployment goal is **active**.
-Recent release notes now distinguish `[feature]`, `[improvement]`, `[fix]`,
-`[performance]`, `[testing]`, `[maintenance]` and `[docs]`; a test count or
-operations fix is not a claimed new converter feature.
-See the [dated checkpoint](products/fox/README.md#current-checkpoint--16-november-2026),
-[changelog](products/fox/CHANGELOG.md), and
-[retrospective history](products/fox/docs/historical-changelog.md).
+FOX source **0.27.0** adds export-only delivery: upload and assess Forms, choose
+the supported scope, generate native APEXlang, validate its format offline, and
+download the application package with compatibility, prerequisites and omissions.
+Database import and browser testing are optional development/lab activities,
+not requirements for this package download. Direct OCI Generative AI is available;
+OPAF remains an optional provider. Generated output is not business acceptance.
+
+This is a development preview, not a universal or production migration product.
+Source publication, local checks and hosted acceptance are separate milestones.
+See the [FOX guide](products/fox/README.md),
+[export-only workflow](products/fox/docs/export-only-packages.md), and
+[versioned changelog](products/fox/CHANGELOG.md).
 
 The workflow inventories supplied Forms evidence, converts supported Forms
 binaries through Oracle tooling, maps Forms behavior to an APEX target design,

@@ -13,12 +13,16 @@ import shutil
 import ssl
 import tempfile
 import zipfile
+from contextlib import contextmanager
+from copy import deepcopy
+from threading import local
 from http.cookies import SimpleCookie
 from pathlib import Path
 from datetime import datetime,timezone
 from urllib.parse import urlsplit
 
 from .intake import checked_source, inventory, MAX_CONVERSION_BYTES
+from .provider_timing import ProviderTiming
 
 WORKFLOW_ID = '573360A075206A99E0637D59000A704E'
 CERT_SHA256 = '68be4eeb6c362a46c0f1cb8bc4eda4585772a8f8a778dbace28cb60992830f93'
@@ -164,23 +168,58 @@ class OpafClient:
         self.username, self.password = username, password
         self.pin = certificate_sha256
         self.cookie = None
+        self._transport_local = local()
+
+    @contextmanager
+    def _role_transport(self, timing):
+        # Scope authentication and the connection to one role, never a global
+        # graph/session cache. Thread-local state cannot leak into another call.
+        if getattr(self._transport_local, 'active', None) is not None:
+            raise OpafError('A prepared OPAF invocation is already active.')
+        state = {'connection': None, 'cookie': None, 'timing': timing}
+        self._transport_local.active = state
+        try:
+            yield
+        finally:
+            try:
+                if state['connection'] is not None:
+                    state['connection'].close()
+            finally:
+                del self._transport_local.active
 
     def _request(self, method, path, payload=None, login=False):
         # The self-signed OPAF certificate is accepted only after exact pin matching.
-        conn = http.client.HTTPSConnection(self.host, self.port, context=ssl._create_unverified_context(), timeout=600)
+        state = getattr(self._transport_local, 'active', None)
+        conn = state['connection'] if state is not None else None
+        newly_created = conn is None
+        if conn is None:
+            conn = http.client.HTTPSConnection(self.host, self.port, context=ssl._create_unverified_context(), timeout=600)
+            if state is not None:
+                state['connection'] = conn
         try:
-            conn.connect()
-            if hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest() != self.pin:
-                raise OpafError('OPAF TLS identity changed; connection blocked.')
+            if newly_created or conn.sock is None:
+                conn.connect()
+                if state is not None:
+                    state['timing'].increment('tls_connections')
+                if hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest() != self.pin:
+                    raise OpafError('OPAF TLS identity changed; connection blocked.')
             headers = {'Accept':'application/json'}
             if login:
                 basic = base64.b64encode(f'{self.username}:{self.password}'.encode()).decode()
                 headers['Authorization'] = 'Basic ' + basic
             else:
-                headers.update(Cookie=self.cookie, Origin=self.origin, Referer=self.origin+'/agentFactory/', **{'Content-Type':'application/json'})
-            conn.request(method, '/agentFactory'+path, json.dumps(payload) if payload is not None else None, headers)
+                headers.update(Cookie=state['cookie'] if state is not None else self.cookie,
+                               Origin=self.origin, Referer=self.origin+'/agentFactory/', **{'Content-Type':'application/json'})
+            # Retain the legacy ASCII-escaped JSON string wire contract.
+            body = json.dumps(payload) if payload is not None else None
+            if state is not None:
+                state['timing'].increment('http_requests')
+                state['timing'].increment('request_body_bytes', len(body.encode('ascii')) if body is not None else 0)
+            conn.request(method, '/agentFactory'+path, body, headers)
             response = conn.getresponse()
             raw = response.read(8_000_001)
+            if state is not None:
+                state['timing'].increment('response_body_bytes', len(raw))
             if response.status != 200 or len(raw) > 8_000_000:
                 raise OpafError(f'OPAF request did not complete (HTTP {response.status}). No automatic retry was attempted.')
             if login:
@@ -189,13 +228,22 @@ class OpafClient:
                     if key.lower() == 'set-cookie': cookies.load(value)
                 if 'agent_factory_session' not in cookies:
                     raise OpafError('OPAF did not establish an authenticated session.')
-                self.cookie = 'agent_factory_session='+cookies['agent_factory_session'].value
+                cookie = 'agent_factory_session='+cookies['agent_factory_session'].value
+                if state is None:
+                    self.cookie = cookie
+                else:
+                    state['cookie'] = cookie
             try:
                 return json.loads(raw, object_pairs_hook=_unique_json_pairs, parse_constant=_finite_json_constant)
             except (ValueError, RecursionError):
                 raise OpafError('OPAF returned an unsupported response format.') from None
         finally:
-            conn.close()
+            # A closed response must not be silently reconnected by http.client:
+            # the next request opens and pins a new connection explicitly.
+            if state is None or getattr(locals().get('response'), 'will_close', True) or conn.sock is None:
+                conn.close()
+                if state is not None:
+                    state['connection'] = None
 
     def run(self, job_id):
         if not re.fullmatch(r'fox-[a-f0-9]{20}', job_id): raise ValueError('Invalid FOX run ID.')
@@ -223,6 +271,21 @@ class OpafClient:
         exception messages or logs. Completed checkpoints need no live OPAF.
         """
         return self._invoke(role,request,role_name=role_name,target_profile=target_profile)
+
+    def invoke_prepared(self, role, request, identity, *, role_name, target_profile, before_invoke):
+        """Observe once, persist the caller's intent, then submit exactly once.
+
+        Timings are metadata only and deliberately separate from sealed model
+        evidence. The callback receives a copy and must complete before POST.
+        """
+        if not callable(before_invoke):
+            raise OpafError('A before-invocation intent callback is required.')
+        timing = ProviderTiming('opaf')
+        with self._role_transport(timing):
+            output, invocation, environment = self._invoke(role, request,
+                role_name=role_name, target_profile=target_profile, identity=identity,
+                before_invoke=before_invoke, timing=timing)
+        return output, invocation, environment, timing.finish()
 
     def observe_environment(self, role, request, *, role_name, target_profile):
         """GET-only authenticated version/graph/saved-LLM observation.
@@ -285,7 +348,8 @@ class OpafClient:
         except (KeyError,ValueError,TypeError,AttributeError,StopIteration,OSError,http.client.HTTPException):
             raise OpafError('Read-only OPAF environment observation failed or returned an invalid result.') from None
 
-    def _invoke(self,role,request,*,role_name=None,target_profile=None):
+    def _invoke(self,role,request,*,role_name=None,target_profile=None,identity=None,before_invoke=None,timing=None):
+        identity = request if identity is None else identity
         workflow_id=role['workflow_id']
         if not re.fullmatch(r'[A-Fa-f0-9]{16,64}',workflow_id):
             raise OpafError('Invalid native workflow identity.')
@@ -294,18 +358,33 @@ class OpafClient:
         try:
             environment=None
             if target_profile is not None:
-                environment=self.observe_environment(role,request,role_name=role_name,target_profile=target_profile)
+                environment=self.observe_environment(role,identity,role_name=role_name,target_profile=target_profile)
+                if timing is not None:
+                    timing.mark('environment_seconds')
             else:
                 self._request('GET','/v1/loginValidation',login=True)
                 current=self._request('GET','/v1/agents/'+workflow_id)['data']
                 if not current.get('published') or canonical_hash(current['data'])!=role['graph_sha256']:
                     raise OpafError('OPAF workflow changed or is unpublished; revalidate its deployment profile.')
+            if before_invoke is not None:
+                binding = canonical_hash([role, request, identity, target_profile])
+                try:
+                    before_invoke(deepcopy(environment))
+                except Exception:
+                    raise OpafError('Model intent callback did not complete; no model request was submitted.') from None
+                if canonical_hash([role, request, identity, target_profile]) != binding:
+                    raise OpafError('Prepared model inputs changed before invocation.')
+                timing.mark('before_invoke_seconds')
             started=_utc_now().isoformat()
             if environment is not None:
-                validate_model_environment(environment,target_profile,role_name,request,
+                validate_model_environment(environment,target_profile,role_name,identity,
                     {**role,'started_at_utc':started,'completed_at_utc':started})
+            if timing is not None:
+                timing.begin_request()
             response=self._request('POST','/v1/agentBuilder/run/'+workflow_id,{'message':encoded})
             completed=_utc_now().isoformat()
+            if timing is not None:
+                timing.mark('request_seconds')
             message=parse_model_message(response.get('message'))
             if not isinstance(message,dict) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',response.get('roomId','')):
                 raise OpafError('OPAF did not return structured output with an invocation identity.')
@@ -313,7 +392,7 @@ class OpafClient:
                         'graph_sha256':role['graph_sha256'],'request_sha256':canonical_hash(request),
                         'response_sha256':canonical_hash(response),'started_at_utc':started,'completed_at_utc':completed}
             if environment is not None:
-                validate_model_environment(environment,target_profile,role_name,request,invocation)
+                validate_model_environment(environment,target_profile,role_name,identity,invocation)
             return message,invocation,environment
         except (KeyError,ValueError,TypeError,AttributeError,StopIteration,OSError,http.client.HTTPException):
             raise OpafError('Native OPAF invocation failed or returned an invalid result; no automatic retry.') from None

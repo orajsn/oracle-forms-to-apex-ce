@@ -64,6 +64,10 @@ def validate_prototype_snapshot(snapshot):
         count_guard = bound_count_guard(selected)
         selected_keys = {'schema_version', 'source_binding', 'focus_plan_sha256',
                          'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
+        if 'delivery_mode' in selected:
+            from .prototype_export_only import delivery_mode
+            delivery_mode(selected)
+            selected_keys.add('delivery_mode')
         if selected['schema_version'] == 2:
             selected_keys.add('max_owned_objects')
         if native_input_policy is not None:
@@ -105,6 +109,7 @@ def validate_prototype_snapshot(snapshot):
             approved_prototype_scope=approvals['synthetic_prototype'],
             schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
             candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy,
+            delivery_mode=selected.get('delivery_mode'),
             **({'count_guard_policy': count_guard['policy_id'], 'count_guard_selection': count_guard['selection'],
                 'approved_count_guard_partial_scope': approvals['isolated_count_check']}
                if count_guard is not None else {}))
@@ -257,7 +262,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     if approval_check(snapshot) is not True:
         raise OpafError('Prototype source-owner approval is no longer current.')
     selected = snapshot['prototype']
-    runtime = (configuration_loader or _configuration)(selected['target_profile_sha256'],
+    from .prototype_export_only import delivery_mode, package_configuration
+    package_mode = delivery_mode(selected) is not None
+    runtime = (configuration_loader or (package_configuration if package_mode else _configuration))(selected['target_profile_sha256'],
                                                         installation_projection=installation_projection)
     def still_approved(context=None, *, phase=None):
         if (job / 'source-snapshot.json').is_symlink() or (job / 'source-snapshot.json').read_bytes() != raw:
@@ -269,7 +276,7 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     # The transport performs no source/model approval itself. Repeat the same
     # current selected-source/owner check before converter GETs and POSTs too.
     transport = runtime.get('converter_adapter')
-    if transport is None:
+    if transport is None and not package_mode:
         transport = PrototypeHttpConverterAdapter(job, runtime['gateway'])
     class ApprovedTransport:
         def supports(self, stage):
@@ -295,7 +302,8 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         approved_chunk_hashes=selected['approved_chunk_hashes'], approved_policy_id=selected['approved_policy_id'],
         opaf_client=runtime['opaf_client'], profile=runtime['profile'],
         target_profile_loader=runtime['target_profile_loader'], processing_approval_check=still_approved,
-        converter_adapter=ApprovedTransport(), renderer=runtime.get('renderer'),
+        converter_adapter=None if package_mode else ApprovedTransport(), renderer=runtime.get('renderer'),
+        delivery_mode=selected.get('delivery_mode'), offline_validator=runtime.get('offline_validator'),
         focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
         candidate_format_policy=selected.get('candidate_format_policy'),
         native_input_policy=selected.get('native_input_policy'), count_guard=selected.get('count_guard'))

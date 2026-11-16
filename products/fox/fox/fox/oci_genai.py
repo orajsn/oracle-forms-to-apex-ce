@@ -5,12 +5,14 @@ error remains uncertain to the durable caller; this class never retries it.
 Injected SDK/client objects are for offline contract tests only.
 """
 from datetime import datetime, timezone
+from copy import deepcopy
 import json
 import uuid
 
 from .design_provider import DIRECT, PROMPTS, direct_config
 from .genai_prompts import PROMPTS as TEXTS, prompt_hash
 from .opaf import OpafError, canonical_hash, parse_model_message
+from .provider_timing import ProviderTiming
 
 
 def _now():
@@ -56,24 +58,65 @@ class OciGenAiClient:
             'prompt_version': PROMPTS[role_name], 'prompt_sha256': prompt_hash(role_name)}
 
     def invoke(self, role, request):
+        return self._invoke(role, request)
+
+    def invoke_prepared(self, role, request, identity, *, role_name, target_profile, before_invoke):
+        """Observe configured metadata, persist intent, then one non-retried chat."""
+        if not callable(before_invoke):
+            raise OpafError('A before-invocation intent callback is required.')
+        timing = ProviderTiming(DIRECT)
+        environment = self.observe_environment(role, identity, role_name=role_name, target_profile=target_profile)
+        timing.mark('environment_seconds')
         try:
-            name = next(n for n in PROMPTS if role == self.config['roles'][n])
-            encoded = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
-            if len(encoded.encode('utf-8')) > 650_000:
-                raise ValueError()
-            m = self.sdk.generative_ai_inference.models
-            details = m.ChatDetails(compartment_id=self.target['oci']['compartment_id'],
-                serving_mode=m.OnDemandServingMode(model_id=role['model']),
-                chat_request=m.GenericChatRequest(api_format='GENERIC', is_stream=False,
-                    num_generations=1, max_tokens=16000, temperature=0,
-                    messages=[m.SystemMessage(content=[m.TextContent(text=TEXTS[name])]),
-                              m.UserMessage(content=[m.TextContent(text=encoded)])]))
-            wire_hash = canonical_hash(self.sdk.util.to_dict(details))
+            # Initialize auth/SDK and validate/serialize before durable intent:
+            # setup failures have not submitted an uncertain inference.
+            self._client()
+            prepared = self._prepare_request(role, request)
+        except Exception:
+            raise OpafError('Direct OCI inference setup failed before submission.') from None
+        timing.mark('setup_seconds')
+        binding = canonical_hash([role, request, identity, target_profile, self.target])
+        try:
+            before_invoke(deepcopy(environment))
+        except Exception:
+            raise OpafError('Model intent callback did not complete; no model request was submitted.') from None
+        if canonical_hash([role, request, identity, target_profile, self.target]) != binding:
+            raise OpafError('Prepared model inputs changed before invocation.')
+        lead = (datetime.fromisoformat(_now()) - datetime.fromisoformat(environment['observed_at_utc'])).total_seconds()
+        if not -5 <= lead <= 120:
+            raise OpafError('Prepared model environment expired before invocation.')
+        timing.mark('before_invoke_seconds')
+        output, invocation = self._invoke(role, request, timing=timing, prepared=prepared)
+        from .design_provider import validate_environment
+        validate_environment(environment, target_profile, role_name, identity, invocation)
+        return output, invocation, environment, timing.finish()
+
+    def _prepare_request(self, role, request):
+        name = next(n for n in PROMPTS if role == self.config['roles'][n])
+        encoded = json.dumps(request, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+        if len(encoded.encode('utf-8')) > 650_000:
+            raise ValueError()
+        m = self.sdk.generative_ai_inference.models
+        details = m.ChatDetails(compartment_id=self.target['oci']['compartment_id'],
+            serving_mode=m.OnDemandServingMode(model_id=role['model']),
+            chat_request=m.GenericChatRequest(api_format='GENERIC', is_stream=False,
+                num_generations=1, max_tokens=16000, temperature=0,
+                messages=[m.SystemMessage(content=[m.TextContent(text=TEXTS[name])]),
+                          m.UserMessage(content=[m.TextContent(text=encoded)])]))
+        return name, details, canonical_hash(self.sdk.util.to_dict(details))
+
+    def _invoke(self, role, request, *, timing=None, prepared=None):
+        try:
+            name, details, wire_hash = self._prepare_request(role, request) if prepared is None else prepared
             client_request_id = 'fox-' + uuid.uuid4().hex
             started = _now()
+            if timing is not None:
+                timing.begin_request()
             response = self._client().chat(details, opc_request_id=client_request_id,
                 retry_strategy=self.sdk.retry.NoneRetryStrategy())
             completed = _now()
+            if timing is not None:
+                timing.mark('request_seconds')
             body = self.sdk.util.to_dict(response.data)
             if len(json.dumps(body, ensure_ascii=False).encode('utf-8')) > 2_000_000:
                 raise ValueError()

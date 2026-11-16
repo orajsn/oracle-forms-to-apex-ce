@@ -9,16 +9,43 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
-## Direct OCI preview — 16 November 2026
+## Export-only preview — 17 November 2026
+
+FOX0.27.0 makes the default new UI conversion a downloadable **APEXlang ZIP**:
+reviewed design -> deterministic native rendering -> SQLcl `/nolog` format
+validation -> package. No target database connection, schema creation, app import,
+browser test or reimport is required by that delivery path.
+
+The package includes declared compatibility, the generated MMD version, observed
+SQLcl version, synthetic supporting SQL, import instructions and explicit gaps.
+Format validation is separate from target import, runtime testing and human
+business acceptance. The ordinary source-owner and AI-review checks remain.
+
+For eligible older inactive runs, **Check saved APEX output** can prepare a new
+format-only delivery from the retained approved design. It does not repeat model
+calls, change the original run status or erase earlier failures.
+
+Recorded AI-request timings are visible when available. Prepared OPAF calls avoid
+two duplicated setup requests and can reuse one pinned TLS connection per role.
+Direct OCI already reuses its SDK client; no cloud model-latency gain is claimed.
+
+Local API/browser scenarios and real connectionless compiler checks have passed;
+the new hosted authenticated download path is a separate acceptance milestone.
+Existing public routing is unchanged. Oracle Forms, Java and SQLcl are external
+prerequisites, and the current operator setup still supplies provider/compatibility
+profile metadata. A fresh customer installation is not yet established by these
+checks. See [export-only packages](docs/export-only-packages.md).
+
+## Historical direct OCI preview — 16 November 2026
 
 FOX0.26.0 adds direct OCI Generative AI design and independent review to the
 existing prototype flow. OPAF remains optional. See the [direct preview guide](docs/direct-oci-preview.md)
 for configuration, external prerequisites and offline packaging.
 
-This is a new isolated-preview implementation. It does not resume the cleared
+This was an isolated-preview implementation. It did not resume the cleared
 OPAF deployment work or authorize public cutover. The first hosted real-FMB
-acceptance run is in progress. Generation, exact-download import/runtime proof
-and human business acceptance remain separate.
+acceptance run was in progress at that checkpoint. Its import/runtime work is
+now optional; it does not gate0.27 format-only delivery.
 
 The package has passed a clean offline dependency installation and API startup
 smoke check without old operational history. That check is not a completed

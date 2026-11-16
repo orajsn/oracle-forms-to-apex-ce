@@ -229,12 +229,21 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
     if provider_roles(target).get(name) != role:
         raise OpafError('Prototype role differs from its approved target profile.')
     _save_once(directory / (name + '-target.json'), target)
-    environment = client.observe_environment(role, identity, role_name=name, target_profile=target)
-    # Only an observed environment and successful approval precede this intent.
-    # Any failure after it requires operator reconciliation, not another POST.
-    _save_once(pending, binding)
+    def before_invoke(environment):
+        # Prepared providers validate/observe once, then persist intent BEFORE POST.
+        _save_once(pending, binding)
+    timing = None
     try:
-        output, invocation = client.invoke(role, request)
+        if callable(getattr(client, 'invoke_prepared', None)):
+            output, invocation, environment, timing = client.invoke_prepared(
+                role, request, identity, role_name=name, target_profile=target,
+                before_invoke=before_invoke)
+            if not pending.is_file() or _json(pending) != binding:
+                raise OpafError('Prepared provider did not retain its invocation intent.')
+        else:
+            environment = client.observe_environment(role, identity, role_name=name, target_profile=target)
+            before_invoke(environment)
+            output, invocation = client.invoke(role, request)
         if (invocation.get('request_sha256') != binding['request_sha256']
                 or not valid_invocation_identity(invocation)
                 or not _SHA.fullmatch(invocation.get('response_sha256', ''))):
@@ -246,6 +255,13 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
                     'model_environment_sha256': canonical_hash(environment)})
     except Exception:
         raise OpafError('Prototype model call did not seal a result; reconcile without replay.') from None
+    if timing is not None:
+        # Advisory metadata cannot invalidate a sealed successful call or cause replay.
+        try:
+            from .prototype_export_only import save_provider_timing
+            save_provider_timing(directory, name, timing, identity)
+        except Exception:
+            pass
     return output, invocation
 
 
@@ -537,7 +553,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            approved_chunk_hashes, approved_policy_id, opaf_client,
                            profile, target_profile_loader, processing_approval_check,
                            converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
-                           native_input_policy=None, count_guard=None):
+                           native_input_policy=None, count_guard=None, delivery_mode=None,
+                           offline_validator=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -546,6 +563,9 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     supplied facts. Checkpoint paths are INTERNAL, not public download grants.
     """
     job = Path(job)
+    if delivery_mode is not None:
+        from .prototype_export_only import delivery_mode as checked_mode
+        checked_mode({'delivery_mode': delivery_mode})
     if not re.fullmatch(r'fox-[a-f0-9]{20}', job.name):
         raise OpafError('Invalid prototype run identity.')
     if approved_policy_id != POLICY_ID:
@@ -567,6 +587,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         from .prototype_job import read_prototype_snapshot
         persisted_snapshot,_ = read_prototype_snapshot(job)
         persisted = persisted_snapshot.get('prototype',{})
+        if delivery_mode != persisted.get('delivery_mode'):
+            raise OpafError('Delivery mode differs from the immutable source snapshot.')
         persisted_policy=persisted.get('metadata_task_policy')
         if metadata_task_policy is None: metadata_task_policy=persisted_policy
         elif metadata_task_policy!=persisted_policy:
@@ -595,6 +617,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'focus_plan_sha256': canonical_hash(plan),
                'profile_sha256': canonical_hash({name: profile[name] for name in ('mapper', 'reviewer')}),
                'approved_policy_id': approved_policy_id}
+    if delivery_mode is not None:
+        binding['delivery_mode'] = delivery_mode
     if native_input_policy is not None:
         binding['native_input_policy'] = native_input_policy
     if count_guard is not None:
@@ -634,6 +658,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
               'status': 'RUNNING', 'stage': 'mapping', 'facts': facts,
               'assessment': _json(checkpoints / 'assessment.json'),
               'artifacts': {'checkpoint_directory': str(checkpoints)}}
+    if delivery_mode is not None:
+        result['delivery_mode'] = delivery_mode
     from .prototype_mapping_epochs import technical_record
     from .prototype_container_epoch import NUMBER as CONTAINER_EPOCH
     from .prototype_partition_review_epoch import NUMBER as PARTITION_EPOCH
@@ -710,6 +736,16 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'plan_sha256': native_plan['plan_sha256'], 'zip_sha256': digest, 'trace': trace})
     facts['native_source_rendered'] = True
     result['artifacts'].update(candidate_apexlang=str(archive), candidate_apexlang_sha256=digest)
+    if delivery_mode is not None:
+        from .prototype_export_only import publish_package
+        request = {'schema_version': 1, 'scope': 'fox-prototype-converter-request-v1',
+            'job_id': job.name, 'project_id': project_id,
+            'source_binding': packet['source_binding'], 'plan_sha256': native_plan['plan_sha256'],
+            'rendering_spec': native_plan['rendering_spec'], 'rendered_zip_sha256': digest,
+            'source_authority': authority, 'prior_receipts': {}}
+        if processing_approval_check(approval_context) is not True:
+            raise OpafError('Current source-owner permission is required before package validation.')
+        return publish_package(job, request, result, validator=offline_validator)
     prior = {}
     for stage in CONVERTER_STAGES:
         result['stage'] = stage

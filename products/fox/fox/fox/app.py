@@ -258,6 +258,70 @@ def conversion_configuration(*, installation_projection=_NO_INSTALLATION_PROJECT
             'configuration_checks': checks,
             'configuration_scope': 'Configuration only; connectivity and all technical release gates are checked during conversion.'}
 
+def package_conversion_configuration() -> dict:
+    """Configuration reporting only: no clients, network or compiler execution.
+
+    This never authorizes the legacy /runs route. That route and its project
+    process capability retain conversion_configuration() and all original gates.
+    """
+    import shutil
+    from .opaf import canonical_hash
+    profile = os.getenv('FOX_CONVERSION_PROFILE', LEGACY_PROFILE).strip()
+    adapter = os.getenv('FOX_RUN_ADAPTER', '').strip()
+    checks = []
+    def check(code, ready, message):
+        checks.append({'code': code, 'ready': bool(ready), 'message': message})
+    check('PACKAGE_PROJECT_PROFILE', profile == PROJECT_PROFILE,
+          'Select the project profile for APEXlang package generation.')
+    check('PACKAGE_PROVIDER_ADAPTER', adapter in ('oci-genai', 'embedded-opaf'),
+          'Select the configured direct OCI or optional OPAF design provider.')
+    ready, provider = False, None
+    try:
+        from forms2apex.target_profile import validate_target_profile
+        path = Path(os.environ['FOX_PROTOTYPE_PROFILE_FILE'])
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 65_536:
+            raise ValueError()
+        envelope = json.loads(path.read_text(encoding='utf-8'))
+        if set(envelope) != {'target_profile', 'target_profile_sha256'}:
+            raise ValueError()
+        target = validate_target_profile(envelope['target_profile'])
+        if canonical_hash(target) != envelope['target_profile_sha256']:
+            raise ValueError()
+        provider = 'oci_genai' if 'design_provider' in target else 'opaf'
+        ready = (provider == 'oci_genai') == (adapter == 'oci-genai')
+    except (KeyError, OSError, ValueError, TypeError, RuntimeError, ImportError):
+        pass
+    check('PACKAGE_DESIGN_PROFILE', ready,
+          'Configure the approved provider profile and package compatibility metadata.')
+    if adapter == 'embedded-opaf':
+        credential = os.getenv('FOX_OPAF_CREDENTIAL_FILE', '')
+        check('PACKAGE_PROVIDER_CREDENTIAL_FILE', bool(credential) and Path(credential).is_file(),
+              'Configure the protected OPAF model credential file. A target database connection is not required.')
+    compiler = os.getenv('FOX_EXPORT_SQLCL_PATH') or os.getenv('F2A_SQLCL_PATH') or shutil.which('sql')
+    check('OFFLINE_COMPILER', bool(compiler) and Path(compiler).is_file(),
+          'Configure SQLcl for offline validation. Compiler version and format checks run before package publication.')
+    return {'conversion_profile': profile,
+            'conversion_configured': all(item['ready'] for item in checks),
+            'configured_project_schema_versions': [], 'configuration_checks': checks,
+            'delivery_mode': 'apexlang_package', 'design_provider': provider,
+            'configuration_scope': 'Package-generation configuration only. Target database credentials, import and runtime services are not required for this delivery. Legacy execution is checked separately.'}
+
+
+def reporting_configuration(*, installation_projection=_NO_INSTALLATION_PROJECTION) -> dict:
+    """Default project UI reports package readiness; explicit legacy stays intact."""
+    if os.getenv('FOX_CONVERSION_PROFILE', LEGACY_PROFILE).strip() != PROJECT_PROFILE:
+        return conversion_configuration(installation_projection=installation_projection)
+    mode = os.getenv('FOX_DEFAULT_DELIVERY_MODE', 'apexlang_package')
+    if mode == 'legacy':
+        return conversion_configuration(installation_projection=installation_projection)
+    result = package_conversion_configuration()
+    if mode != 'apexlang_package':
+        result['conversion_configured'] = False
+        result['configuration_checks'].append({'code': 'DEFAULT_DELIVERY_MODE', 'ready': False,
+            'message': 'Select apexlang_package or explicit legacy readiness reporting.'})
+    return result
+
+
 def password_hash(password: str, salt: str | None = None) -> str:
     salt=salt or secrets.token_hex(16)
     return salt+':'+hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
@@ -591,7 +655,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         with db() as c: c.execute('DELETE FROM sessions WHERE token=?',(hashlib.sha256(request.cookies.get('fox_session','').encode()).hexdigest(),))
         response=JSONResponse({'ok':True});response.delete_cookie('fox_session');return response
     @app.get('/api/session')
-    def session(request:Request): return {'username':owner(request),'mode':'Internal MVP',**configured_conversion()}
+    def session(request:Request): return {'username':owner(request),'mode':'Internal MVP',
+        **reporting_configuration(installation_projection=(fresh.projection if fresh is not None else _NO_INSTALLATION_PROJECTION))}
     @app.get('/api/projects')
     def projects(request:Request):
         who=owner(request)
@@ -648,6 +713,10 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                                'Conversion is not configured for this deployment.' if not configured else None)},
                 'local_preparation': {'enabled': enable_local_preparation},
             }
+            package_configuration = package_conversion_configuration()
+            p['project_capabilities']['package_delivery'] = {
+                'enabled': package_configuration['conversion_configured'], 'delivery_mode': 'apexlang_package',
+                'reason': None if package_configuration['conversion_configured'] else 'Configure the design provider and offline SQLcl compiler for package delivery.'}
             p['processing_notice'] = (('Conversion uses direct OCI Generative AI for design and independent review. ' if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai' else 'Conversion uses embedded OPAF and the configured AI provider. ') +
                 'Only source approved for that processing route may be submitted. '
                 'Do not upload credentials or production records; generated test data is synthetic.')

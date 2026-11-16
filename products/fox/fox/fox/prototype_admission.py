@@ -62,7 +62,8 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
                                 approved_redacted_source, approved_external_ai,
                                 approved_prototype_scope, schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
                                 native_input_policy=None, count_guard_policy=None,
-                                count_guard_selection=None, approved_count_guard_partial_scope=None):
+                                count_guard_selection=None, approved_count_guard_partial_scope=None,
+                                delivery_mode=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
@@ -76,6 +77,11 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
         raise ValueError('The configured prototype destination must be checked before conversion.')
     description = describe_prototype_sources(documents)
     strategy = {'schema_version': schema_version}
+    if delivery_mode is not None:
+        from .prototype_export_only import DELIVERY_MODE
+        if delivery_mode != DELIVERY_MODE:
+            raise ValueError('Unknown prototype delivery mode.')
+        strategy['delivery_mode'] = delivery_mode
     if type(schema_version) is int and schema_version == 2:
         strategy['max_owned_objects'] = FOCUS_MAX_OWNED_OBJECTS
     limit = bound_focus_limit(strategy)

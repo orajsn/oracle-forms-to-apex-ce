@@ -12,3 +12,5 @@ test-fixtures/
 test-output/
 test-tools/
 .test-codex-home/
+/work/
+/outputs/

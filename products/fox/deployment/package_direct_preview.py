@@ -32,7 +32,7 @@ def build(root: Path, wheelhouse: Path, output: Path):
                 raise ValueError('Package inputs must not contain links.')
             if path.is_file():
                 rows[rel.as_posix()] = path
-    for name in ('fox/requirements-lock.txt', 'fox/requirements.txt', 'converter/pyproject.toml', 'README.md', 'THIRD_PARTY.md', 'docs/direct-oci-preview.md'):
+    for name in ('fox/requirements-lock.txt', 'fox/requirements.txt', 'converter/pyproject.toml', 'README.md', 'THIRD_PARTY.md', 'docs/direct-oci-preview.md', 'docs/export-only-packages.md'):
         rows[name] = root/name
     for path in wheelhouse.iterdir():
         if path.is_file() and (path.suffix == '.whl' or path.name == 'requirements.txt'):

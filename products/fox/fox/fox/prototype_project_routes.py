@@ -38,7 +38,7 @@ class PrototypeRunInput(BaseModel):
     @classmethod
     def creation_only_count_check(cls, value):
         if (not cls.allow_count_guard_creation and isinstance(value, dict) and any(key in value for key in
-                ('count_guard_policy', 'count_guard_selection', 'approved_count_guard_partial_scope'))):
+                ('count_guard_policy', 'count_guard_selection', 'approved_count_guard_partial_scope', 'delivery_mode'))):
             raise ValueError('A count-check selection is creation-only and cannot upgrade an existing run.')
         return value
 
@@ -59,10 +59,17 @@ class CountGuardSelectionInput(BaseModel):
 class PrototypeNewRunInput(PrototypeRunInput):
     # A creation-only choice: continuations cannot upgrade old immutable jobs.
     allow_count_guard_creation: ClassVar[bool] = True
+    delivery_mode: Literal['apexlang_package'] | None = None
     native_input_policy: Literal['forms-required-inputs-v1'] | None = None
     count_guard_policy: Literal['forms-isolated-count-check-v1'] | None = None
     count_guard_selection: CountGuardSelectionInput | None = None
     approved_count_guard_partial_scope: StrictBool | None = None
+
+
+class SavedPackageInput(BaseModel):
+    model_config = {'extra': 'forbid'}
+    preparation_binding_sha256: str = Field(pattern=r'^[a-f0-9]{64}$')
+    approved_format_only_delivery: StrictBool
 
 
 class PrototypeEpochInput(PrototypeContinuationInput):
@@ -218,6 +225,31 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 return target
             with epoch_read_scope(job / 'prototype-pipeline'):
                 target = current()
+                from .prototype_export_only import delivery_mode, retained_package
+                if delivery_mode(snapshot['prototype']) is not None:
+                    raw, metadata, publication = retained_package(job, snapshot, target)
+                    current()
+                    headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                    if metadata_only:
+                        return Response(json.dumps({
+                            'schema_version': 1, 'scope': 'fox-apexlang-package-output-v1',
+                            'project_id': pid, 'run_id': rid, 'source_hash': snapshot['source_hash'],
+                            'selected_source_set_id': snapshot['selected_source_set_id'],
+                            'source_binding': snapshot['prototype']['source_binding'],
+                            'status': 'APEX_GENERATED', 'delivery_mode': 'apexlang_package',
+                            'package_format': 'apexlang_zip', 'format_validated': True,
+                            'download_path': f'/api/projects/{pid}/prototype-runs/{rid}/download',
+                            'package_sha256': publication['package_sha256'],
+                            'package_bytes': publication['package_bytes'],
+                            'compatibility': metadata['compatibility'], 'validation': metadata['validation'],
+                            'prerequisites': metadata['prerequisites'], 'omissions': metadata['omissions'],
+                            'technically_verified': False, 'runtime_verified': False, 'import_verified': False,
+                            'business_behavior_accepted': False, 'clean_schema_install_passed': False,
+                            'package_reimport_passed': False}), media_type='application/json', headers=headers)
+                    headers.update({'Content-Disposition': f'attachment; filename="{rid}-apexlang-package.zip"',
+                        'X-FOX-Output-Scope': 'format-validated-apexlang-not-import-tested',
+                        'X-Content-SHA256': publication['package_sha256']})
+                    return Response(raw, media_type='application/zip', headers=headers)
                 export_request, receipt = retained_export_request(job, snapshot, target)
                 if metadata_only:
                     current()
@@ -262,6 +294,127 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/download')
     def download_generated_prototype(pid: str, rid: str, request: Request):
         return generated_prototype(pid, rid, request)
+
+    def saved_context(c, pid, rid, request):
+        from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+        from .prototype_export_only import saved_candidate
+        from .prototype_mapping_epochs import validate_epoch_chain
+        from .prototype_read_scope import epoch_read_scope
+        from . import prototype_query_omission_continuation as omission
+        import re
+        p = project(request, pid)
+        if not re.fullmatch(r'fox-[a-f0-9]{20}', rid):
+            raise HTTPException(404, 'Saved run not found.')
+        row = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
+        owner = c.execute('SELECT owner FROM projects WHERE id=?', (pid,)).fetchone()
+        if not row or not owner or owner['owner'] != p['owner']:
+            raise HTTPException(404, 'Saved run not found.')
+        if row['state'] not in ('ATTENTION', 'GENERATED'):
+            raise OpafError('Only an inactive saved legacy run may prepare a format-only delivery.')
+        if (root / 'jobs').is_symlink():
+            raise OpafError('Unsafe saved-run storage.')
+        job = root / 'jobs' / rid
+        snapshot, original = read_prototype_snapshot(job)
+        validate_prototype_snapshot(snapshot)
+        if (snapshot['approvals']['owner'] != p['owner'] or snapshot['project_id'] != pid
+                or snapshot['source_hash'] != row['source_hash']
+                or inventory(current_sources(pid, c))['source_hash'] != snapshot['source_hash']
+                or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']):
+            raise OpafError('Saved-output owner or original selected source changed.')
+        target = target_reader()
+        with epoch_read_scope(job / 'prototype-pipeline'):
+            validate_epoch_chain(job, snapshot, original, c)
+            omission.validate_record(job, snapshot, original, c)
+            source_request, binding = saved_candidate(job, snapshot, original, target, dict(row))
+        if read_prototype_snapshot(job)[1] != original:
+            raise OpafError('Saved-output snapshot changed.')
+        return job, snapshot, source_request, binding
+
+    def saved_output(pid, rid, snapshot, binding, metadata, publication):
+        return {'schema_version': 1, 'scope': 'fox-saved-apexlang-package-output-v1',
+            'project_id': pid, 'run_id': rid, 'source_hash': snapshot['source_hash'],
+            'selected_source_set_id': snapshot['selected_source_set_id'],
+            'source_binding': snapshot['prototype']['source_binding'],
+            'status': 'PACKAGE_PREPARED', 'legacy_run_state': binding['legacy_run_state'],
+            'delivery_mode': 'retained_apexlang_package', 'package_format': 'apexlang_zip',
+            'preparation_binding_sha256': canonical_hash(binding), 'format_validated': True,
+            'candidate_sha256': binding['candidate_sha256'],
+            'download_path': f'/api/projects/{pid}/prototype-runs/{rid}/saved-package/download',
+            'package_sha256': publication['package_sha256'], 'package_bytes': publication['package_bytes'],
+            **{key: metadata[key] for key in ('compatibility', 'validation', 'prerequisites', 'omissions', 'selected_code_scope')},
+            'technically_verified': False, 'runtime_verified': False, 'import_verified': False,
+            'business_behavior_accepted': False, 'clean_schema_install_passed': False,
+            'package_reimport_passed': False}
+
+    def saved_package_response(pid, rid, request, *, action, body=None):
+        from .prototype_export_only import (_saved_directory, prepare_saved_package, read_saved_package,
+                                            OfflineCompilerUnavailable)
+        import zipfile
+        project(request, pid)  # Authentication before filesystem access or compiler execution.
+        try:
+            with db() as c:
+                if action == 'prepare':
+                    c.execute('BEGIN IMMEDIATE')
+                else:
+                    c.execute('PRAGMA query_only=ON')
+                    c.execute('BEGIN')
+                job, snapshot, source_request, binding = saved_context(c, pid, rid, request)
+                digest = canonical_hash(binding)
+                directory = _saved_directory(job)
+                published = (directory / 'publication.json').exists() or (directory / 'publication.json').is_symlink()
+                if action == 'readiness':
+                    if published:
+                        read_saved_package(job, source_request, binding)
+                    projection = {'schema_version': 1, 'scope': 'fox-saved-apexlang-package-readiness-v1',
+                        'project_id': pid, 'run_id': rid, 'eligible': True, 'prepared': published,
+                        'preparation_binding_sha256': digest, 'source_hash': binding['source_hash'],
+                        'source_binding': binding['source_binding'], 'selected_source_set_id': binding['selected_source_set_id'],
+                        'candidate_sha256': binding['candidate_sha256'], 'snapshot_sha256': binding['snapshot_sha256'],
+                        'legacy_run_state': binding['legacy_run_state'],
+                        'output_path': f'/api/projects/{pid}/prototype-runs/{rid}/saved-package/output'}
+                    saved_context(c, pid, rid, request)
+                    return Response(json.dumps(projection), media_type='application/json', headers={'Cache-Control': 'no-store'})
+                if action == 'prepare':
+                    if body.approved_format_only_delivery is not True or body.preparation_binding_sha256 != digest:
+                        raise OpafError('Confirm format-only delivery for the exact current saved candidate.')
+                    if published:
+                        raw, metadata, publication = read_saved_package(job, source_request, binding)
+                    else:
+                        raw, metadata, publication = prepare_saved_package(job, source_request, binding)
+                else:
+                    raw, metadata, publication = read_saved_package(job, source_request, binding)
+                if canonical_hash(saved_context(c, pid, rid, request)[3]) != digest:
+                    raise OpafError('Saved-output binding changed during preparation or read.')
+                headers = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+                if action == 'download':
+                    headers.update({'Content-Disposition': f'attachment; filename="{rid}-saved-apexlang-package.zip"',
+                        'X-FOX-Output-Scope': 'saved-format-only-apexlang-original-run-unchanged',
+                        'X-Content-SHA256': publication['package_sha256']})
+                    return Response(raw, media_type='application/zip', headers=headers)
+                return Response(json.dumps(saved_output(pid, rid, snapshot, binding, metadata, publication)),
+                    media_type='application/json', headers=headers)
+        except OfflineCompilerUnavailable as error:
+            raise HTTPException(503, str(error)) from None
+        except HTTPException:
+            raise
+        except (ValueError, KeyError, TypeError, AttributeError, ImportError, OSError, RuntimeError, zipfile.BadZipFile):
+            raise HTTPException(409, 'Saved-output delivery is unavailable: the original run must be inactive with unchanged owner/source/profile, approved review, exact rendered candidate and genuine offline validation evidence. No model or target operation was retried.') from None
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/saved-package/readiness')
+    def saved_package_readiness(pid: str, rid: str, request: Request):
+        return saved_package_response(pid, rid, request, action='readiness')
+
+    @app.post('/api/projects/{pid}/prototype-runs/{rid}/saved-package')
+    def prepare_saved_output(pid: str, rid: str, body: SavedPackageInput, request: Request):
+        return saved_package_response(pid, rid, request, action='prepare', body=body)
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/saved-package/output')
+    def saved_package_output(pid: str, rid: str, request: Request):
+        return saved_package_response(pid, rid, request, action='output')
+
+    @app.get('/api/projects/{pid}/prototype-runs/{rid}/saved-package/download')
+    def download_saved_package(pid: str, rid: str, request: Request):
+        return saved_package_response(pid, rid, request, action='download')
 
     def recovery_context(c, pid, rid, owner):
         from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
@@ -1419,6 +1572,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     approved_prototype_scope=body.approved_prototype_scope, schema_version=2,
                     metadata_task_policy='same-byte-dsc-identity-metadata-v1',
                     candidate_format_policy='exact-source-envelope-and-item-fact-aliases-v1',
+                    delivery_mode=body.delivery_mode,
                     native_input_policy=body.native_input_policy,
                     count_guard_policy=body.count_guard_policy,
                     count_guard_selection=(body.count_guard_selection.model_dump() if body.count_guard_selection is not None else None),
@@ -1430,7 +1584,13 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 # Never create a second charged execution or overwrite earlier proof.
                 raise HTTPException(409, 'This source version already has a conversion run. Open that run; it has not been restarted or replaced.')
             admission_recheck=None
-            if fresh_admission_allowed is None:
+            if body.delivery_mode == 'apexlang_package':
+                # This immutable mode cannot touch Oracle/runtime work. Preserve
+                # unrelated retained outcomes, but do not require their live DB
+                # isolation witnesses merely to queue a new offline package.
+                if c.execute("SELECT 1 FROM runs WHERE state IN ('QUEUED','PROCESSING') LIMIT 1").fetchone():
+                    raise HTTPException(429, 'Another conversion is active. Your files are saved; try again when it finishes.')
+            elif fresh_admission_allowed is None:
                 if not admission_allowed(c):
                     raise HTTPException(429, 'Another conversion or verification requires completion. Your source files are saved.')
             else:

@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import stat
 
-from .opaf import canonical_hash
+from .opaf import OpafError, canonical_hash
 
 STAGES = ('mapping', 'validate', 'prepare_schema', 'import', 'verify_runtime', 'export')
 MAX_METADATA_BYTES = 2_000_000
@@ -144,6 +144,12 @@ def prototype_progress(root, run, owner):
         if snapshot.get('conversion_profile') != 'native-blueprint-prototype-v1':
             raise NotPrototypeRun()
         selected = snapshot['prototype']
+        from .prototype_export_only import delivery_mode, package_progress
+        package_mode = delivery_mode(selected) is not None
+        if package_mode:
+            result.update(delivery_mode='apexlang_package',
+                timing={'available': False, 'scope': 'fox-provider-timing-summary-v1'},
+                stages=[{'id': name, 'status': 'not_observed'} for name in ('mapping', 'render', 'validate', 'package')])
         _require(snapshot['project_id'] == snapshot['project'] == pid
                  and snapshot['source_hash'] == source_hash and snapshot['approvals']['owner'] == owner
                  and type(selected['source_binding']) is str and _SHA.fullmatch(selected['source_binding'])
@@ -159,6 +165,8 @@ def prototype_progress(root, run, owner):
         _require(binding['job_id'] == rid and binding['project_id'] == pid
                  and binding['source_binding'] == source_binding
                  and binding['focus_plan_sha256'] == selected['focus_plan_sha256'])
+        if package_mode:
+            return package_progress(metadata, job, result, binding, selected)
         required = ('native-plan.json', 'rendered.json', 'sources-manifest.json', 'review-index.json')
         if not all(metadata.exists(pipeline / name) for name in required):
             pending = _mapping_pending(metadata, pipeline, rid, source_binding)
@@ -226,9 +234,9 @@ def prototype_progress(root, run, owner):
         return result
     except NotPrototypeRun:
         raise
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, OverflowError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, OverflowError, OpafError):
         result['progress_available'] = False
         result['current_stage'] = None
-        result['stages'] = [{'id': name, 'status': 'not_observed'} for name in STAGES]
+        result['stages'] = [{'id': row['id'], 'status': 'not_observed'} for row in result['stages']]
         result['message'] = 'Progress is not currently available. Saved work is unchanged.'
         return result

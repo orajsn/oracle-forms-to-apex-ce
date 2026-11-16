@@ -80,6 +80,8 @@ def process_one(db,root:Path,*,installation_projection=_NO_INSTALLATION_PROJECTI
             state = 'GENERATED' if generated else 'ATTENTION'
             message = ('APEX prototype generated. Full-package reimport, clean-schema installation and business review remain pending.'
                        if generated else 'Prototype processing stopped at a retained checkpoint. Review the run details; do not restart uncertain operations.')
+            if generated and outcome.get('delivery_mode') == 'apexlang_package':
+                message = 'APEXlang package generated and format validated. Database import, runtime testing and business review were not run.'
             with db() as current:
                 current.execute('UPDATE runs SET state=?,message=?,artifact=NULL,updated=? WHERE id=?',
                                 (state, message, time.time(), rid))

@@ -45,6 +45,7 @@ def _run_script(sqlcl_path: Path, args: list[str], commands: list[str], cwd: Pat
             text=True,
             encoding="utf-8",
             errors="replace",
+            input="",  # Batch scripts need a real EOF pipe, not an inherited console/NUL handle.
             capture_output=True,
             timeout=timeout,
             check=False,
