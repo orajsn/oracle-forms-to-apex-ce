@@ -14,7 +14,7 @@ This repository contains two related projects:
 | CE Workbench | This README | A Codex-assisted assessment and POC skill. |
 | FOX web product | [FOX README](products/fox/README.md) | A business-user Forms upload-to-APEX workflow under development. |
 
-FOX source **0.27.1** provides export-only delivery: upload and assess Forms, choose
+FOX source **0.27.2** provides export-only delivery: upload and assess Forms, choose
 the supported scope, generate native APEXlang, validate its format offline, and
 download the application package with compatibility, prerequisites and omissions.
 Database import and browser testing are optional development/lab activities,

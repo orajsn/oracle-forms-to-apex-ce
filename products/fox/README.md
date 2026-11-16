@@ -11,6 +11,13 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Export-only preview — 17 November 2026
 
+Patch 0.27.2 keeps the download action near the package summary and collapses long
+omission lists by default, without removing any report content. An isolated
+hosted 0.27.1 check has now prepared and downloaded a real retained Forms-derived
+package through the UI. The exact whole downloaded ZIP passed connectionless
+SQLcl validation; its native files and original run evidence were unchanged.
+This is format-only acceptance, not public cutover or business acceptance.
+
 Patch0.27.1 gives saved-output GET checks a bounded90-second allowance after an
 actual valid readiness request took28.9seconds and the30-second UI budget proved
 too tight under concurrent work. This corrects premature UI aborts; it is not a
@@ -36,7 +43,8 @@ two duplicated setup requests and can reuse one pinned TLS connection per role.
 Direct OCI already reuses its SDK client; no cloud model-latency gain is claimed.
 
 Local API/browser scenarios and real connectionless compiler checks have passed;
-the new hosted authenticated download path is a separate acceptance milestone.
+the isolated hosted saved-design download path has also passed. Fresh new-mode
+hosted generation and customer installation remain separate acceptance scopes.
 Existing public routing is unchanged. Oracle Forms, Java and SQLcl are external
 prerequisites, and the current operator setup still supplies provider/compatibility
 profile metadata. A fresh customer installation is not yet established by these

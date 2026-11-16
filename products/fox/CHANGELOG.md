@@ -8,6 +8,20 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.2] - 2026-11-17
+
+### [fix] Keep package download visible with large gap reports
+Impact: Users do not have to scroll through hundreds of remediation rows to
+download a prepared APEX package.
+Change: Move the action before long reports and place the complete omissions
+list in an initially collapsed, counted native details control. Report content,
+source binding, timeout budgets and no-retry behavior are unchanged.
+Verification: Frontend build and both focused synthetic Edge scenarios passed
+with 300 remediation rows, desktop/mobile layouts, keyboard expansion, complete
+report text, stale-link clearing and unchanged request budgets. Lead visual
+inspection and independent diff review passed. No backend or package bytes change.
+Delivery: UI source patch; isolated-preview visual acceptance follows publication.
+
 ## [0.27.1] - 2026-11-17
 
 ### [fix] Avoid premature saved-output readiness aborts
@@ -20,6 +34,11 @@ in28.9seconds, while the initial browser check hit its30-second budget. Browser
 regression checks the90-second GET and180-second POST timers, retains unknown-
 outcome GET reconciliation, and the frontend builds with matching release metadata.
 Delivery: Source patch; private-preview acceptance follows the reviewed commit.
+Subsequent isolated acceptance: one explicit UI preparation and actual browser
+download passed for a retained real Forms-derived design. The exact complete ZIP
+passed SQLcl26.1.2 `/nolog` with network disabled and no wallet; native application
+files and the original run/tree remained unchanged. No model replay or target
+database operation occurred. Public routing and business acceptance are separate.
 Remaining: Backend proof-reconstruction optimization needs a separately tested
 read scope. A longer timeout is a reliability fix, not a measured speedup.
 
