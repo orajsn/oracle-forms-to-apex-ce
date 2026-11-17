@@ -19,6 +19,7 @@ from .forms_effective_view import derive_effective_view
 from .forms_redaction import redact_forms_xml
 from .linux_forms import LinuxOracleFormsBackend, MAX_READABLE_BYTES, _path, _read_bounded
 from .prototype_source import validate_redacted_prototype_source
+from . import development_source as development
 
 STATUS = 'PREPARED_REDACTED_REVIEW_REQUIRED'
 SCOPE = 'fox-host-native-preparation-v1'
@@ -44,7 +45,8 @@ def _write(path: Path, raw: bytes) -> None:
 
 
 def prepare_native_source(source: Path, output_root: Path, *, oracle_home=None,
-                          java_home=None, backend_factory=None, job_id: str | None = None) -> Path:
+                          java_home=None, backend_factory=None, job_id: str | None = None,
+                          preparation_mode: str = development.LEGACY_MODE) -> Path:
     """Return a fresh private job only after actual paired-backend calls and gates.
 
     FMB-only in this bounded slice; no other selected file is silently ignored.
@@ -54,6 +56,8 @@ def prepare_native_source(source: Path, output_root: Path, *, oracle_home=None,
     job directories or treat a redaction receipt as transfer/import permission.
     """
     try:
+        if preparation_mode not in development.MODES:
+            raise NativePreparationError('Choose a supported source preparation mode.')
         source, output_root = _path(source), _path(output_root)
         safe_name(source.name)
         if source.suffix.lower() != '.fmb':
@@ -134,6 +138,14 @@ def prepare_native_source(source: Path, output_root: Path, *, oracle_home=None,
                               'input_sha256': binary_hash, 'output_sha256': output_hash,
                               'original_unchanged': True})
 
+        if preparation_mode == development.MODE:
+            reviews = {variant: development.review_xml(xml_name, paired[mode], native=True)
+                       for variant, mode in (('overridden', 'OVERRIDDEN'), ('all', 'ALL'))}
+            if any(review['finding_count'] for review in reviews.values()):
+                original_unchanged()
+                _seal_development(job, job_id, source.name, original, files, tool_runs, reviews)
+                return job
+
         stage = 'DERIVE_EFFECTIVE_VIEW'
         effective = derive_effective_view(xml_name, paired['OVERRIDDEN'], paired['ALL'], binary_sha256=binary_hash)
         derived, derivation = effective['derived_xml'], effective['receipt']
@@ -144,6 +156,18 @@ def prepare_native_source(source: Path, output_root: Path, *, oracle_home=None,
             raise NativePreparationError('Effective-view provenance does not match the exact native pair.')
         save('effective/' + xml_name, derived, 'effective_xml')
         save('effective/derivation-receipt.json', _json(derivation), 'derivation_receipt')
+
+        if preparation_mode == development.MODE:
+            stage = 'PRESERVE_AND_REVIEW'
+            preserved = development.preserve_development_source(xml_name, derived)
+            reviews['effective'] = preserved['receipt']['credential_review']
+            save('effective/preservation-receipt.json', _json(preserved['receipt']), 'preservation_receipt')
+            original_unchanged()
+            _seal_development(job, job_id, source.name, original, files, tool_runs, reviews,
+                              prepared_source={**{key: preserved['document'][key] for key in ('name', 'sha256', 'bytes')},
+                                               'xml_path': 'effective/' + xml_name,
+                                               'receipt_path': 'effective/preservation-receipt.json'})
+            return job
 
         stage = 'REDACT_AND_VALIDATE'
         redacted = redact_forms_xml(xml_name, derived)
@@ -196,3 +220,30 @@ def prepare_native_source(source: Path, output_root: Path, *, oracle_home=None,
         except (OSError, ValueError):
             pass
         raise NativePreparationError('Native preparation failed; private job evidence is retained and no approved output was released.') from None
+
+
+def _seal_development(job, job_id, name, original, files, tool_runs, reviews, prepared_source=None):
+    """Seal preserved evidence honestly; a credential block can precede derivation."""
+    for record in files:
+        raw = _read_bounded(job / record['path'], max(MAX_RAW_BYTES, MAX_RECEIPT_BYTES))
+        if len(raw) != record['bytes'] or digest(raw) != record['sha256']:
+            raise NativePreparationError('Private preparation evidence changed before sealing.')
+    status = (development.CREDENTIAL_REVIEW if any(review['finding_count'] for review in reviews.values())
+              else development.PREPARED)
+    manifest = {'schema_version': 2, 'scope': 'fox-host-native-preparation-v2',
+                'preparation_mode': development.MODE, 'policy_id': development.POLICY_ID,
+                'job_id': job_id, 'status': status,
+                'source': {'name': name, 'sha256': digest(original), 'bytes': len(original)},
+                'tool_runs': tool_runs, 'files': files, 'credential_review': reviews,
+                'safety': {'original_unchanged': True, 'source_preserved': True,
+                           'model_submission_allowed': False, 'model_calls': False,
+                           'database_calls': False, 'business_accepted': False,
+                           'oracle_provenance_attested': False},
+                'limitations': [development.LIMITATION,
+                               'Source preparation does not authorize provider processing or establish behavior conversion.']}
+    if prepared_source is not None:
+        manifest['prepared_source'] = prepared_source
+    _write(job / 'manifest.json', _json(manifest))
+    _write(job / 'status.json', _json({'schema_version': 2, 'scope': manifest['scope'],
+                                     'preparation_mode': development.MODE, 'job_id': job_id,
+                                     'status': status, 'stage': 'COMPLETE'}))

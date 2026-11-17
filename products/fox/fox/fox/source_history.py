@@ -123,30 +123,42 @@ def readable_source_bytes(entry: dict) -> bytes:
 
 def _checked(entry: dict, connection=None, project_id=None) -> dict:
     raw = readable_source_bytes(entry)
+    # Provenance must be checked even when ordinary intake would accept these
+    # bytes: simple development XML must not shed its mode/policy on history read.
+    receipt = None
     try:
-        verified = checked_source(entry.get('name'), raw)
-    except (ValueError, TypeError, AttributeError):
-        # Only the dedicated redacted-prototype upload persists this provenance.
-        # Revalidate exact bytes and the strict analysis-only grammar on every
-        # read; a receipt/hash by itself never overrides ordinary source checks.
-        try:
-            if connection is None or not project_id or not connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_redaction_receipts'").fetchone():
-                _fail()
+        if (connection is not None and project_id and connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_redaction_receipts'").fetchone()):
             receipt = _one(connection, 'SELECT receipt_json,receipt_sha256,owner FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
                            (project_id, entry.get('name'), entry.get('sha256')))
+        if receipt is not None:
             owner = _one(connection, 'SELECT owner FROM projects WHERE id=?', (project_id,))
-            if (not receipt or not owner or receipt['owner'] != owner['owner']
+            if (not owner or receipt['owner'] != owner['owner']
                     or len(receipt['receipt_json'].encode('utf-8')) > 2_000_000
                     or hashlib.sha256(receipt['receipt_json'].encode('utf-8')).hexdigest() != receipt['receipt_sha256']):
                 _fail()
-            from .prototype_source import validate_redacted_prototype_source
-            verified = validate_redacted_prototype_source(entry.get('name'), raw, json.loads(receipt['receipt_json']))
-        except (ValueError, TypeError, AttributeError, KeyError, ImportError):
-            raise SourceHistoryError(_BAD) from None
+            from .prototype_source import validate_prepared_source
+            verified = validate_prepared_source(entry.get('name'), raw, json.loads(receipt['receipt_json']))
+        else:
+            verified = checked_source(entry.get('name'), raw)
+    except (ValueError, TypeError, AttributeError, KeyError, ImportError):
+        raise SourceHistoryError(_BAD) from None
     if any(verified[key] != entry.get(key) for key in ('name', 'sha256', 'bytes', 'text')):
         _fail()
     return verified
+
+
+def development_source_present(c: sqlite3.Connection, pid: str, files: list[dict]) -> bool:
+    """Pure fail-closed query: old redaction approvals cannot cover this mode."""
+    from .development_source import POLICY_ID
+    present = False
+    for entry in files:
+        _checked(entry, c, pid)
+        receipt = _one(c, 'SELECT receipt_json FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
+                       (pid, entry['name'], entry['sha256']))
+        if receipt is not None and json.loads(receipt['receipt_json'])['policy_id'] == POLICY_ID:
+            present = True
+    return present
 
 
 def _selection(c: sqlite3.Connection, pid: str) -> dict:

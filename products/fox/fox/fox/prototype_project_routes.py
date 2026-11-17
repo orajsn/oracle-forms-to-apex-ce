@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from . import source_history
+from .source_processing_policy import source_processing_policy, DEVELOPMENT_REASON
 from .intake import inventory, MAX_FILE_BYTES
 from .partial_draft import saved_draft_scope
 from .opaf import OpafError, canonical_hash
@@ -1521,6 +1522,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Select valid, redacted Forms XML files for prototype assessment. Original files are preserved.') from None
             result.update(source_hash=inventory(sources)['source_hash'], selected_source_set_id=selected)
+            result.update(source_processing_policy(c, pid, sources))
         try:
             result.update(target_profile_sha256=target_hash(), conversion_configured=True)
         except HTTPException:
@@ -1551,12 +1553,14 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
     @app.post('/api/projects/{pid}/prototype-runs', status_code=202)
     def submit_prototype(pid: str, body: PrototypeNewRunInput, request: Request):
         p = project(request, pid)
-        digest = target_hash()
-        if digest != body.target_profile_sha256:
-            raise HTTPException(409, 'The processing destination changed. Review the prototype assessment again.')
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
             sources = current_sources(pid, c)
+            if not source_processing_policy(c, pid, sources)['source_processing_allowed']:
+                raise HTTPException(409, DEVELOPMENT_REASON)
+            digest = target_hash()
+            if digest != body.target_profile_sha256:
+                raise HTTPException(409, 'The processing destination changed. Review the prototype assessment again.')
             inv = inventory(sources)
             if (inv['source_hash'] != body.source_hash or
                     source_history.selected_source_set_id(c, pid) != body.expected_current_source_set_id):

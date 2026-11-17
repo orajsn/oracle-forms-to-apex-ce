@@ -15,6 +15,7 @@ import stat
 
 from .extractor import MAX_RAW_BYTES, _output_name, assert_local_path, digest, safe_name
 from .prototype_source import validate_redacted_prototype_source
+from . import development_source as development
 
 SCOPE = 'fox-hosted-forms-job-v1'
 PREPARED = 'PREPARED_REDACTED_REVIEW_REQUIRED'
@@ -163,10 +164,13 @@ class HostedFormsJobs:
         marker = _load(job / 'ready.json')
         manifest = _decode(raw)
         try:
-            if (set(manifest) != {'schema_version', 'scope', 'job_id', 'request_id', 'project_id',
+            if type(manifest) is not dict:
+                _fail()
+            development_mode = manifest.get('preparation_mode') == development.MODE
+            if (set(manifest) != ({'preparation_mode'} if development_mode else set()) | {'schema_version', 'scope', 'job_id', 'request_id', 'project_id',
                                  'owner_id', 'source_set_sha256', 'selected_source_set_id', 'source'}
-                    or type(manifest['schema_version']) is not int or manifest['schema_version'] != 1
-                    or manifest['scope'] != SCOPE or manifest['job_id'] != job_id
+                    or type(manifest['schema_version']) is not int or manifest['schema_version'] != (2 if development_mode else 1)
+                    or manifest['scope'] != ('fox-hosted-forms-job-v2' if development_mode else SCOPE) or manifest['job_id'] != job_id
                     or manifest['request_id'] != job_id
                     or marker != {'job_id': job_id, 'input_manifest_sha256': digest(raw)}):
                 _fail()
@@ -194,7 +198,8 @@ class HostedFormsJobs:
 
     def submit(self, *, request_id: str, project_id: str, owner_id: str,
                source_set_sha256: str, name: str, raw: bytes,
-               selected_source_set_id: str | None = None) -> dict:
+               selected_source_set_id: str | None = None,
+               preparation_mode: str = development.LEGACY_MODE) -> dict:
         """Idempotent only for exactly the same binding, filename and bytes.
 
         The caller obtains owner/project/source-set from trusted current project
@@ -202,6 +207,8 @@ class HostedFormsJobs:
         retain their request ID and cannot be automatically resubmitted.
         """
         try:
+            if preparation_mode not in development.MODES:
+                _fail()
             job_id, project_id, owner_id = _id(request_id), _id(project_id), _owner(owner_id)
             safe_name(name)
             _output_name(name)
@@ -212,6 +219,8 @@ class HostedFormsJobs:
                         'source_set_sha256': _sha(source_set_sha256),
                         'selected_source_set_id': None if selected_source_set_id is None else _id(selected_source_set_id),
                         'source': {'name': name, 'sha256': digest(raw), 'bytes': len(raw)}}
+            if preparation_mode == development.MODE:
+                manifest.update(schema_version=2, scope='fox-hosted-forms-job-v2', preparation_mode=development.MODE)
             self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
             job = self._job(job_id)
             if job.exists():
@@ -277,11 +286,16 @@ class HostedFormsJobs:
                         state = 'BLOCKED'
                 elif _path(job / 'result.json').exists():
                     # A partial seal or corrupt artifact is not a ready result.
-                    self._result(job_id)
-                    state = PREPARED
+                    result = self._result(job_id)
+                    state = result.get('status', PREPARED)
             except HostedFormsJobError:
                 pass
-        return {'job_id': job_id, 'status': state, 'model_submission_allowed': False,
+        extra = {}
+        if manifest.get('preparation_mode') == development.MODE:
+            extra = {'preparation_mode': development.MODE, 'source_review_required': True}
+            if state in {development.PREPARED, development.CREDENTIAL_REVIEW}:
+                extra['credential_review'] = result['credential_review']
+        return {**extra, 'job_id': job_id, 'status': state, 'model_submission_allowed': False,
                 'business_accepted': False, 'name': manifest['source']['name'],
                 'source': dict(manifest['source']), 'source_set_sha256': manifest['source_set_sha256'],
                 'selected_source_set_id': manifest['selected_source_set_id']}
@@ -347,6 +361,8 @@ class HostedFormsJobs:
 
     def _validate_prepared(self, prepared, manifest):
         result = _load(prepared / 'manifest.json')
+        if manifest.get('preparation_mode') == development.MODE:
+            return self._validate_development(prepared, manifest, result)
         try:
             if (type(result['schema_version']) is not int or result['schema_version'] != 1
                     or result['scope'] != 'fox-host-native-preparation-v1'
@@ -417,7 +433,10 @@ class HostedFormsJobs:
         try:
             output_root = _path(job / 'prepared')
             expected = output_root / job_id
-            actual = prepare(job / 'input' / manifest['source']['name'], output_root, job_id=job_id)
+            kwargs = {'job_id': job_id}
+            if manifest.get('preparation_mode') == development.MODE:
+                kwargs['preparation_mode'] = development.MODE
+            actual = prepare(job / 'input' / manifest['source']['name'], output_root, **kwargs)
             if _path(actual) != expected:
                 _fail()
             self._input(job_id)  # Native preparation must not mutate queue inputs.
@@ -440,6 +459,106 @@ class HostedFormsJobs:
         its normal source-history path. This does not grant external model consent.
         """
         self._authorized(job_id, project_id, owner_id, source_set_sha256, selected_source_set_id)
-        if self.status(job_id, project_id=project_id, owner_id=owner_id)['status'] != PREPARED:
+        if self.status(job_id, project_id=project_id, owner_id=owner_id)['status'] not in {PREPARED, development.PREPARED}:
             _fail()
         return self._result(job_id)
+
+
+    def _validate_development(self, prepared, manifest, result):
+        """Freshly bind original pair, policy, review and derived source bytes."""
+        try:
+            from defusedxml import ElementTree as ET
+            from .extractor import NS
+            from .forms_effective_view import derive_effective_view
+            keys = {'schema_version', 'scope', 'preparation_mode', 'policy_id', 'job_id', 'status',
+                    'source', 'tool_runs', 'files', 'credential_review', 'safety', 'limitations'}
+            if 'prepared_source' in result:
+                keys.add('prepared_source')
+            if (set(result) != keys or type(result['schema_version']) is not int or result['schema_version'] != 2
+                    or result['scope'] != 'fox-host-native-preparation-v2'
+                    or result['preparation_mode'] != development.MODE
+                    or result['policy_id'] != development.POLICY_ID
+                    or result['job_id'] != manifest['job_id'] or result['source'] != manifest['source']):
+                _fail()
+            if result['safety'] != {'original_unchanged': True, 'source_preserved': True,
+                                    'model_submission_allowed': False, 'model_calls': False,
+                                    'database_calls': False, 'business_accepted': False,
+                                    'oracle_provenance_attested': False}:
+                _fail()
+            by_role, contents, paths = {}, {}, set()
+            if type(result['files']) is not list or not 3 <= len(result['files']) <= 6:
+                _fail()
+            for record in result['files']:
+                if (type(record) is not dict or set(record) != {'role', 'path', 'sha256', 'bytes'}
+                        or type(record['role']) is not str or record['role'] in by_role
+                        or record['path'] in paths or type(record['bytes']) is not int):
+                    _fail()
+                _sha(record['sha256'])
+                raw = _read(_relative(prepared, record['path']), MAX_METADATA_BYTES)
+                if digest(raw) != record['sha256'] or len(raw) != record['bytes']:
+                    _fail()
+                by_role[record['role']], contents[record['role']] = record, raw
+                paths.add(record['path'])
+            native_roles = {'original_binary', 'native_overridden', 'native_all'}
+            if not native_roles <= by_role.keys():
+                _fail()
+            if (by_role['original_binary']['sha256'] != manifest['source']['sha256']
+                    or by_role['original_binary']['bytes'] != manifest['source']['bytes']):
+                _fail()
+            name = _output_name(manifest['source']['name'])
+            reviews = {}
+            for variant in ('overridden', 'all'):
+                raw = contents['native_' + variant]
+                reviews[variant] = development.review_xml(name, raw, native=True)
+                root = ET.fromstring(raw)
+                if root.tag != NS + 'Module' or len(root) != 1 or root[0].tag != NS + 'FormModule':
+                    _fail()
+            blocked = any(review['finding_count'] for review in reviews.values())
+            checked = receipt = None
+            if blocked:
+                if set(by_role) != native_roles or 'prepared_source' in result:
+                    _fail()
+            else:
+                if set(by_role) != native_roles | {'effective_xml', 'derivation_receipt', 'preservation_receipt'}:
+                    _fail()
+                derived = derive_effective_view(name, contents['native_overridden'], contents['native_all'],
+                                                binary_sha256=manifest['source']['sha256'])
+                if (derived['derived_xml'] != contents['effective_xml']
+                        or _json(derived['receipt']) != _json(_decode(contents['derivation_receipt']))):
+                    _fail()
+                source = result['prepared_source']
+                if (set(source) != {'name', 'sha256', 'bytes', 'xml_path', 'receipt_path'} or source['name'] != name
+                        or source['sha256'] != by_role['effective_xml']['sha256']
+                        or source['bytes'] != by_role['effective_xml']['bytes']
+                        or source['xml_path'] != by_role['effective_xml']['path']
+                        or source['receipt_path'] != by_role['preservation_receipt']['path']):
+                    _fail()
+                preserved = development.preserve_development_source(name, contents['effective_xml'])
+                receipt = _decode(contents['preservation_receipt'])
+                if _json(receipt) != _json(preserved['receipt']):
+                    _fail()
+                reviews['effective'] = receipt['credential_review']
+                blocked = bool(reviews['effective']['finding_count'])
+                if not blocked:
+                    checked = development.validate_development_source(name, contents['effective_xml'], receipt)
+            expected_status = development.CREDENTIAL_REVIEW if blocked else development.PREPARED
+            if result['status'] != expected_status or _json(result['credential_review']) != _json(reviews):
+                _fail()
+            return {'document': checked, 'receipt': receipt, 'status': expected_status,
+                    'credential_review': reviews, '_artifacts': contents}
+        except (KeyError, TypeError, ValueError, OSError):
+            _fail()
+
+    def read_source_attachment(self, job_id: str, *, project_id: str, owner_id: str, variant: str) -> bytes:
+        """Private owner review only, including blocked jobs; never path access."""
+        if variant not in {'overridden', 'all', 'effective'}:
+            _fail()
+        _, manifest, _ = self._authorized(job_id, project_id, owner_id)
+        if manifest.get('preparation_mode') != development.MODE:
+            _fail()
+        result = self._result(job_id)
+        role = 'effective_xml' if variant == 'effective' else 'native_' + variant
+        try:
+            return result['_artifacts'][role]
+        except KeyError:
+            _fail()

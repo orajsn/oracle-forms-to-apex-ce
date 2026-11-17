@@ -38,6 +38,14 @@ def _fail():
     raise ValueError('Prepared prototype source is not exact safely masked Forms XML with matching redaction provenance.') from None
 
 
+def validate_prepared_source(name: str, raw: bytes, receipt: dict) -> dict:
+    """Explicit policy dispatch; the legacy validator itself remains strict."""
+    from .development_source import POLICY_ID, validate_development_source
+    if isinstance(receipt, dict) and receipt.get('policy_id') == POLICY_ID:
+        return validate_development_source(name, raw, receipt)
+    return validate_redacted_prototype_source(name, raw, receipt)
+
+
 def _code(code, status):
     if status == 'withheld':
         if code != forms_redaction._WITHHELD:

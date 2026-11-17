@@ -9,6 +9,21 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Development-source preparation — 17 November 2026
+
+Version 0.28.0 adds an explicit **Preserve development source** preparation mode.
+Oracle Forms-to-XML remains inside the hosted preparation flow. Original native
+XML is retained, and normal business literals are preserved. Possible credentials
+produce review locations and private XML downloads; correct the original source
+and upload a new request before adoption. Zero findings still requires review.
+
+Clean development XML can be added to project history for analysis. AI conversion
+for this mode is not enabled yet, and legacy redacted-source approval cannot enable
+it. Existing masked preparation and historical jobs keep their original meaning.
+See [hosted preparation](docs/server-side-fmb-preparation.md) for the modes and
+boundaries. Source publication does not promote the public service, which remains
+0.27.4. The 0.27.5 checkpoint below describes its earlier verified output behavior.
+
 ## Export-only preview — 17 November 2026
 
 Patch 0.27.5 adds grouped, searchable findings with the supplied next actions and

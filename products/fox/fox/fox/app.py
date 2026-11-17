@@ -29,6 +29,7 @@ from .prepared_source import (UPLOAD_MANIFEST_NAME, MAX_MANIFEST_BYTES,
                               encode_upload_manifest, parse_upload_manifest,
                               verify_upload_manifest)
 from . import source_history
+from .source_processing_policy import source_processing_policy, DEVELOPMENT_REASON
 from .release_info import public_release
 from .source_requests import build_source_requests, request_text
 from .partial_draft import prepare_partial_draft, saved_draft_scope
@@ -562,10 +563,12 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         if connection is not None:
             saved_draft_scope(connection, pid, result['source_hash'])
             result['selected_source_set_id'] = source_history.selected_source_set_id(connection, pid)
+            result.update(source_processing_policy(connection, pid, sources))
         else:
             with db() as c:
                 saved_draft_scope(c, pid, result['source_hash'])
                 result['selected_source_set_id'] = source_history.selected_source_set_id(c, pid)
+                result.update(source_processing_policy(c, pid, sources))
         result['conversion_profile'] = os.getenv('FOX_CONVERSION_PROFILE', LEGACY_PROFILE).strip()
         if result['conversion_profile'] == NATIVE_PROFILE:
             result['native_assessment'] = assess_native_source(sources)
@@ -707,16 +710,16 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             storage_configured = not mapped_plan or 2 in configuration['configured_project_schema_versions']
             p['project_capabilities'] = {
                 'upload': {'enabled': True}, 'select_version': {'enabled': True},
-                'process': {'enabled': configured and plan_ready and storage_configured,
-                    'reason': ('Resolve every selected form\u2019s findings before converting.' if not plan_ready else
+                'process': {'enabled': p['inventory']['source_processing_allowed'] and configured and plan_ready and storage_configured,
+                    'reason': (p['inventory']['source_processing_reason'] if not p['inventory']['source_processing_allowed'] else 'Resolve every selected form\u2019s findings before converting.' if not plan_ready else
                                'Processing these original table names needs the mapped-project workflow configuration.' if not storage_configured else
                                'Conversion is not configured for this deployment.' if not configured else None)},
                 'local_preparation': {'enabled': enable_local_preparation},
             }
             package_configuration = package_conversion_configuration()
             p['project_capabilities']['package_delivery'] = {
-                'enabled': package_configuration['conversion_configured'], 'delivery_mode': 'apexlang_package',
-                'reason': None if package_configuration['conversion_configured'] else 'Configure the design provider and offline SQLcl compiler for package delivery.'}
+                'enabled': p['inventory']['source_processing_allowed'] and package_configuration['conversion_configured'], 'delivery_mode': 'apexlang_package',
+                'reason': p['inventory']['source_processing_reason'] if not p['inventory']['source_processing_allowed'] else None if package_configuration['conversion_configured'] else 'Configure the design provider and offline SQLcl compiler for package delivery.'}
             p['processing_notice'] = (('Conversion uses direct OCI Generative AI for design and independent review. ' if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai' else 'Conversion uses embedded OPAF and the configured AI provider. ') +
                 'Only source approved for that processing route may be submitted. '
                 'Do not upload credentials or production records; generated test data is synthetic.')
@@ -949,6 +952,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
         with db() as c:
             c.execute('BEGIN')
             sources=current_sources(pid, c);inv=source_assessment(sources, pid, c)
+            if not inv['source_processing_allowed']:
+                raise HTTPException(409, DEVELOPMENT_REASON)
         project_plan = None
         if not sources: raise HTTPException(409,'Add readable source files first.')
         if inv['source_hash']!=body.source_hash: raise HTTPException(409,'Sources changed. Review the current assessment.')
@@ -988,6 +993,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             # Recheck after acquiring the write lock: an upload can have completed
             # between the first assessment and queue creation.
             locked_sources = current_sources(pid, c)
+            if not source_processing_policy(c, pid, locked_sources)['source_processing_allowed']:
+                raise HTTPException(409, DEVELOPMENT_REASON)
             if inventory(locked_sources)['source_hash'] != body.source_hash:
                 raise HTTPException(409,'Sources changed. Review the current assessment.')
             saved_draft_scope(c, pid, body.source_hash)

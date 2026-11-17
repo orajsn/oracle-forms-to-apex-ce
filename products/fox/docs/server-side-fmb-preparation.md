@@ -8,10 +8,17 @@ to an external model.
 ## User flow
 
 1. Open the project upload screen and choose **Forms FMB file**.
-2. Select **Prepare FMB**, then **Check preparation status**.
-3. When prepared, select **Add prepared form to project**.
-4. Review the inventory, missing dependencies and prototype scope. The separate
-   AI-processing approval is still required before conversion can run.
+2. Choose **Preserve development source** or **Legacy masked source**. The new
+   mode appears only when advertised by the server; older servers retain masking.
+3. Select **Prepare FMB**, then **Check preparation status**. Oracle exports both
+   OVERRIDDEN and ALL XML inside preparation; no separate client conversion is needed.
+4. For development mode, download the retained XML and review the source. Possible
+   credentials show numeric XML/field locations and block adoption. Correct the
+   original development source and upload a new request; there is no override.
+5. When clean and reviewed, select **Add prepared form to project** for analysis.
+   AI conversion for preserved development source is not enabled. The old redacted-
+   source approval cannot enable it. Legacy masked sources retain their separate
+   source-specific AI-processing approval workflow.
 
 A lost response keeps its request reference. Check that request rather than
 submitting another copy. A blocked or interrupted native job is retained for
@@ -72,19 +79,26 @@ do not grant the public app SSH keys, the Podman socket or arbitrary command acc
 - Confirm app and host resolve the same private queue and existing resource scope.
 - Submit a representative genuine FMB through the installed authenticated UI.
 - Observe two successful native exports, an unchanged original and validated
-  derivation/redaction records. Verify the app can read the completed result.
-- Add it to the correct project; confirm source history and redaction provenance
+  mode-specific derivation and preparation records. Verify the app can read the completed result.
+- Add it to the correct project; confirm source history and mode-specific provenance
   persist, while no conversion run or model call is created by preparation.
 - Test an invalid FMB and a changed source selection. Neither may appear converted
   or overwrite an existing version. Check an uncertain request without replay.
 - Then verify OPAF, SQLcl, APEX import, runtime and export separately. Passing this
   preparation stage does not prove any of those downstream stages.
 
-The original, native exports and effective XML are private evidence. Only the
-strictly validated redacted document is adopted into project history. Retained
-technical names can still be sensitive; redaction is not a guarantee that all
-personal/customer information is removed. The source owner must approve the
-actual processing boundary before external AI use.
+The original binary and exact native exports remain private evidence. Development
+mode offers owner-bound downloads of retained OVERRIDDEN/ALL XML, and separately
+identifies derived effective XML when available. No literals are rewritten in
+this mode. Possible-credential review happens before derivation, so a blocked job
+still retains the native pair for review without an adoptable effective source.
+A preservation receipt records the mode and exact source bytes; it is not a signed
+certificate or a guarantee that secrets/personal data are absent.
+
+Legacy mode still adopts only the strictly validated redacted document. Requests
+that omit a mode keep that behavior. Existing receipts, source history and unknown
+jobs are never upgraded or replayed. Both modes require human source review; only
+the separately supported legacy processing contract currently permits conversion.
 
 ## Guarded upgrade activation
 

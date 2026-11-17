@@ -1,15 +1,15 @@
 {
-  "version": "0.27.5",
+  "version": "0.28.0",
   "released_on": "2026-11-17",
-  "title": "Faster saved reads and clearer remaining work",
+  "title": "Preserve development sources during Forms preparation",
   "changes": [
-    "Reuse identical source packet parsing within one fenced initial-direct saved read, keeping fresh source and approval checks.",
-    "Group findings by plain-language category, search supplied references and actions, and retain every original detail and duplicate.",
-    "Show supplied next actions and qualified XML evidence without guessing missing source names or treating candidate dependencies as confirmed objects."
+    "Choose development preservation or the existing masked preparation mode; Oracle Forms-to-XML remains inside hosted preparation.",
+    "Keep original Oracle XML and business constants, with targeted possible-credential findings and owner-only XML downloads.",
+    "Adopt reviewed clean development XML for analysis without inheriting legacy redacted-source AI approval."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
-    "Only explicitly approved redacted source may be processed by the selected provider.",
+    "Development-preserve intake supports review and analysis only. AI conversion for this mode is not enabled; existing redacted-source processing approval is not reused.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
     "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",
     "The primary new output is an APEXlang ZIP with synthetic supporting SQL and explicit omissions, not a conventional database-derived SQL export.",

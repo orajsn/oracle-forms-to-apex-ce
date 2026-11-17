@@ -8,12 +8,13 @@ from pathlib import Path
 import re
 import time
 
-from fastapi import File, Form, HTTPException, Request, UploadFile
+from fastapi import File, Form, HTTPException, Request, Response, UploadFile
 
 from . import source_history
 from .extractor import MAX_RAW_BYTES, safe_name
 from .intake import inventory
 from .partial_draft import saved_draft_scope
+from . import development_source as development
 
 
 def attach_hosted_forms_routes(app, *, db, project, current_sources, queue=None):
@@ -48,13 +49,17 @@ def attach_hosted_forms_routes(app, *, db, project, current_sources, queue=None)
         except (ValueError, OSError):
             raise HTTPException(503, 'Saved preparation jobs need operator attention. Nothing was restarted.') from None
         return {'enabled': True, 'formats': ['.fmb'], 'jobs': jobs,
+                'preparation_modes': list(development.MODES),
                 'max_file_bytes': MAX_RAW_BYTES, 'model_processing_started': False}
 
     @app.post('/api/projects/{pid}/native-preparations', status_code=202)
     async def submit(pid: str, request: Request, file: UploadFile = File(...),
-                     request_id: str = Form(...), expected_current_source_set_id: str = Form(...)):
+                     request_id: str = Form(...), expected_current_source_set_id: str = Form(...),
+                     preparation_mode: str = Form(development.LEGACY_MODE)):
         p = project(request, pid)
         q = available()
+        if preparation_mode not in development.MODES:
+            raise HTTPException(422, 'Choose an advertised source preparation mode.')
         if expected_current_source_set_id != 'null' and not re.fullmatch(r'ss-[a-f0-9]{32}', expected_current_source_set_id):
             raise HTTPException(422, 'The expected source version is invalid. Refresh the project.')
         raw = await file.read(MAX_RAW_BYTES + 1)
@@ -79,7 +84,7 @@ def attach_hosted_forms_routes(app, *, db, project, current_sources, queue=None)
             try:
                 result = q.submit(request_id=request_id, project_id=pid, owner_id=p['owner'],
                                   source_set_sha256=digest, selected_source_set_id=selected,
-                                  name=file.filename or '', raw=raw)
+                                  name=file.filename or '', raw=raw, preparation_mode=preparation_mode)
             except (ValueError, OSError):
                 raise HTTPException(503, 'The preparation submission outcome needs confirmation. Keep this request identifier, check its status, and do not upload it again.') from None
             # Submission is idempotent in the queue; the event is recorded once.
@@ -128,14 +133,18 @@ def attach_hosted_forms_routes(app, *, db, project, current_sources, queue=None)
                                        source_set_sha256=digest, selected_source_set_id=selected)
                 source, receipt = result['document'], result['receipt']
                 # Revalidate at publication, even though the private reader did so.
-                from .prototype_source import validate_redacted_prototype_source
-                source = validate_redacted_prototype_source(source['name'], source['text'].encode('utf-8'), receipt)
+                from .prototype_source import validate_prepared_source
+                source = validate_prepared_source(source['name'], source_history.readable_source_bytes(source), receipt)
                 canonical = json.dumps(receipt, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)
                 receipt_hash = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
             except (ValueError, OSError, KeyError, TypeError):
                 raise HTTPException(409, 'Preparation is incomplete, changed, or belongs to a different source version. Check its status; no files were replaced.') from None
             existing = c.execute('SELECT receipt_sha256,owner FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
                                  (pid, source['name'], source['sha256'])).fetchone()
+            if (receipt.get('preparation_mode') == development.MODE and not existing
+                    and c.execute('SELECT 1 FROM sources WHERE project=? AND name=? AND sha256=?',
+                                  (pid, source['name'], source['sha256'])).fetchone()):
+                raise HTTPException(409, 'These exact source bytes are already retained without compatible preservation provenance. Use a separate project; existing source history was not changed.')
             if existing and (existing['receipt_sha256'] != receipt_hash or existing['owner'] != p['owner']):
                 raise HTTPException(409, 'Different provenance is already retained for this source. Ask the operator to reconcile it.')
             now = time.time()
@@ -148,3 +157,15 @@ def attach_hosted_forms_routes(app, *, db, project, current_sources, queue=None)
             selected, digest = binding(c, pid, p['owner'])
         return {'adopted': True, 'already_adopted': False, 'source_hash': digest,
                 'selected_source_set_id': selected, 'processing_approved': False}
+
+    @app.get('/api/projects/{pid}/native-preparations/{jid}/source/{variant}')
+    def source_attachment(pid: str, jid: str, variant: str, request: Request):
+        p = project(request, pid)
+        try:
+            raw = available().read_source_attachment(jid, project_id=pid, owner_id=p['owner'], variant=variant)
+        except (ValueError, OSError):
+            raise HTTPException(404, 'Retained source review is unavailable or its evidence changed.') from None
+        return Response(raw, media_type='application/octet-stream', headers={
+            'Content-Disposition': 'attachment; filename="fox-retained-' + variant + '.xml"',
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; sandbox"})

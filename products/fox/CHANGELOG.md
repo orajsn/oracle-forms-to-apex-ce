@@ -8,6 +8,28 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.28.0] - 2026-11-17
+
+### [feature] Preserve development source during hosted Forms preparation
+Impact: Review original Oracle XML and preserve business constants instead of
+blanket literal masking when explicitly choosing development preparation.
+Change: A separate immutable preparation mode retains original binary and native
+OVERRIDDEN/ALL XML, scans possible credentials before effective-view derivation,
+and offers owner-bound XML attachments with safe source locations. Findings block
+adoption; clean reviewed XML can be added for analysis with policy-bound history.
+Older jobs and the legacy masked route retain their existing receipts and meaning.
+Both fresh generation routes reject preserved development sources; old redacted-
+source approval is not reused as permission for new processing.
+Delivery: Reviewed source release preparation; private-preview acceptance pending.
+The public service remains 0.27.4; no public promotion is included.
+Verification: Synthetic local preparation/API, provenance, owner/download and
+processing-boundary checks; real browser tests with simulated API and production
+frontend build. Exact final results are recorded in the release handoff.
+Remaining: Credential detection is incomplete by nature and does not replace
+source-owner review. Development-mode AI conversion is not enabled. Oracle Forms
+extraction, APEX generation, technical verification and business acceptance remain
+separate facts; this release does not add a business-behavior conversion claim.
+
 ## [0.27.5] - 2026-11-17
 
 ### [docs] Record private-preview acceptance — 17 November 2026
