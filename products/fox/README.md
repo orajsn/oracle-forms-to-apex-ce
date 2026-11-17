@@ -21,8 +21,11 @@ Clean development XML can be added to project history for analysis. AI conversio
 for this mode is not enabled yet, and legacy redacted-source approval cannot enable
 it. Existing masked preparation and historical jobs keep their original meaning.
 See [hosted preparation](docs/server-side-fmb-preparation.md) for the modes and
-boundaries. Source publication does not promote the public service, which remains
-0.27.4. The 0.27.5 checkpoint below describes its earlier verified output behavior.
+boundaries. Actual private-preview upload/extraction, XML downloads and analysis
+adoption passed on 0.28.0, retaining all 56 original non-empty code fields. No
+provider submission or database operation ran. Source publication does not promote
+the public service, which remains 0.27.4. The 0.27.5 checkpoint below describes its
+earlier verified output behavior.
 
 ## Export-only preview — 17 November 2026
 

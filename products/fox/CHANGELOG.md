@@ -10,6 +10,25 @@ application version or relabel existing images.
 
 ## [0.28.0] - 2026-11-17
 
+### [docs] Record private hosted preparation acceptance — 17 November 2026
+Impact: The private preview now supports genuine FMB upload, Oracle XML extraction,
+source-preserving review/download and adoption for analysis. Public remains 0.27.4.
+Verification: Authenticated desktop/mobile browser flow on 0.28.0 passed against
+installed Oracle Forms tooling. Downloaded native/effective XML matched sealed
+bytes; all 56 non-empty original code fields survived unchanged. The analysis
+screen disabled generation; no provider submission or target-database operation
+ran. All 259 pre-existing private files and original database rows were retained.
+Local repaired boundary suite: 258 passed, three Windows platform skips. Linux
+file/permission suite: 137 passed, no skips. Focused processing regression: 78
+passed. New/legacy browser checks, TypeScript/Vite build and independent review
+passed; browser fixture tests are separate from the actual hosted acceptance.
+Delivery: Source/tag published; existing private preview serves 0.28.0. No public
+promotion, dependency installation, new infrastructure or business acceptance.
+Remaining: Development-mode AI conversion still requires a separate processing
+contract and explicit source/destination authorization. Credential scanning is
+not exhaustive; source-owner review remains necessary.
+
+
 ### [feature] Preserve development source during hosted Forms preparation
 Impact: Review original Oracle XML and preserve business constants instead of
 blanket literal masking when explicitly choosing development preparation.
@@ -20,7 +39,7 @@ adoption; clean reviewed XML can be added for analysis with policy-bound history
 Older jobs and the legacy masked route retain their existing receipts and meaning.
 Both fresh generation routes reject preserved development sources; old redacted-
 source approval is not reused as permission for new processing.
-Delivery: Reviewed source release preparation; private-preview acceptance pending.
+Delivery: Source/tag published and private-preview acceptance recorded above.
 The public service remains 0.27.4; no public promotion is included.
 Verification: Synthetic local preparation/API, provenance, owner/download and
 processing-boundary checks; real browser tests with simulated API and production
