@@ -10,6 +10,26 @@ application version or relabel existing images.
 
 ## [0.27.5] - 2026-11-17
 
+### [docs] Record private-preview acceptance — 17 November 2026
+Impact: The private preview now demonstrates the grouped findings and faster read
+path on the same prepared package. The public service remains 0.27.4.
+Verification: Actual authenticated browser checks recovered all 366 findings,
+searched qualified references, checked desktop/mobile layout and downloaded
+byte-for-byte identical output, with zero project POSTs. All 245 original and
+prepared-package files and the original run row were unchanged; the public user
+service kept its process identity and health. Shared dependencies were not changed.
+Observed readiness was 17.194 to 2.390 seconds, output visible 23.960 to 4.636
+seconds, and download 4.881 to 2.263 seconds. These are individual browser runs,
+not an SLA. The older private 0.27.3 UI also made a 19.8-second legacy validation
+request; the inherited 0.27.4 export-mode guard removes that request. Do not
+attribute the whole UI difference solely to this release's document cache; the
+isolated three-sample component comparison is reported separately below.
+Delivery: Published/tagged source and verified private preview; no public rollout,
+new preparation, provider inference, target-database action or business acceptance.
+Remaining: Intake/source-fidelity policy and broader behavior conversion are
+separate work; this release does not silently change existing source controls.
+
+
 ### [improvement] Review findings by category, reference and next action
 Impact: Users can find relevant remaining work without reading a long list of IDs.
 Change: Preserve full remediation objects in new and saved package views; add
@@ -20,7 +40,7 @@ review controls; source changes reset the view. No package or API format changes
 Verification: Four focused browser scenarios and the frontend build passed. A local
 render using retained real metadata recovered all 366 findings exactly and checked
 reference search, desktop/mobile layout and zero writes; that render mocked HTTP.
-Delivery: Reviewed source; private-preview acceptance for this revision pending.
+Delivery: Published/tagged source; subsequent private-preview acceptance is recorded above.
 Remaining: No public promotion or new conversion/business acceptance is claimed.
 
 ### [performance] Avoid repeated parsing within a saved-read operation

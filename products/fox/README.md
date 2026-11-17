@@ -17,9 +17,13 @@ It also reuses identical source parsing within the existing initial-direct saved
 read scope. A same-host/input comparison against published 0.27.4, three samples
 each, measured saved-candidate median **2.38 seconds before / 1.14 seconds after**
 (51.99% reduction). This is a component result, not total UI or model time.
-The existing public service remains 0.27.4; this increment's private-preview
-acceptance is pending. It does not change intake redaction or authorize a new
-provider submission, target import or public rollout.
+The private-preview browser check passed with all 366 findings and identical
+package bytes. Observed readiness was 17.19 to 2.39 seconds, output visible 23.96
+to 4.64 seconds, and download 4.88 to 2.26 seconds. These individual UI observations
+also include the inherited 0.27.4 export-mode guard removing an unnecessary legacy
+validation request; they are not an isolated cache or model-inference benchmark.
+The public service remains 0.27.4. No source-intake policy, provider submission,
+target import or public rollout was changed by this increment.
 
 
 Patch 0.27.4 supports an explicitly configured HTTPS public origin behind an
