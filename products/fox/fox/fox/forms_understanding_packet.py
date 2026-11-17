@@ -30,6 +30,11 @@ def _hash(raw: bytes) -> str:
 def _build(documents: list[tuple[str, bytes]]) -> tuple[dict, list[dict]]:
     from .prototype_read_scope import current_read_root, optional_document_build
     root = current_read_root()
+    if root is None:
+        # Initial-direct saved reads have their own full-job fence. Never open
+        # an epoch scope or borrow its proof budget for these historical jobs.
+        from .prototype_initial_direct_read_scope import current_read_root, optional_document_build
+        root = current_read_root()
     if root is None or type(documents) is not list or not 1 <= len(documents) <= MAX_FILES:
         return _build_uncached(documents)
     # Copy the container; every accepted key component is a plain immutable

@@ -1,18 +1,11 @@
 {
-  "version": "0.27.4",
+  "version": "0.27.5",
   "released_on": "2026-11-17",
-  "title": "Support HTTPS export-only deployment with clear available actions",
+  "title": "Faster saved reads and clearer remaining work",
   "changes": [
-    "Allow an explicit validated HTTPS public origin while retaining a loopback-only listener and exact-origin login protection.",
-    "Hide unavailable legacy runtime recovery actions in export-only sessions while preserving historical evidence and saved package downloads.",
-    "Reuse identical initial-direct proof reconstruction within one saved-candidate read: a same-host retained-job benchmark fell from 14.88 to 2.53 seconds, with identical output. This is not whole-conversion or AI latency.",
-    "Place package downloads before long reports and collapse the complete omissions list behind an accessible count summary without removing details.",
-    "Allow up to 90 seconds for saved-package GET checks while retaining the existing 180-second preparation budget, source binding and no-automatic-retry behavior.",
-    "Generate and download a reviewed, offline-format-validated APEXlang ZIP without database import, browser tests or reimport as delivery gates.",
-    "Prepare a separate format-only package from an eligible saved design without repeating model calls or changing the original run and its failures.",
-    "Show declared compatibility, generated MMD, prerequisites, omissions and recorded AI-request timings in the workbench.",
-    "Remove duplicated OPAF setup requests and reuse a freshly pinned TLS connection within each prepared role call when the server supports keepalive.",
-    "Keep direct OCI and legacy OPAF evidence compatible, and give SQLcl batch scripts an explicit EOF input pipe."
+    "Reuse identical source packet parsing within one fenced initial-direct saved read, keeping fresh source and approval checks.",
+    "Group findings by plain-language category, search supplied references and actions, and retain every original detail and duplicate.",
+    "Show supplied next actions and qualified XML evidence without guessing missing source names or treating candidate dependencies as confirmed objects."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

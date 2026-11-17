@@ -17,6 +17,11 @@ from .prototype_read_scope import _inventory, _owner
 MAX_PROOFS = 4
 MAX_VALUE_BYTES = 4 * 1024 * 1024
 MAX_CACHE_BYTES = 8 * 1024 * 1024
+# Optional pure document material never spends the retained-proof budget.
+# These bound serialized values, not Python process RSS.
+MAX_DOCUMENT_BUILDS = 4
+MAX_DOCUMENT_BUILD_VALUE_BYTES = 4 * 1024 * 1024
+MAX_DOCUMENT_BUILD_BYTES = 8 * 1024 * 1024
 _state = ContextVar('fox_saved_initial_direct_read', default=None)
 
 
@@ -49,7 +54,8 @@ def initial_direct_read_scope(job, target):
     if any(part in ('.', '..') for part in job.parts):
         _fail()
     before = _inventory(job), _ancestors(job)
-    current = {'root': root, 'owner': _owner(), 'proofs': {}, 'bytes': 0, 'active': True}
+    current = {'root': root, 'owner': _owner(), 'proofs': {}, 'bytes': 0, 'active': True,
+               'document_builds': {}, 'document_build_bytes': 0}
     token = _state.set(current)
     try:
         yield
@@ -63,7 +69,51 @@ def initial_direct_read_scope(job, target):
             current['active'] = False
             current['proofs'].clear()
             current['bytes'] = 0
+            current['document_builds'].clear()
+            current['document_build_bytes'] = 0
             _state.reset(token)
+
+
+def current_read_root():
+    """Pure helpers may reuse only this active owner/thread/task's job scope."""
+    current = _state.get()
+    if current is None:
+        return None
+    if not current['active'] or current['owner'] != _owner():
+        _fail()
+    return current['root']
+
+
+def optional_document_build(root, identity, compute):
+    """Detached exact-byte packet/chunks, independent of retained proof storage.
+
+    Only capacity declines storage; context, computation and full-job exit fence
+    failures still propagate. No selection, consent or authority is cached.
+    """
+    current = _state.get()
+    if current is None:
+        return compute()
+    if current_read_root() != Path(root).absolute():
+        _fail()
+    if (type(identity) is not tuple or not 1 <= len(identity) <= 4
+            or any(type(row) is not tuple or len(row) != 3 or type(row[0]) is not str
+                   or len(row[0]) > 180 or type(row[1]) is not int or row[1] <= 0
+                   or type(row[2]) is not str or not re.fullmatch('[a-f0-9]{64}', row[2])
+                   for row in identity)):
+        _fail()
+    builds = current['document_builds']
+    if identity in builds:
+        return deepcopy(builds[identity])
+    if len(builds) >= MAX_DOCUMENT_BUILDS:
+        return compute()
+    value = compute()
+    size = len(json.dumps(value, separators=(',', ':'), ensure_ascii=False,
+                          allow_nan=False).encode('utf-8'))
+    if size > MAX_DOCUMENT_BUILD_VALUE_BYTES or current['document_build_bytes'] + size > MAX_DOCUMENT_BUILD_BYTES:
+        return value
+    builds[identity] = deepcopy(value)
+    current['document_build_bytes'] += size
+    return deepcopy(builds[identity])
 
 
 def optional_proof(root, identity, compute):

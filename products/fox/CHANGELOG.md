@@ -8,6 +8,38 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.5] - 2026-11-17
+
+### [improvement] Review findings by category, reference and next action
+Impact: Users can find relevant remaining work without reading a long list of IDs.
+Change: Preserve full remediation objects in new and saved package views; add
+counted collapsed categories, search, source-provided next actions and qualified
+XML references. Unknowns, duplicates and original JSON remain accessible. Search
+hides unmatched groups and Clear restores the complete report. Download stays above
+review controls; source changes reset the view. No package or API format changes.
+Verification: Four focused browser scenarios and the frontend build passed. A local
+render using retained real metadata recovered all 366 findings exactly and checked
+reference search, desktop/mobile layout and zero writes; that render mocked HTTP.
+Delivery: Reviewed source; private-preview acceptance for this revision pending.
+Remaining: No public promotion or new conversion/business acceptance is claimed.
+
+### [performance] Avoid repeated parsing within a saved-read operation
+Impact: The supported initial-direct saved-read path does less repeated source work.
+Change: Add a separately bounded exact-document store inside the existing fenced
+read scope. Detached copies, ordered filename/length/hash identity, context
+revocation, file checks and fresh source/selection/approval checks remain intact.
+Verification: Against the exact published 0.27.4 baseline on the same host/input,
+three alternating samples per variant reduced saved-candidate median time from
+2.379738 to 1.142606 seconds (51.99%). Fresh packet builds fell from 43 to 1;
+request, adoption and package hashes and original files were unchanged. This is
+one retained saved-read component, not total UI or model-inference performance.
+Local focused regressions passed 184 cases with four Windows link skips; Linux
+passed all 74 targeted integrity cases without skips. Independent review cleared
+the source boundaries; no dependency, model or database operation changed.
+Delivery: Reviewed source; existing public service remains 0.27.4.
+Remaining: Hosted UI observations for this revision are separate from this controlled
+component comparison. Development-source preparation policy is unchanged.
+
 ## [0.27.4] - 2026-11-17
 
 ### [docs] Record the authorized public promotion

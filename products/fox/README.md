@@ -11,6 +11,17 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Export-only preview — 17 November 2026
 
+Patch 0.27.5 adds grouped, searchable findings with the supplied next actions and
+qualified source references, preserving every original record and package byte.
+It also reuses identical source parsing within the existing initial-direct saved
+read scope. A same-host/input comparison against published 0.27.4, three samples
+each, measured saved-candidate median **2.38 seconds before / 1.14 seconds after**
+(51.99% reduction). This is a component result, not total UI or model time.
+The existing public service remains 0.27.4; this increment's private-preview
+acceptance is pending. It does not change intake redaction or authorize a new
+provider submission, target import or public rollout.
+
+
 Patch 0.27.4 supports an explicitly configured HTTPS public origin behind an
 existing reverse proxy, without exposing a new listener or inheriting database
 credentials. Export-only sessions hide unavailable legacy runtime recovery
