@@ -54,7 +54,7 @@ async function request(path:string,body?:unknown,timeoutMs=15000){
   return data;
  }finally{clearTimeout(timer);}
 }
-export default function PrototypeConversion({projectId,source,busy,unknownOutcome,hasRun,activeRun,execute,onRefresh}:{projectId:string;source:SourceBinding;busy:boolean;unknownOutcome:boolean;hasRun:boolean;activeRun?:ProjectRun|null;execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;onRefresh?:()=>Promise<WorkbenchActionResult>}){
+export default function PrototypeConversion({exportOnly=false,projectId,source,busy,unknownOutcome,hasRun,activeRun,execute,onRefresh}:{exportOnly?:boolean;projectId:string;source:SourceBinding;busy:boolean;unknownOutcome:boolean;hasRun:boolean;activeRun?:ProjectRun|null;execute:(action:()=>Promise<WorkbenchActionResult>,readOnly?:boolean)=>Promise<boolean>;onRefresh?:()=>Promise<WorkbenchActionResult>}){
  const [assessment,setAssessment]=useState<Assessment|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState(''),[selected,setSelected]=useState<string[]>([]),[consents,setConsents]=useState([false,false,false]),[submitted,setSubmitted]=useState(false);
  const [countChoice,setCountChoice]=useState<{binding:string;choice:CountChoice}|null>(null);
  const [xmlFiles,setXmlFiles]=useState<File[]>([]),[receipts,setReceipts]=useState<File[]>([]),[uploadError,setUploadError]=useState('');
@@ -131,7 +131,7 @@ export default function PrototypeConversion({projectId,source,busy,unknownOutcom
   }catch(e){if(currentBinding.current===captured&&currentOutputBinding.current===capturedOutput){setOmission(null);setOmissionApproved(false);setFormat(null);setDsc(null);setConsents([false,false,false]);setError(e instanceof Error?e.message:'Assessment unavailable. Refresh the project and try again.');}}finally{if(currentBinding.current===captured&&currentOutputBinding.current===capturedOutput)setLoading(false);}
  }
  const current=assessment?.source_hash===source.source_hash&&assessment?.selected_source_set_id===source.selected_source_set_id;
- const recoveryEligible=Boolean(!busy&&!unknownOutcome&&source.project_id===projectId&&source.selected_source_set_id&&activeRun?.project_id===projectId&&activeRun.source_hash===source.source_hash&&activeRun.state==='ATTENTION'&&/^fox-[a-f0-9]{20}$/.test(activeRun.id));
+ const recoveryEligible=Boolean(!exportOnly&&!busy&&!unknownOutcome&&source.project_id===projectId&&source.selected_source_set_id&&activeRun?.project_id===projectId&&activeRun.source_hash===source.source_hash&&activeRun.state==='ATTENTION'&&/^fox-[a-f0-9]{20}$/.test(activeRun.id));
  async function checkRecovery(){
   if(!recoveryEligible||!activeRun||continuationLoading||continuationLock.current||continuationSent||epochLoading||epochSent||epoch?.eligible||epoch?.epoch_recorded)return;
   const captured=outputBinding,revision=++outputRevision.current;

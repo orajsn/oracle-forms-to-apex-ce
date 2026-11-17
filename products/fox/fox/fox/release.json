@@ -1,8 +1,10 @@
 {
-  "version": "0.27.3",
+  "version": "0.27.4",
   "released_on": "2026-11-17",
-  "title": "Reduce repeated saved-output proof reconstruction",
+  "title": "Support HTTPS export-only deployment with clear available actions",
   "changes": [
+    "Allow an explicit validated HTTPS public origin while retaining a loopback-only listener and exact-origin login protection.",
+    "Hide unavailable legacy runtime recovery actions in export-only sessions while preserving historical evidence and saved package downloads.",
     "Reuse identical initial-direct proof reconstruction within one saved-candidate read: a same-host retained-job benchmark fell from 14.88 to 2.53 seconds, with identical output. This is not whole-conversion or AI latency.",
     "Place package downloads before long reports and collapse the complete omissions list behind an accessible count summary without removing details.",
     "Allow up to 90 seconds for saved-package GET checks while retaining the existing 180-second preparation budget, source binding and no-automatic-retry behavior.",

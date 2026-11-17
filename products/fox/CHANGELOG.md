@@ -8,6 +8,24 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.27.4] - 2026-11-17
+
+### [improvement] Prepare export-only FOX for an existing HTTPS site
+Impact: Operators can use the export-only service behind their existing HTTPS
+address, with a UI that does not offer unavailable database-runtime recovery.
+Change: Add an optional canonical HTTPS public_origin to the loopback launcher;
+retain exact-Origin CSRF checks, secure cookies and filtered environment settings.
+Consume the server-reported delivery mode to hide legacy recovery actions without
+changing old evidence, saved package access or the legacy-mode interface.
+Delivery: Reviewed source; actual retained-store promotion is separately guarded.
+Verification: Launcher/API configuration regressions passed 94 tests with one
+Windows skip; login, cookie and wrong-Origin scenarios used real in-process API
+calls. Three synthetic Edge scenarios passed, including legacy recovery and saved
+package controls, and the frontend build passed. A missing read-only mock causing
+a timing-dependent extra alert was corrected without weakening its assertion.
+Remaining: Rehearse preserved users/projects, source revisions, job files and
+prepared upload queues before cutover; verify real HTTPS login and rollback.
+
 ## [0.27.3] - 2026-11-17
 
 ### [docs] Record subsequent private-preview acceptance

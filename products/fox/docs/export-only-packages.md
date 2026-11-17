@@ -79,6 +79,22 @@ storage. It shares the existing preview lock; do not run two supervisors on the
 same data. The legacy `run_direct_preview.py` remains available for optional lab
 operations. Preview activation and public routing remain explicit operator steps.
 
+For an existing HTTPS reverse proxy, 0.27.4 accepts an optional configuration
+property `"public_origin": "https://fox.example.test"`. It must be a canonical
+origin without credentials, path, trailing slash, query or fragment. The listener
+still binds only to 127.0.0.1; configure the proxy separately and do not rewrite
+browser Origin headers. Without this property, the old loopback origin is retained.
+
+Do not point a live public service at the private preview's store. Quiesce writers,
+capture a consistent SQLite backup and complete file snapshot, rehearse a separate
+copy, and retain the public username/hash and ownership identities. Also preserve
+the hosted Forms queue: the launcher expects `instance_root/forms-queue`, which
+can differ from an older deployment's `data/native-preparations`. Completed queue
+records must remain available; queued or uncertain work needs reconciliation.
+Do not restore stale SQLite WAL/SHM files alongside a backup database. Preserve
+the old installation and store for rollback; after new public writes, rollback
+requires reconciliation rather than silently restoring an older snapshot.
+
 ## API contract
 
 New creation uses the existing prototype-run endpoint with the immutable field

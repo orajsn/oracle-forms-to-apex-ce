@@ -6,6 +6,7 @@ public listener or automatic retry. Oracle tooling remains an explicit prerequis
 """
 from __future__ import annotations
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -15,9 +16,44 @@ import stat
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 FIELDS={'schema_version','instance_root','product_root','api_port',
         'ui_credentials_file','design_profile_file','sqlcl_path','forms'}
+OPTIONAL_FIELDS={'public_origin'}
+
+
+def public_origin(value):
+    """Accept an exact browser-serialized HTTPS origin, never normalize it.
+
+    The API compares Origin literally. Reject aliases (including default ports
+    and trailing slashes) that browsers would serialize differently.
+    """
+    message='Use an exact HTTPS public origin without credentials, path, query or fragment.'
+    if type(value) is not str or not re.fullmatch(r'https://[!-~]+',value) or any(c in value for c in '\\%?#@'):
+        raise ValueError(message)
+    try:
+        parsed=urlsplit(value)
+        host=parsed.hostname
+        port=parsed.port
+        if parsed.scheme!='https' or not host or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError(message)
+        if ':' in host:
+            canonical_host='['+ipaddress.IPv6Address(host).compressed+']'
+        else:
+            try:canonical_host=str(ipaddress.IPv4Address(host))
+            except ValueError:
+                labels=host.split('.')
+                if (len(host)>253 or not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?',label) for label in labels)
+                        or re.fullmatch(r'(?:[0-9]+|0x[a-f0-9]+)',labels[-1])):
+                    raise ValueError(message) from None
+                canonical_host=host
+        if port is not None and (port==443 or not 1<=port<=65535):raise ValueError(message)
+        expected='https://'+canonical_host+(f':{port}' if port is not None else '')
+        if value!=expected:raise ValueError(message)
+    except ValueError:
+        raise ValueError(message) from None
+    return value
 
 
 def absolute(value):
@@ -46,8 +82,10 @@ def private_json(value):
 
 def configuration(path):
     value=private_json(path)
-    if type(value) is not dict or set(value)!=FIELDS or type(value['schema_version']) is not int or value['schema_version']!=1:
+    if (type(value) is not dict or not FIELDS<=set(value) or set(value)-FIELDS-OPTIONAL_FIELDS
+            or type(value['schema_version']) is not int or value['schema_version']!=1):
         raise ValueError('Unsupported export-preview configuration.')
+    if 'public_origin' in value:value['public_origin']=public_origin(value['public_origin'])
     for key in ('instance_root','product_root','ui_credentials_file','design_profile_file','sqlcl_path'):
         value[key]=absolute(value[key])
     root,product=value['instance_root'],value['product_root']
@@ -75,11 +113,12 @@ def configuration(path):
 
 def launch_plan(value,credentials,*,environ=None,python=None):
     root,product=value['instance_root'],value['product_root']
+    origin=public_origin(value['public_origin']) if 'public_origin' in value else f"http://127.0.0.1:{value['api_port']}"
     env={key:item for key,item in (os.environ if environ is None else environ).items()
          if not key.startswith(('FOX_','F2A_')) and key!='PYTHONHOME'}
     env.update(PYTHONPATH=os.pathsep.join(str(product/p) for p in ('fox','converter')),
         PYTHONDONTWRITEBYTECODE='1',TMPDIR=str(root/'tmp'),
-        FOX_DATA_DIR=str(root/'data'),FOX_PUBLIC_ORIGIN=f"http://127.0.0.1:{value['api_port']}",
+        FOX_DATA_DIR=str(root/'data'),FOX_PUBLIC_ORIGIN=origin,
         FOX_RUN_ADAPTER='oci-genai',FOX_CONVERSION_PROFILE='native-project-v1',
         FOX_DEFAULT_DELIVERY_MODE='apexlang_package',
         FOX_PROTOTYPE_PROFILE_FILE=str(value['design_profile_file']),

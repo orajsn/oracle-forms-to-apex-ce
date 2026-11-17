@@ -11,6 +11,13 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Export-only preview — 17 November 2026
 
+Patch 0.27.4 supports an explicitly configured HTTPS public origin behind an
+existing reverse proxy, without exposing a new listener or inheriting database
+credentials. Export-only sessions hide unavailable legacy runtime recovery
+actions; existing history and saved package output remain visible. Promotion
+requires a preserved public store, unchanged owner credentials, queue migration
+and separate live acceptance. A source release alone does not switch a public site.
+
 Patch 0.27.3 reduces repeated saved-output proof reconstruction for initial-direct
 runs. On the same OCI host and retained input, two alternating samples per version
 measured a median **14.88 seconds before / 2.53 seconds after** (82.99% reduction).
