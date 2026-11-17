@@ -17,6 +17,10 @@ credentials. Export-only sessions hide unavailable legacy runtime recovery
 actions; existing history and saved package output remain visible. Promotion
 requires a preserved public store, unchanged owner credentials, queue migration
 and separate live acceptance. A source release alone does not switch a public site.
+The authorized existing-instance promotion has now passed real HTTPS login and
+desktop/mobile checks. Its original login, 15 projects, 28 sources, 12 runs and
+prepared upload queue were retained. No new conversion was run during promotion;
+the separate private-preview demo project was not merged into the public store.
 
 Patch 0.27.3 reduces repeated saved-output proof reconstruction for initial-direct
 runs. On the same OCI host and retained input, two alternating samples per version
@@ -27,7 +31,8 @@ with the read operation; owner/source checks and offline validation still run.
 The final private-preview UI check passed with the same downloaded package.
 Observed readiness was about 18.0 seconds versus 45.5 seconds on the prior build;
 download was 4.9 versus 30.2 seconds. These individual runs are not guaranteed
-response times. The existing public service has not been switched.
+response times. At that 0.27.3 checkpoint the public service had not been switched;
+the subsequent 0.27.4 promotion is recorded above.
 
 Patch 0.27.2 keeps the download action near the package summary and collapses long
 omission lists by default, without removing any report content. An isolated
@@ -65,7 +70,8 @@ Direct OCI already reuses its SDK client; no cloud model-latency gain is claimed
 Local API/browser scenarios and real connectionless compiler checks have passed;
 the isolated hosted saved-design download path has also passed. Fresh new-mode
 hosted generation and customer installation remain separate acceptance scopes.
-Existing public routing is unchanged. Oracle Forms, Java and SQLcl are external
+The 0.27.4 promotion reuses the existing public address and reverse proxy.
+Oracle Forms, Java and SQLcl are external
 prerequisites, and the current operator setup still supplies provider/compatibility
 profile metadata. A fresh customer installation is not yet established by these
 checks. See [export-only packages](docs/export-only-packages.md).

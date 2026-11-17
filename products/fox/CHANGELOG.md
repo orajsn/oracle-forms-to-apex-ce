@@ -10,6 +10,21 @@ application version or relabel existing images.
 
 ## [0.27.4] - 2026-11-17
 
+### [docs] Record the authorized public promotion
+Impact: The existing public instance now serves the export-only release.
+Change: Document the preserved-store rollout and actual HTTPS acceptance, without
+changing software or replaying a conversion.
+Verification: Public health reports 0.27.4. Original login, 15 projects, 28 sources,
+12 runs, 1,407 retained files and three prepared Forms uploads were preserved.
+Real HTTPS browser checks passed for login, project access, export-only controls,
+secure cookies and narrow-screen layout, with no page errors or project writes.
+The service restart and existing offline compiler were checked. No model calls,
+target-database operations, new OCI resources or proxy/network changes occurred.
+Delivery: Public deployment verified on 17 November 2026; original installation,
+store and snapshot retained. Rollback after new project writes needs reconciliation.
+Remaining: This promotion does not prove a new conversion or business equivalence;
+the private-preview demonstration project was not merged into the public store.
+
 ### [improvement] Prepare export-only FOX for an existing HTTPS site
 Impact: Operators can use the export-only service behind their existing HTTPS
 address, with a UI that does not offer unavailable database-runtime recovery.
@@ -17,14 +32,14 @@ Change: Add an optional canonical HTTPS public_origin to the loopback launcher;
 retain exact-Origin CSRF checks, secure cookies and filtered environment settings.
 Consume the server-reported delivery mode to hide legacy recovery actions without
 changing old evidence, saved package access or the legacy-mode interface.
-Delivery: Reviewed source; actual retained-store promotion is separately guarded.
+Delivery: Reviewed source; subsequent guarded public acceptance is recorded above.
 Verification: Launcher/API configuration regressions passed 94 tests with one
 Windows skip; login, cookie and wrong-Origin scenarios used real in-process API
 calls. Three synthetic Edge scenarios passed, including legacy recovery and saved
 package controls, and the frontend build passed. A missing read-only mock causing
 a timing-dependent extra alert was corrected without weakening its assertion.
-Remaining: Rehearse preserved users/projects, source revisions, job files and
-prepared upload queues before cutover; verify real HTTPS login and rollback.
+Remaining: Customer installations and additional conversion coverage are separate
+from the verified existing-instance promotion recorded above.
 
 ## [0.27.3] - 2026-11-17
 
