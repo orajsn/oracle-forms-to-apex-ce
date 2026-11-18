@@ -337,9 +337,12 @@ def _scoped_review_index(checkpoints, plan):
         packet = _artifact_json(checkpoints/'packet.json')
         target = read(checkpoints/plan['requests'][0]['focus_id']/'mapper-target.json')
         _policy_roles(binding,target)
+        from . import prototype_compiler_view as compiler_view
+        compiled_views = compiler_view.retained_views(checkpoints, packet, plan, target)
         views, files = [], []
-        for request in plan['requests']:
-            view = active_focus(checkpoints,packet,plan,request,target,views)
+        for index, request in enumerate(plan['requests']):
+            view = (compiled_views[index] if compiled_views is not None else
+                    active_focus(checkpoints,packet,plan,request,target,views))
             if not view['checked']['approved_structured_design']: raise OpafError('Source design is not independently approved.')
             views.append(view)
             for path in sorted((checkpoints/request['focus_id']).iterdir()):
@@ -377,6 +380,12 @@ def _scoped_review_index(checkpoints, plan):
         if prose_lineage is not None:
             reference_fields = {**reference_fields, 'prose_representation_lineage': prose_lineage}
             reference_schema = 8
+            reference_enabled = True
+        from .prototype_compiler_continuation import index_evidence as compiler_evidence
+        compiler_lineage = compiler_evidence(checkpoints)
+        if compiler_lineage is not None:
+            reference_fields = {**reference_fields, 'compiler_derivation_lineage': compiler_lineage}
+            reference_schema = 9
             reference_enabled = True
         if direct:
             from . import prototype_direct_container as container
@@ -507,7 +516,13 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
     views = []
     from .design_provider import is_direct
     original_target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
-    for focus in plan['requests']:
+    from . import prototype_compiler_view as compiler_view
+    compiled_views = compiler_view.retained_views(checkpoints, packet, plan, original_target)
+    for index, focus in enumerate(plan['requests']):
+        if compiled_views is not None:
+            view = compiled_views[index]
+            views.append(view); candidates.append(view['candidate'])
+            continue
         if epoch is not None or binding.get('candidate_format_policy') is not None or is_direct(original_target):
             target = _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json')
             if binding.get('candidate_format_policy') is not None: _policy_roles(binding,target)
@@ -535,7 +550,8 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
         if not checked['approved_structured_design'] or _json(child / 'review-receipt.json') != checked:
             raise OpafError('Prototype authority lacks an approved source-bound design review.')
         candidates.append(candidate)
-    merged = merge_focus_blueprints(documents, plan, candidates)
+    from .prototype_compiler_view import merge as compiler_merge
+    merged = compiler_merge(checkpoints, documents, plan, candidates)
     native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy, count_guard=count_guard,
         project_id=binding['project_id'], project_name=binding['project_name'], approved_policy_id=POLICY_ID)
     if (merged != _artifact_json(checkpoints / 'merged-blueprint.json')
@@ -753,7 +769,16 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     from . import prototype_candidate_continuation as candidate_format
     from . import prototype_preclaim_continuation as preclaim
     from . import prototype_query_omission_continuation as omission
-    if preclaim.present(checkpoints):
+    from . import prototype_compiler_view as compiler_view
+    if compiler_view.present(checkpoints):
+        target = (target_profile_loader() if target_profile_loader is not None else
+                  _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
+        views = compiler_view.retained_views(checkpoints, packet, plan, target)
+        if views is None or len(views) != len(plan['requests']):
+            raise OpafError('Compiler continuation requires every original approved focus; no model call is allowed.')
+        candidates = [view['candidate'] for view in views]
+        reviews = [view['checked'] for view in views]
+    elif preclaim.present(checkpoints):
         target = (target_profile_loader() if target_profile_loader is not None else
                   _json(checkpoints / plan['requests'][0]['focus_id'] / 'mapper-target.json'))
         views = preclaim.retained_views(checkpoints,packet,plan,target)
@@ -784,7 +809,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
             return result
         candidates.append(candidate)
         views.append(view)
-    merged = merge_focus_blueprints(documents, plan, candidates)
+    from .prototype_compiler_view import merge as compiler_merge
+    merged = compiler_merge(checkpoints, documents, plan, candidates)
     _save_artifact(checkpoints / 'merged-blueprint.json', merged)
     native_plan = build_native_plan(documents, merged['blueprint'], native_input_policy=native_input_policy, count_guard=count_guard,
         project_id=project_id, project_name=project_name, approved_policy_id=approved_policy_id)

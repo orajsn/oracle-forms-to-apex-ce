@@ -8,6 +8,34 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.5] - 2026-11-18
+
+### [fix] Compile exact inherited item-screen links without another AI call
+Impact: A fully reviewed retained design can finish compilation when two items
+omit the screen already specified by their own source block.
+Change: Complete only an absent screen key from the proposed block owned by the same
+section, with one explicitly declared screen. Existing null, wrong or ambiguous links
+remain rejected. Source text, dispositions, components, claims and all original
+AI candidates/reviews stay unchanged. A separate compiler derivation passes the
+unchanged whole-design validator; historical reviews are never relabelled as
+approval of changed candidates. An external create-only continuation freezes
+all original evidence and permits only rendering, offline validation and packaging.
+Execution and download authorization use the same derivation, with schema-9
+lineage retaining prior provider and prose evidence. No new model operation is allowed.
+Verification: 147 pure/helper checks and 83 ordinary pipeline/export regressions
+passed. Four portable API/proof checks passed; three overlapping proof cases also
+passed independently without a prior seed. Zero new model/auth/runtime-focus calls
+were enforced during compilation, download, restart and rejection checks. A real
+retained-source diagnostic rendered and passed SQLcl /nolog format validation.
+The isolated Linux suite passed 62 tests with no skips, and a read-only probe
+reproduced the exact retained-source compiler plan without changing 98 evidence
+files or invoking a model. Final installed workflow acceptance remains separate.
+Delivery: Candidate source; no public rollout or database import is included.
+Remaining: Deterministic constraint completion is not business-behavior acceptance.
+The bounded operator action preserves original approvals and does not grant a new
+inference/retry allowance. Package format validation does not establish target
+importability, runtime correctness or full Forms behavior equivalence.
+
 ## [0.29.4] - 2026-11-18
 
 ### [fix] Preserve long mapping proposals through independent review

@@ -9,6 +9,14 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Exact compiler completion — 18 November 2026
+
+Patch 0.29.5 adds a bounded operator continuation for a fully reviewed design
+whose items omit a screen link already fixed by their own source block. It
+completes only those redundant links, preserves every original AI response and
+review, and records a separate compiler derivation before the unchanged package
+validators. No new AI call or business-behavior approval is introduced.
+
 ## Lossless proposal representation — 18 November 2026
 
 Patch 0.29.4 preserves bounded long behavior proposals as ordered text segments
