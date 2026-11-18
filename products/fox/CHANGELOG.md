@@ -20,7 +20,8 @@ Verification: A real browser fixture passed a response delayed beyond thirty
 seconds, the bounded timeout, stale-source suppression and backend-error cases.
 TypeScript and independent source review passed. The real retained output API
 returned the exact package hash after 277 seconds with no generation request.
-Delivery: Candidate source; final private browser/download acceptance remains separate.
+Delivery: Source published; private browser/download acceptance is recorded in
+the dated documentation checkpoint below. Public rollout remains separate.
 Remaining: This fixes premature cancellation, not the underlying proof-check cost.
 Saved-output verification may still take several minutes. No new model call,
 regeneration, database import, runtime proof or business acceptance is introduced.
@@ -501,6 +502,25 @@ Verification: Acceptance evidence is being collected; no completed hosted conver
 Remaining: Complete hosted upload, extraction, approved-source processing, UI SQL download, exact-file fresh-ID import and runtime proof; human business acceptance stays separate.
 
 ## Documentation updates
+
+### [docs] 2026-11-18 — Record private preserved-source package acceptance
+
+Impact: The verified checkpoint now distinguishes a downloadable prototype from
+unimplemented business behavior and target-runtime acceptance.
+Change: Record one retained preserved-source flow through Oracle XML intake,
+AI mapping/review, native rendering, whole-package SQLcl format validation and
+an authenticated browser download. Compiler completion and the UI follow-up
+reused the retained evidence and package without another model operation.
+Delivery: Source releases through 0.29.6 are published; private 0.29.6 acceptance
+passed. The public deployment is unchanged. No software version or tag was moved
+for this documentation update.
+Verification: Exact downloaded ZIP hash, desktop/mobile layout, no page errors
+or project writes, and preservation of prior source/evidence and run rows were
+checked. Local/browser and Linux verification scopes remain recorded above.
+Remaining: The package is a synthetic-storage prototype with explicit code,
+behavior, dependency and mapping remediation. Target import, runtime testing and
+business acceptance are not established. Saved-output checks still take minutes;
+the UI change fixes cancellation rather than reducing proof-check cost.
 
 ### [docs] 2026-11-16 — Record completed 0.25.0 image builds
 

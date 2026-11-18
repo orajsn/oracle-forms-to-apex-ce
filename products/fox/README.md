@@ -9,6 +9,19 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Verified private checkpoint — 18 November 2026
+
+A retained preserved-source run completed Oracle XML intake, AI mapping/review,
+native APEX generation, whole-package SQLcl format validation and authenticated
+desktop/mobile package download. The private preview is verified on 0.29.6; the
+public deployment remains unchanged. Original source and review evidence were
+preserved, and the final compiler/UI steps made no new model calls.
+
+This is a downloadable synthetic-storage prototype, not a claim that legacy
+business code has been implemented. Review the package remediation before a
+separately authorized target import and runtime/business testing. Saved-output
+verification still takes several minutes; the longer UI wait is not a speedup.
+
 ## Saved-output verification wait — 18 November 2026
 
 Patch 0.29.6 keeps the read-only output check open while retained evidence is
