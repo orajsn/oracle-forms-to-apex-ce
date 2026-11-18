@@ -9,6 +9,13 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Saved-output verification wait — 18 November 2026
+
+Patch 0.29.6 keeps the read-only output check open while retained evidence is
+verified, with a bounded ten-minute wait and a clear status message. It reuses
+the existing generated package. It does not restart conversion or change backend
+validation, and it does not claim faster verification.
+
 ## Exact compiler completion — 18 November 2026
 
 Patch 0.29.5 adds a bounded operator continuation for a fully reviewed design

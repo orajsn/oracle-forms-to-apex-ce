@@ -8,6 +8,23 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.6] - 2026-11-18
+
+### [fix] Let the saved-output check finish without restarting conversion
+Impact: The UI can finish checking a generated package and expose its download
+link, instead of cancelling the read after thirty seconds.
+Change: Only the read-only output GET uses a bounded ten-minute deadline, with
+a visible waiting message. Source/revision checks, response validation, disabled
+duplicate clicks, error handling and all backend validators stay unchanged.
+Verification: A real browser fixture passed a response delayed beyond thirty
+seconds, the bounded timeout, stale-source suppression and backend-error cases.
+TypeScript and independent source review passed. The real retained output API
+returned the exact package hash after 277 seconds with no generation request.
+Delivery: Candidate source; final private browser/download acceptance remains separate.
+Remaining: This fixes premature cancellation, not the underlying proof-check cost.
+Saved-output verification may still take several minutes. No new model call,
+regeneration, database import, runtime proof or business acceptance is introduced.
+
 ## [0.29.5] - 2026-11-18
 
 ### [fix] Compile exact inherited item-screen links without another AI call
