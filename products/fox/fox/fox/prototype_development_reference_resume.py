@@ -161,6 +161,8 @@ def _closure(job, files, directories, documents, focus, selected, *, continued):
                     'prototype-pipeline/' + focus['requests'][0]['focus_id']}
     if continued:
         allowed.update({OWNER_RECORD, 'prototype-pipeline/' + TECHNICAL, 'prototype-result.json'})
+        allowed.update({'development-reference-followup.json',
+                        'prototype-pipeline/development-reference-followup.json'})
         allowed.update('prototype-pipeline/' + name for name in _FUTURE_ROOT)
         allowed_dirs.add('prototype-results')
         for name in files:

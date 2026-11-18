@@ -75,7 +75,8 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
     development = None
     if chunk_evidence_policy is not None:
         from .prototype_chunk_evidence import POLICY
-        if (chunk_evidence_policy != POLICY or processing_mode != 'development'
+        from .prototype_reference_echo import POLICY as ECHO_POLICY
+        if (chunk_evidence_policy not in (POLICY, ECHO_POLICY) or processing_mode != 'development'
                 or delivery_mode != 'apexlang_package'):
             raise ValueError('Chunk evidence policy requires an explicit development package approval.')
     if processing_mode is not None:

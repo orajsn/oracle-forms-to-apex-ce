@@ -16,7 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from . import source_history
-from .prototype_chunk_evidence import POLICY as CHUNK_EVIDENCE_POLICY
+from .prototype_reference_echo import POLICY as CHUNK_EVIDENCE_POLICY
 from .source_processing_policy import (source_processing_policy, DEVELOPMENT_REASON,
                                        DEVELOPMENT_EVENT, current_processing_approval)
 from .intake import inventory, MAX_FILE_BYTES
@@ -165,7 +165,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 raise HTTPException(404, 'Prototype run not found.')
             allowed = {f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{part}' for part in ('progress', 'output', 'download')}
             route = getattr(request.scope.get('route'), 'path', None)
-            if route == '/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume' and request.method in {'GET', 'POST'}:
+            if route in {'/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume', '/api/projects/{pid}/prototype-runs/{rid}/development-reference-followup'} and request.method in {'GET', 'POST'}:
                 return owner  # Dedicated handler revalidates exact same-run continuation authority.
             if request.method == 'GET' and route in allowed:
                 # Advisory progress stays metadata-only; output/download perform
@@ -204,6 +204,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
     from .development_reference_routes import attach as attach_development_reference_routes
     attach_development_reference_routes(app, root=root, db=db, project=project,
         current_sources=current_sources, target_reader=target_reader)
+    attach_development_reference_routes(app, root=root, db=db, project=project,
+        current_sources=current_sources, target_reader=target_reader, followup=True)
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/progress')
     def prototype_run_progress(pid: str, rid: str, request: Request):
@@ -262,6 +264,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                         raise OpafError('The original source processing approval is no longer current.')
                     from .prototype_development_reference_resume import validate_owner as validate_reference_owner
                     validate_reference_owner(job, snapshot, original, c)
+                    from .prototype_development_reference_followup import validate_owner as validate_reference_followup
+                    validate_reference_followup(job, snapshot, original, c)
                     from .prototype_mapping_epochs import validate_epoch_chain
                     validate_epoch_chain(job, snapshot, original, c)
                     from . import prototype_query_omission_continuation as omission

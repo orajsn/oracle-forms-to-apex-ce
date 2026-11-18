@@ -72,7 +72,8 @@ def validate_prototype_snapshot(snapshot):
             selected_keys.update(('processing_mode', 'development_processing', 'development_processing_sha256'))
         if 'chunk_evidence_policy' in selected:
             from .prototype_chunk_evidence import POLICY
-            if (development is None or selected['chunk_evidence_policy'] != POLICY
+            from .prototype_reference_echo import POLICY as ECHO_POLICY
+            if (development is None or selected['chunk_evidence_policy'] not in (POLICY, ECHO_POLICY)
                     or selected.get('delivery_mode') != 'apexlang_package'):
                 raise ValueError()
             selected_keys.add('chunk_evidence_policy')

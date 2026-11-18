@@ -74,7 +74,8 @@ def describe_development_processing(documents, *, project_id, selected_source_se
     optional = {}
     if chunk_evidence_policy is not None:
         from .prototype_chunk_evidence import POLICY
-        if chunk_evidence_policy != POLICY:
+        from .prototype_reference_echo import POLICY as ECHO_POLICY
+        if chunk_evidence_policy not in (POLICY, ECHO_POLICY):
             _fail()
         optional['chunk_evidence_policy'] = chunk_evidence_policy
     return {'schema_version': 1, 'policy_id': POLICY_ID, 'processing_mode': PROCESSING_MODE,

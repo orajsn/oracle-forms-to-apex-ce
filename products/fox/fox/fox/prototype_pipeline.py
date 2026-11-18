@@ -349,15 +349,15 @@ def _scoped_review_index(checkpoints, plan):
         from . import prototype_development_reference_view as development_references
         reference_enabled = development_references.enabled(checkpoints)
         reference_fields = {}
+        reference_schema = None
         if reference_enabled:
-            from . import prototype_development_reference_resume as reference_resume
-            technical = reference_resume.technical(checkpoints)
-            if technical is not None:
-                path = checkpoints / reference_resume.TECHNICAL
+            reference_fields, record_names, reference_schema = development_references.index_policy(checkpoints, plan)
+            for name in record_names:
+                path = checkpoints / name
+                if path.is_symlink() or not path.is_file():
+                    raise OpafError('Unsafe reference-continuation provenance.')
                 files.append({'path': path.relative_to(checkpoints).as_posix(),
                               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
-            reference_fields = {'chunk_evidence_policy': development_references.POLICY,
-                                'reference_continuation_sha256': canonical_hash(technical) if technical is not None else None}
         if direct:
             from . import prototype_direct_container as container
             extra = [checkpoints/'assessment.json']
@@ -365,9 +365,9 @@ def _scoped_review_index(checkpoints, plan):
             for path in extra:
                 if path.is_symlink() or not path.is_file(): raise OpafError('Unsafe container provenance.')
                 files.append({'path':path.relative_to(checkpoints).as_posix(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
-            return {'schema_version':5 if reference_enabled else 4,**reference_fields,'direct_container_policy':container.POLICY,'source_binding':plan['source_binding'],
+            return {'schema_version':reference_schema if reference_enabled else 4,**reference_fields,'direct_container_policy':container.POLICY,'source_binding':plan['source_binding'],
                 'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
-        return {'schema_version':5 if reference_enabled else 3,**reference_fields,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
+        return {'schema_version':reference_schema if reference_enabled else 3,**reference_fields,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
             'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
     if epoch is not None:
         packet = _artifact_json(checkpoints / 'packet.json')

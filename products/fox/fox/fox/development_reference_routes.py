@@ -20,7 +20,12 @@ class ReferenceResumeInput(BaseModel):
     approved_source_reference_correction: StrictBool
 
 
-def attach(app, *, root, db, project, current_sources, target_reader):
+def attach(app, *, root, db, project, current_sources, target_reader, followup=False):
+    if followup:
+        from . import prototype_development_reference_followup as protocol
+    else:
+        protocol = resume
+    operation = 'development-reference-followup' if followup else 'development-reference-resume'
     def checked(c, pid, rid, owner):
         row = c.execute('SELECT * FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone()
         if not row:
@@ -47,13 +52,16 @@ def attach(app, *, root, db, project, current_sources, target_reader):
         if (target['target_profile_sha256'] != selected['target_profile_sha256']
                 or canonical_hash(target['target_profile']) != selected['target_profile_sha256']):
             raise OpafError('The original processing destination changed.')
-        recorded = resume.validate_owner(job, snapshot, original, c)
+        recorded = protocol.validate_owner(job, snapshot, original, c)
+        if not followup:
+            from .prototype_development_reference_followup import validate_owner as validate_followup_owner
+            validate_followup_owner(job, snapshot, original, c)
         if recorded is not None:
-            technical = resume.technical(job / 'prototype-pipeline')
+            technical = protocol.technical(job / 'prototype-pipeline')
             return row, job, snapshot, original, technical['plan'], recorded
         if row['state'] != 'ATTENTION' or row['artifact'] is not None:
             raise OpafError('Only the exact stopped first-mapper outcome can continue.')
-        plan = resume.inspect(job, snapshot, original, target['target_profile'])
+        plan = protocol.inspect(job, snapshot, original, target['target_profile'])
         return row, job, snapshot, original, plan, None
 
     def response(row, plan, recorded):
@@ -67,7 +75,7 @@ def attach(app, *, root, db, project, current_sources, target_reader):
                            if recorded is not None else
                            'Resolve exact source references, independently review the saved mapping, then continue only unstarted sections. The original mapper result stays unchanged.')}
 
-    @app.get('/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume')
+    @app.get(f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{operation}')
     def inspect_resume(pid: str, rid: str, request: Request):
         owner = project(request, pid)['owner']
         try:
@@ -80,7 +88,7 @@ def attach(app, *, root, db, project, current_sources, target_reader):
         except (OpafError, ValueError, TypeError, KeyError, OSError):
             raise HTTPException(409, 'No exact source-reference continuation is available. Retained and uncertain outcomes are preserved.') from None
 
-    @app.post('/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume', status_code=202)
+    @app.post(f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{operation}', status_code=202)
     def submit_resume(pid: str, rid: str, body: ReferenceResumeInput, request: Request):
         owner = project(request, pid)['owner']
         if body.approved_source_reference_correction is not True:
@@ -98,8 +106,8 @@ def attach(app, *, root, db, project, current_sources, target_reader):
                 if c.execute("SELECT 1 FROM runs WHERE state IN ('QUEUED','PROCESSING') LIMIT 1").fetchone():
                     raise HTTPException(429, 'Another conversion is active. The saved result is preserved.')
                 now = time.time()
-                technical, authorization = resume.records(plan, owner, now)
-                paths = (job / 'prototype-pipeline' / resume.TECHNICAL, job / resume.OWNER_RECORD)
+                technical, authorization = protocol.records(plan, owner, now)
+                paths = (job / 'prototype-pipeline' / protocol.TECHNICAL, job / protocol.OWNER_RECORD)
                 if any(path.exists() or path.is_symlink() for path in paths):
                     raise OpafError('An existing continuation requires reconciliation.')
                 _save_once(paths[0], technical)
@@ -111,8 +119,8 @@ def attach(app, *, root, db, project, current_sources, target_reader):
                 if changed.rowcount != 1:
                     raise OpafError('Stopped run state changed.')
                 c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
-                    (owner, resume.EVENT, rid + ':' + canonical_hash(authorization), now))
-                resume.validate_owner(job, snapshot, original, c)
+                    (owner, protocol.EVENT, rid + ':' + canonical_hash(authorization), now))
+                protocol.validate_owner(job, snapshot, original, c)
                 value = response({'state': 'QUEUED'}, plan, authorization)
                 value['already_recorded'] = False
             return JSONResponse(value, status_code=202, headers={'Cache-Control': 'no-store'})

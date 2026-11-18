@@ -9,6 +9,15 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Combined reference compatibility — 18 November 2026
+
+Patch 0.29.2 also handles an exact duplicate source-binding echo accompanying
+selected chunk references. It preserves the original response and code, and
+requires independent review of the derived candidate. A bounded follow-up keeps
+the first two approved sections under their original V1 proofs while enabling V2
+for the saved third mapping and remaining work. No completed call is repeated.
+Unknown or mismatched bindings and semantic defects still stop processing.
+
 ## Exact source-reference compatibility — 18 November 2026
 
 Patch 0.29.1 handles a mapper response that cites a selected code chunk instead

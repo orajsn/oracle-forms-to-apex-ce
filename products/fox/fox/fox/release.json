@@ -1,11 +1,11 @@
 {
-  "version": "0.29.1",
+  "version": "0.29.2",
   "released_on": "2026-11-18",
-  "title": "Continue mapping with exact source evidence references",
+  "title": "Continue combined source-identity and reference compatibility",
   "changes": [
-    "Resolve selected code-chunk references to their exact owned source-unit references without changing source or model claims.",
-    "Preserve the completed mapper response, record the correction separately and require independent review before continuing only unstarted sections.",
-    "Bind new-job reference compatibility and same-run continuation to exact source, consent, target and retained package proofs."
+    "Compose removal of an exact duplicate source-binding echo with the existing source-proven code-reference projection.",
+    "Keep already reviewed V1 sections unchanged and continue the saved third mapping under an explicit V1-to-V2 proof boundary.",
+    "Preserve original source and completed responses, reject duplicate or stale continuation, and require independent review and package validation."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

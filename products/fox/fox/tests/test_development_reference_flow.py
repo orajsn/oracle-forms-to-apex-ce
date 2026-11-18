@@ -117,10 +117,11 @@ def assert_download(c, root, pid, rid):
 
 @pytest.mark.parametrize('container', [False, True])
 def test_fresh_chunk_policy_direct_worker_and_download(client, configured, runtime, container):
+    from fox.prototype_reference_echo import POLICY as CURRENT_POLICY
     runtime.omit_container = container
     c, root, pid, rid, snapshot = queued_case(client)
-    assert snapshot['prototype']['chunk_evidence_policy'] == POLICY
-    assert snapshot['prototype']['development_processing']['chunk_evidence_policy'] == POLICY
+    assert snapshot['prototype']['chunk_evidence_policy'] == CURRENT_POLICY
+    assert snapshot['prototype']['development_processing']['chunk_evidence_policy'] == CURRENT_POLICY
     row = process(root)
     assert row['state'] == 'GENERATED', row
     projected = []
@@ -135,6 +136,7 @@ def test_fresh_chunk_policy_direct_worker_and_download(client, configured, runti
     assert projected
     receipts = [json.loads(p.read_bytes()) for p in
                 (root / 'jobs' / rid).rglob('projection-receipt.json')]
+    receipts = [r.get('v1_projection', r) for r in receipts]
     assert any(r.get('chunk_evidence') for r in receipts)
     if container:
         assert any(r.get('chunk_evidence') and r.get('container_retention') for r in receipts)

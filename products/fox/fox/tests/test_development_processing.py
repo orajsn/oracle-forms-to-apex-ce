@@ -230,8 +230,11 @@ def test_absent_chunk_policy_preserves_prechange_context_and_snapshot_hashes():
     assert 'chunk_evidence_policy' not in snapshot()['prototype']
 
 
-def test_optional_chunk_policy_changes_context_digest_and_is_snapshot_bound():
+@pytest.mark.parametrize('policy_version', [1, 2])
+def test_optional_chunk_policy_changes_context_digest_and_is_snapshot_bound(policy_version):
     from fox.prototype_chunk_evidence import POLICY
+    if policy_version == 2:
+        from fox.prototype_reference_echo import POLICY
     base = context(chunk_evidence_policy=POLICY)
     assert base['chunk_evidence_policy'] == POLICY
     assert canonical_hash(base) != canonical_hash(context())
@@ -299,11 +302,13 @@ def test_explicit_null_policy_field_is_not_an_old_context():
         prepare_development_processing(documents(), context=base, approved_chunk_hashes={})
 
 
-@pytest.mark.parametrize('opt_in', [False, True])
+@pytest.mark.parametrize('opt_in', [False, True, 'v2'])
 def test_job_passes_only_the_snapshot_bound_optional_policy(tmp_path, monkeypatch, opt_in):
     import json
     from fox import prototype_job, prototype_mapping_epochs
     from fox.prototype_chunk_evidence import POLICY
+    if opt_in == 'v2':
+        from fox.prototype_reference_echo import POLICY
     value = snapshot(chunk_evidence_policy=POLICY if opt_in else None)
     job = tmp_path / ('fox-' + '3' * 20)
     job.mkdir()
@@ -325,3 +330,23 @@ def test_job_passes_only_the_snapshot_bound_optional_policy(tmp_path, monkeypatc
     assert calls[0]['development_processing_sha256'] == value['prototype']['development_processing_sha256']
     if opt_in: assert calls[0]['chunk_evidence_policy'] == POLICY
     else: assert 'chunk_evidence_policy' not in calls[0]
+
+
+def test_v1_policy_context_and_snapshot_hashes_remain_exactly_unchanged():
+    from fox.prototype_chunk_evidence import POLICY
+    # Captured from these same synthetic fixtures before V2 allowlist edits.
+    assert canonical_hash(context(chunk_evidence_policy=POLICY)) == 'be74d84e301aea7f9d33cc7fa0d185afb39e1cf022e60d863f93058fa32f85eb'
+    assert canonical_hash(snapshot(chunk_evidence_policy=POLICY)) == '83f50d439f84c302139e454a17c243c3df96fe00d8545b9eb505ad75aa7143f6'
+
+
+@pytest.mark.parametrize('context_version', [1, 2])
+def test_v1_and_v2_policy_bindings_cannot_be_interchanged(context_version):
+    from fox.prototype_chunk_evidence import POLICY as V1
+    from fox.prototype_reference_echo import POLICY as V2
+    original, changed = (V1, V2) if context_version == 1 else (V2, V1)
+    args = arguments(chunk_evidence_policy=original)
+    args['chunk_evidence_policy'] = changed
+    with pytest.raises(ValueError): prepare_prototype_admission(documents(), **args)
+    value = snapshot(chunk_evidence_policy=original)
+    value['prototype']['chunk_evidence_policy'] = changed
+    with pytest.raises(OpafError): validate_prototype_snapshot(value)

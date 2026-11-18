@@ -8,6 +8,30 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.2] - 2026-11-18
+
+### [fix] Continue combined source-identity and reference compatibility
+Impact: A response containing an exact duplicate source-binding echo together
+with selected chunk references can proceed to independent review without
+repeating the saved mapper or earlier approved sections.
+Change: V2 verifies the duplicate echo against original source, request and
+blueprint bindings, then composes the unchanged V1 reference projection. Original
+source, claims, mapper responses and prior reviews remain immutable. Fresh jobs
+bind the exact policy before processing. One append-only follow-up pins the two
+approved V1 sections and the exact third mapper, enabling V2 only from that
+boundary onward. Current owner/source/destination and both durable approval chains
+are rechecked. Duplicate submissions never requeue completed or uncertain work.
+Delivery: Source release preparation; private continuation and live package
+acceptance are recorded separately. Public service is unchanged by this patch.
+Verification: 27 focused local API/worker checks, a strengthened saved-output
+case, 166 relevant regression checks, independent review and production build.
+A read-only probe reconstructed both approved real prefix proofs and eight exact
+reference corrections, retaining all 36 original files with zero provider calls.
+Remaining: This is exact echo/reference compatibility, not semantic repair.
+Combined Item-fact-kind aliases and chunk-reference defects remain unsupported.
+Live review, deterministic whole-package validation and download still gate the
+result. Target import, runtime correctness and business acceptance are separate.
+
 ## [0.29.1] - 2026-11-18
 
 ### [fix] Continue mapping after exact source-reference mismatch
