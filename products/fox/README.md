@@ -9,6 +9,16 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Lossless proposal representation — 18 November 2026
+
+Patch 0.29.4 preserves bounded long behavior proposals as ordered text segments
+within the existing schema. Every character and UTF-8 byte is retained. The raw
+response and source remain unchanged, and a new independent reviewer checks the
+derived mapping. A bounded continuation reuses a captured fifth mapper while
+preserving four approved sections and the prior provider-attempt proof. It does
+not repeat completed calls or grant permission for an unknown-outcome retry.
+See the changelog for verification and delivery status.
+
 ## Explicit one-attempt provider reconciliation — 18 November 2026
 
 Version 0.29.3 adds a bounded operator action for one uncertain fourth-mapper

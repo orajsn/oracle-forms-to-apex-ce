@@ -73,7 +73,8 @@ def validate_prototype_snapshot(snapshot):
         if 'chunk_evidence_policy' in selected:
             from .prototype_chunk_evidence import POLICY
             from .prototype_reference_echo import POLICY as ECHO_POLICY
-            if (development is None or selected['chunk_evidence_policy'] not in (POLICY, ECHO_POLICY)
+            from .prototype_prose_segments import POLICY as PROSE_POLICY
+            if (development is None or selected['chunk_evidence_policy'] not in (POLICY, ECHO_POLICY, PROSE_POLICY)
                     or selected.get('delivery_mode') != 'apexlang_package'):
                 raise ValueError()
             selected_keys.add('chunk_evidence_policy')

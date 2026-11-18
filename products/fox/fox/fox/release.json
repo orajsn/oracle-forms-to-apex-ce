@@ -1,11 +1,11 @@
 {
-  "version": "0.29.3",
+  "version": "0.29.4",
   "released_on": "2026-11-18",
-  "title": "Capture provider outcomes before interpreting them",
+  "title": "Preserve long mapping proposals through independent review",
   "changes": [
-    "Require explicit acknowledgement of an unknown prior outcome and one possible extra inference charge before a bounded operator repeat.",
-    "Persist independent one-attempt consumption and exact SDK request binding before submission; retain responses before parsing.",
-    "Label a newly adopted result as a new attempt, preserve original evidence and capture remaining calls with receipt-bound download proofs."
+    "Represent bounded long behavior proposals as ordered text segments without dropping characters or changing source code.",
+    "Continue one retained fifth mapping with four approved sections and captured provider outcomes preserved.",
+    "Keep prior-attempt lineage and exact prose proof in the validated package; no completed mapper is repeated."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

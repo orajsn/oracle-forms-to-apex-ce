@@ -39,6 +39,11 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
            if key in {'authority', 'consumed', 'adoption'}):
         if database.is_symlink() or not database.is_file():
             raise OpafError('Provider reexecution requires its durable owner database.')
+    from . import prototype_prose_continuation as prose_continuation
+    prose_path = prose_continuation.path(job)
+    if prose_path.exists() or prose_path.is_symlink():
+        if database.is_symlink() or not database.is_file():
+            raise OpafError('Prose continuation requires its durable owner database.')
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
     from . import prototype_preclaim_continuation as preclaim
     preclaimed = preclaim.present(job/'prototype-pipeline')
@@ -62,6 +67,7 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
         development_resume.validate_owner(job, snapshot, original, connection)
         development_followup.validate_owner(job, snapshot, original, connection)
         provider_reexecution.validate_owner(job, snapshot, original, connection)
+        prose_continuation.validate_owner(job, snapshot, original, connection)
         validation_retry.validate_owner(job, snapshot, original, connection)
         direct_container.validate_owner(job, snapshot, original, connection)
         omission.validate_record(job, snapshot, original, connection, phase=phase)

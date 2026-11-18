@@ -16,6 +16,8 @@ def enabled(root):
     from .prototype_mapping_epochs import read
     from .prototype_job import read_prototype_snapshot
     from .prototype_reference_echo import POLICY as ECHO_POLICY
+    from .prototype_prose_segments import POLICY as PROSE_POLICY
+    from . import prototype_prose_continuation as prose
     root = Path(root)
     binding = read(root / 'binding.json')
     resume = root / 'development-reference-resume.json'
@@ -23,11 +25,12 @@ def enabled(root):
     if 'chunk_evidence_policy' in binding:
         snapshot, _ = read_prototype_snapshot(root.parent)
         selected = snapshot.get('prototype', {})
-        if (binding['chunk_evidence_policy'] not in (POLICY, ECHO_POLICY)
+        if (binding['chunk_evidence_policy'] not in (POLICY, ECHO_POLICY, PROSE_POLICY)
                 or selected.get('chunk_evidence_policy') != binding['chunk_evidence_policy']
                 or selected.get('processing_mode') != 'development'
                 or selected.get('delivery_mode') != 'apexlang_package'
                 or selected.get('development_processing_sha256') != binding.get('development_processing_sha256')
+                or prose.path(root.parent).exists() or prose.path(root.parent).is_symlink()
                 or any(path.exists() or path.is_symlink() for path in
                        (resume, followup, root.parent / resume.name, root.parent / followup.name))):
             raise OpafError('Development reference policy differs from its immutable admission.')
@@ -38,15 +41,20 @@ def enabled(root):
         if technical(root) is None:
             raise OpafError('Development reference continuation is unavailable.')
         followup_technical(root)
+        prose.technical(root)
         return True
     if any(path.exists() or path.is_symlink() for path in (followup, root.parent / followup.name)):
         raise OpafError('Reference follow-up has no original continuation.')
+    if prose.path(root.parent).exists() or prose.path(root.parent).is_symlink():
+        raise OpafError('Prose continuation has no original reference authority.')
     return False
 
 
 def policy_for_focus(root, plan, request):
     from .prototype_mapping_epochs import read
     from .prototype_reference_echo import POLICY as ECHO_POLICY
+    from .prototype_prose_segments import POLICY as PROSE_POLICY
+    from . import prototype_prose_continuation as prose
     from .prototype_development_reference_followup import technical
     if not enabled(root):
         raise OpafError('No exact development reference policy is enabled.')
@@ -58,6 +66,15 @@ def policy_for_focus(root, plan, request):
         raise OpafError('Reference policy focus is missing or ambiguous.')
     if 'chunk_evidence_policy' in binding:
         return binding['chunk_evidence_policy']
+    prose_record = prose.technical(root)
+    if prose_record is not None:
+        boundary = prose_record['plan']
+        pivot = boundary['pivot_index']
+        if (boundary['focus_plan_sha256'] != canonical_hash(plan)
+                or type(pivot) is not int or pivot != 4 or ids[pivot] != boundary['pivot_focus_id']):
+            raise OpafError('Prose continuation differs from the original focus plan.')
+        if ids.index(request['focus_id']) >= pivot:
+            return PROSE_POLICY
     followup = technical(root)
     if followup is None:
         return POLICY
@@ -74,6 +91,8 @@ def index_policy(root, plan):
     """Describe the exact policy chain, retaining the prior V1 index shape."""
     from .prototype_mapping_epochs import read
     from .prototype_reference_echo import POLICY as ECHO_POLICY
+    from .prototype_prose_segments import POLICY as PROSE_POLICY
+    from . import prototype_prose_continuation as prose
     from . import prototype_development_reference_resume as parent
     from . import prototype_development_reference_followup as followup
     if not enabled(root):
@@ -81,6 +100,7 @@ def index_policy(root, plan):
     binding = read(Path(root) / 'binding.json')
     parent_record = parent.technical(root)
     next_record = followup.technical(root)
+    prose_record = prose.technical(root)
     paths = ([parent.TECHNICAL] if parent_record is not None else [])
     parent_hash = canonical_hash(parent_record) if parent_record is not None else None
     if next_record is not None:
@@ -92,10 +112,19 @@ def index_policy(root, plan):
                 or ids[pivot] != boundary['pivot_focus_id']):
             raise OpafError('Review-index reference transition differs from the original focus plan.')
         paths.append(followup.TECHNICAL)
-        return {'reference_policy_chain': [{'start_index': 0, 'policy': POLICY},
-                                           {'start_index': pivot, 'policy': ECHO_POLICY}],
+        chain = [{'start_index': 0, 'policy': POLICY}, {'start_index': pivot, 'policy': ECHO_POLICY}]
+        if prose_record is not None:
+            boundary = prose_record['plan']
+            if (boundary['focus_plan_sha256'] != canonical_hash(plan)
+                    or boundary['pivot_index'] != 4 or ids[4] != boundary['pivot_focus_id']):
+                raise OpafError('Review-index prose transition differs from its original focus plan.')
+            chain.append({'start_index': 4, 'policy': PROSE_POLICY})
+        return {'reference_policy_chain': chain,
                 'reference_continuation_sha256': parent_hash,
-                'reference_followup_sha256': canonical_hash(next_record)}, paths, 6
+                'reference_followup_sha256': canonical_hash(next_record)}, paths, 8 if prose_record else 6
+    if binding.get('chunk_evidence_policy') == PROSE_POLICY:
+        return {'reference_policy_chain': [{'start_index': 0, 'policy': PROSE_POLICY}],
+                'reference_continuation_sha256': None, 'reference_followup_sha256': None}, paths, 8
     if binding.get('chunk_evidence_policy') == ECHO_POLICY:
         return {'reference_policy_chain': [{'start_index': 0, 'policy': ECHO_POLICY}],
                 'reference_continuation_sha256': None, 'reference_followup_sha256': None}, paths, 6
@@ -164,10 +193,11 @@ def _active_focus(root, packet, plan, request, target, previous, *, policy, runt
     """Fixed-policy core; pure prefix reconstruction never dispatches continuation."""
     from . import prototype_mapping_epochs as epochs
     from .prototype_reference_echo import POLICY as ECHO_POLICY, project as echo_project
+    from .prototype_prose_segments import POLICY as PROSE_POLICY, project as prose_project
     from .prototype_dsc_identity_repair import documents
     from .design_provider import invocation_id
     root = Path(root)
-    if policy not in (POLICY, ECHO_POLICY):
+    if policy not in (POLICY, ECHO_POLICY, PROSE_POLICY):
         raise OpafError('Unknown fixed source-reference policy.')
     assert_initial_only(root)
     if epochs.technical_record(root) is not None:
@@ -181,7 +211,7 @@ def _active_focus(root, packet, plan, request, target, previous, *, policy, runt
     epochs.save(directory / 'request.json', request, write)
     identity = {'job_id': root.parent.name, 'source_hash': plan['source_binding']}
     raw, mapper = epochs._role(directory, 'mapper', request, target, identity, runtime)
-    projector = project if policy == POLICY else echo_project
+    projector = {POLICY: project, ECHO_POLICY: echo_project, PROSE_POLICY: prose_project}[policy]
     candidate, evidence = projector(documents(root), packet, request, raw, target)
     gate = source_fact_gate(packet, request, candidate)
     derived = ('projection-candidate.json', 'projection-receipt.json', 'reviewer-request.json')

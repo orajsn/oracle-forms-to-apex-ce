@@ -8,6 +8,33 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.4] - 2026-11-18
+
+### [fix] Preserve long mapping proposals through independent review
+Impact: A retained mapping with bounded long behavior prose can continue without
+repeating its mapper or discarding any characters.
+Change: V3 represents eligible proposal/unresolved behavior text of 513–2048
+characters as at most four ordered segments within the existing scalar limit.
+Exact character, whitespace and UTF-8 recomposition is proven; original source
+and raw responses remain intact. The unchanged source gate and a new independent
+review remain mandatory. An external, create-only continuation record pins four
+approved sections, the fifth mapper and existing provider receipts. Only the
+pending review and final section's two calls can proceed. Current owner/source/
+destination checks and the prior explicit-attempt lineage remain in output proof.
+Verification: Pure representation and compatibility checks: 301 passed. Earlier
+reference/provider regression: 180 passed, one Windows platform skip. Eight
+continuation tests and three API/worker scenarios passed, including exact remaining
+calls, package/download, restart and stale/tampered evidence rejection. Independent
+source review and the frontend build passed. The isolated Linux suite passed
+69 tests with no skips. A read-only retained-source probe passed without provider
+calls and checked the initial callback cost against the existing freshness gate.
+Counts overlap; these checks do not establish a completed live conversion.
+Delivery: Candidate source; private activation and actual package delivery are
+separate. No public rollout or new model permission is introduced.
+Remaining: Exact text preservation does not establish semantic equivalence.
+Package format validation, target runtime verification and business acceptance
+remain separate. Unknown provider outcomes are never automatically replayed.
+
 ## [0.29.3] - 2026-11-18
 
 ### [fix] Capture provider outcomes and bound one explicitly approved new attempt

@@ -370,7 +370,13 @@ def _scoped_review_index(checkpoints, plan):
         attempt_evidence = provider_attempt_evidence(checkpoints.parent)
         if attempt_evidence is not None:
             reference_fields = {**reference_fields, 'provider_attempt_lineage': attempt_evidence}
-            reference_schema = 7
+            reference_schema = max(reference_schema or 0, 7)
+            reference_enabled = True
+        from .prototype_prose_continuation import index_evidence as prose_evidence
+        prose_lineage = prose_evidence(checkpoints)
+        if prose_lineage is not None:
+            reference_fields = {**reference_fields, 'prose_representation_lineage': prose_lineage}
+            reference_schema = 8
             reference_enabled = True
         if direct:
             from . import prototype_direct_container as container
