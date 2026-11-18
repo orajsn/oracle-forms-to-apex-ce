@@ -33,6 +33,12 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
          job / development_followup.OWNER_RECORD, job / 'prototype-pipeline' / development_followup.TECHNICAL))
     if reference_recorded and (database.is_symlink() or not database.is_file()):
         raise OpafError('Development reference continuation requires its durable owner database.')
+    from . import prototype_provider_reexecution as provider_reexecution
+    provider_paths = provider_reexecution.paths(job)
+    if any(path.exists() or path.is_symlink() for key, path in provider_paths.items()
+           if key in {'authority', 'consumed', 'adoption'}):
+        if database.is_symlink() or not database.is_file():
+            raise OpafError('Provider reexecution requires its durable owner database.')
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
     from . import prototype_preclaim_continuation as preclaim
     preclaimed = preclaim.present(job/'prototype-pipeline')
@@ -55,6 +61,7 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     with sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True) as connection:
         development_resume.validate_owner(job, snapshot, original, connection)
         development_followup.validate_owner(job, snapshot, original, connection)
+        provider_reexecution.validate_owner(job, snapshot, original, connection)
         validation_retry.validate_owner(job, snapshot, original, connection)
         direct_container.validate_owner(job, snapshot, original, connection)
         omission.validate_record(job, snapshot, original, connection, phase=phase)

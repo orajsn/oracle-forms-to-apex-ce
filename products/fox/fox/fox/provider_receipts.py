@@ -120,8 +120,10 @@ class LocalProviderReceiptStore:
     commit is fsynced before capture returns, including its directory entry.
     """
 
-    def __init__(self, root, *, sealed_job_root):
+    def __init__(self, root, *, sealed_job_root, read_only=False):
         try:
+            _need(type(read_only) is bool)
+            self._read_only = read_only
             self.root = Path(os.path.abspath(root))
             self.sealed_job_root = Path(os.path.abspath(sealed_job_root))
             _need(not self.root.is_relative_to(self.sealed_job_root)
@@ -131,14 +133,21 @@ class LocalProviderReceiptStore:
                 _safe_metadata(self.sealed_job_root.lstat(), directory=True)
             self._parents(self.root.parent)
             if not self.root.exists():
+                _need(not self._read_only)
                 self.root.mkdir(mode=0o700)
             self._root_check()
             info = self.root.lstat()
             self._root_identity = info.st_dev, info.st_ino
             # Persist the root's name too, including when the caller just made it.
-            _sync_directory(self.root.parent)
+            if not self._read_only:
+                _sync_directory(self.root.parent)
         except Exception:
             raise ProviderReceiptError('Private provider receipt store is unavailable or unsafe.') from None
+
+    @classmethod
+    def read_only(cls, root, *, sealed_job_root):
+        """Open existing evidence without creation, fsync or write capability."""
+        return cls(root, sealed_job_root=sealed_job_root, read_only=True)
 
     @staticmethod
     def _parents(path):
@@ -163,6 +172,7 @@ class LocalProviderReceiptStore:
         return self.root / (key + '.' + kind + '.json')
 
     def _write(self, key, kind, payload):
+        _need(not self._read_only)
         path = self._path(key, kind)
         raw = _encode({'schema_version': 1, 'kind': kind, 'payload': payload,
                        'payload_sha256': canonical_hash(payload)})

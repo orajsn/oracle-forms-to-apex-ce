@@ -1,11 +1,11 @@
 {
-  "version": "0.29.2",
+  "version": "0.29.3",
   "released_on": "2026-11-18",
-  "title": "Continue combined source-identity and reference compatibility",
+  "title": "Capture provider outcomes before interpreting them",
   "changes": [
-    "Compose removal of an exact duplicate source-binding echo with the existing source-proven code-reference projection.",
-    "Keep already reviewed V1 sections unchanged and continue the saved third mapping under an explicit V1-to-V2 proof boundary.",
-    "Preserve original source and completed responses, reject duplicate or stale continuation, and require independent review and package validation."
+    "Require explicit acknowledgement of an unknown prior outcome and one possible extra inference charge before a bounded operator repeat.",
+    "Persist independent one-attempt consumption and exact SDK request binding before submission; retain responses before parsing.",
+    "Label a newly adopted result as a new attempt, preserve original evidence and capture remaining calls with receipt-bound download proofs."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

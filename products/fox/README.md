@@ -9,7 +9,17 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
-## Unreleased provider response hardening — 18 November 2026
+## Explicit one-attempt provider reconciliation — 18 November 2026
+
+Version 0.29.3 adds a bounded operator action for one uncertain fourth-mapper
+outcome. It requires explicit acknowledgement that the earlier call may have
+completed or been charged. Approved sections and the original intent stay intact;
+no automatic retry is introduced. The new attempt and remaining calls retain
+private SDK response receipts before parsing, and download proof identifies the
+new attempt separately. Failed or partial actions require reconciliation.
+See the changelog for candidate, Linux, private and live acceptance status.
+
+## Earlier opt-in provider component — 18 November 2026
 
 An optional [private response receipt component](docs/provider-response-receipts.md)
 retains bounded OCI replies before model-content parsing and provides explicit

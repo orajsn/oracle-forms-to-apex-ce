@@ -249,6 +249,10 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
             raise OpafError('Prototype role checkpoint changed; no automatic replay.')
         target = _json(directory / (name + '-target.json'))
         validate_model_environment(saved['model_environment'], target, name, identity, saved['invocation'])
+        from .prototype_provider_reexecution import validate_checkpoint as validate_new_attempt
+        from .provider_reexecution_runtime import validate_recorded_receipt
+        validate_new_attempt(directory, name, saved)
+        validate_recorded_receipt(directory, name, request, target, saved)
         return saved['output'], saved['invocation']
     if pending.exists() or pending.is_symlink():
         raise OpafError('Prior prototype model result is uncertain; reconcile it without replay.')
@@ -284,10 +288,14 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
                 or not _SHA.fullmatch(invocation.get('response_sha256', ''))):
             raise OpafError('Prototype invocation is not bound to the actual model request.')
         validate_model_environment(environment, target, name, identity, invocation)
-        _save_once(complete, {'binding': binding, 'output': output,
+        checkpoint = {'binding': binding, 'output': output,
                     'output_sha256': canonical_hash(output), 'invocation': invocation,
                     'model_environment': environment,
-                    'model_environment_sha256': canonical_hash(environment)})
+                    'model_environment_sha256': canonical_hash(environment)}
+        if callable(getattr(client, 'recorded_receipt', None)):
+            checkpoint['provider_response_receipt'] = client.recorded_receipt(role, request, identity,
+                role_name=name, target_profile=target, output=output, invocation=invocation, environment=environment)
+        _save_once(complete, checkpoint)
     except Exception:
         raise OpafError('Prototype model call did not seal a result; reconcile without replay.') from None
     if timing is not None:
@@ -358,6 +366,12 @@ def _scoped_review_index(checkpoints, plan):
                     raise OpafError('Unsafe reference-continuation provenance.')
                 files.append({'path': path.relative_to(checkpoints).as_posix(),
                               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        from .provider_reexecution_runtime import index_evidence as provider_attempt_evidence
+        attempt_evidence = provider_attempt_evidence(checkpoints.parent)
+        if attempt_evidence is not None:
+            reference_fields = {**reference_fields, 'provider_attempt_lineage': attempt_evidence}
+            reference_schema = 7
+            reference_enabled = True
         if direct:
             from . import prototype_direct_container as container
             extra = [checkpoints/'assessment.json']

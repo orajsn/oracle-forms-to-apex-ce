@@ -1,9 +1,10 @@
 # Private OCI response receipts
 
-Status: opt-in provider component under development. This does not change the
-running FOX pipeline, enable structured-output generation, retry a model call,
-or grant permission to process source. Historical jobs and OPAF records retain
-their existing behavior. Production pipeline integration is a separate step.
+Status: the component remains opt-in. Version 0.29.3 integrates it only behind
+a specific, explicitly acknowledged one-extra-attempt operator action and its
+remaining calls. No implicit processing permission, structured-output generation
+or automatic retry is added. Historical jobs and OPAF records retain their
+existing behavior. Source release, private activation and live acceptance differ.
 
 ## Purpose
 
@@ -39,6 +40,8 @@ For a captured response, an explicit read/parse operation is available:
 
 ```python
 # First recheck current owner/source permission and acquire job ownership.
+# Open existing storage without mkdir, fsync or write capability.
+store = LocalProviderReceiptStore.read_only(receipt_directory, sealed_job_root=job_directory)
 output, invocation, environment = client.recover_prepared(
     role, request, identity,
     role_name=role_name,
@@ -100,3 +103,20 @@ An opt-in synthetic pipeline test injects the receipt-enabled client through the
 existing provider seam and reaches a generated package using an authored validator.
 That is not actual model or SQLcl execution. Its invalid-response case confirms
 the existing pending-intent gate remains in force and no provider call is repeated.
+
+## Bounded operator integration
+
+The authenticated `provider-reexecution` inspection returns a plan hash for the
+exact inactive fourth-mapper intent and three already approved sections. Execution
+requires both explicit acknowledgements: prior outcome unknown, possible extra
+charge. The consumed latch uses exclusive creation and its own committed event
+before POST. The actual SDK binding is checked against the reviewed plan before
+receipt intent creation/submission. One allowance cannot be restored by deleting
+receipt storage. Duplicate requests return retained status without queueing work.
+
+Successful adoption creates the previously absent mapper checkpoint with a
+`provider_reexecution` marker, private receipt hashes and a separate durable
+adoption event. The old intent and all prefix files remain unchanged. Later new
+calls are captured, and package proof includes the new-attempt lineage. No
+original response is reconstructed or fabricated. Partial/crashed adoption is
+an operator reconciliation task; it is not a second automatic inference attempt.

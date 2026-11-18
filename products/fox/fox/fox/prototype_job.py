@@ -290,6 +290,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
     package_mode = delivery_mode(selected) is not None
     runtime = (configuration_loader or (package_configuration if package_mode else _configuration))(selected['target_profile_sha256'],
                                                         installation_projection=installation_projection)
+    from .provider_reexecution_runtime import for_job as receipt_client_for_job
+    runtime = dict(runtime)  # Do not attach one job's receipt store to a caller-cached configuration.
+    runtime['opaf_client'] = receipt_client_for_job(job, runtime['opaf_client'])
     def still_approved(context=None, *, phase=None):
         if (job / 'source-snapshot.json').is_symlink() or (job / 'source-snapshot.json').read_bytes() != raw:
             raise OpafError('Prototype immutable source snapshot changed; no further operation is authorized.')

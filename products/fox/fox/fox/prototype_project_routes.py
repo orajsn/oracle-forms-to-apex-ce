@@ -165,7 +165,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 raise HTTPException(404, 'Prototype run not found.')
             allowed = {f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{part}' for part in ('progress', 'output', 'download')}
             route = getattr(request.scope.get('route'), 'path', None)
-            if route in {'/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume', '/api/projects/{pid}/prototype-runs/{rid}/development-reference-followup'} and request.method in {'GET', 'POST'}:
+            if route in {'/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume', '/api/projects/{pid}/prototype-runs/{rid}/development-reference-followup', '/api/projects/{pid}/prototype-runs/{rid}/provider-reexecution'} and request.method in {'GET', 'POST'}:
                 return owner  # Dedicated handler revalidates exact same-run continuation authority.
             if request.method == 'GET' and route in allowed:
                 # Advisory progress stays metadata-only; output/download perform
@@ -206,6 +206,9 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         current_sources=current_sources, target_reader=target_reader)
     attach_development_reference_routes(app, root=root, db=db, project=project,
         current_sources=current_sources, target_reader=target_reader, followup=True)
+    from .provider_reexecution_routes import attach as attach_provider_reexecution
+    attach_provider_reexecution(app, root=root, db=db, project=project,
+        current_sources=current_sources, target_reader=target_reader)
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/progress')
     def prototype_run_progress(pid: str, rid: str, request: Request):
@@ -266,6 +269,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     validate_reference_owner(job, snapshot, original, c)
                     from .prototype_development_reference_followup import validate_owner as validate_reference_followup
                     validate_reference_followup(job, snapshot, original, c)
+                    from .prototype_provider_reexecution import validate_owner as validate_provider_reexecution
+                    validate_provider_reexecution(job, snapshot, original, c)
                     from .prototype_mapping_epochs import validate_epoch_chain
                     validate_epoch_chain(job, snapshot, original, c)
                     from . import prototype_query_omission_continuation as omission

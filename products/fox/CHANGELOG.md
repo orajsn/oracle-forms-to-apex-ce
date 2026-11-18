@@ -8,7 +8,35 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
-## [Unreleased] — response receipt component, 2026-11-18
+## [0.29.3] - 2026-11-18
+
+### [fix] Capture provider outcomes and bound one explicitly approved new attempt
+Impact: Operators can prepare a reviewable, one-attempt action for a specific
+uncertain fourth mapper while preserving three approved sections and the
+original unknown intent. A new result is labelled as a new attempt, never as
+recovery of evidence that was not retained.
+Change: Exact owner/source/target, prefix and new SDK-request bindings gate an
+explicit unknown-outcome/additional-charge acknowledgement. An independent,
+exclusive consumed latch and committed event precede POST; deleted receipts and
+duplicate requests cannot restore the allowance. SDK response data is retained
+before parsing. Strict provider/source validation precedes create-only adoption,
+and subsequent calls use captured receipts. Read-only opens cannot create or
+write storage. Package proofs retain the unknown prior outcome and new lineage.
+The generic pending-intent rejection remains unchanged.
+Verification: Eight local API/worker scenarios passed, including a complete
+synthetic package/download, concurrent duplicates, failure/crash/storage-loss
+cases and changed actual SDK binding with zero POSTs. Final narrow regression:
+84 passed, three Windows platform skips. SDK ISO timestamps and wall-clock latch
+times are compared at microsecond precision without inventing finer ordering.
+Delivery: Candidate source; Linux checks, activation and any explicitly approved
+live attempt remain separate. No public promotion or provider retry occurred
+as part of these tests.
+Remaining: No exactly-once or billing guarantee. The original outcome is still
+unknown. A crash after response capture needs explicit operator reconciliation;
+duplicate POST does not adopt or retry automatically. New inference requires a
+fresh, specific acknowledgement, and format/runtime/business gates remain separate.
+
+## Provider component source checkpoint — 2026-11-18, before 0.29.3
 
 ### [improvement] Retain an opt-in OCI reply before interpreting it
 Impact: Explicitly opted-in provider callers can preserve a received reply even
