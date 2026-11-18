@@ -9,6 +9,19 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Source-linked business-rule generation - 18 November 2026
+
+Version 0.30.0 adds an [operator CLI and library](docs/source-behavior-generation.md)
+for two complete source patterns: a numeric CEIL report calculation and a numeric
+nonzero guard with minimum validation and focus movement. It generates native
+APEX components from original XML and an exact matching parent package, preserves
+source evidence and records every unsupported unit. A derivative package passed
+fresh local SQLcl format validation; target execution remains unverified.
+
+This first slice is available through the operator tool. It is not yet connected
+to the normal web generation action or deployed to the existing preview. The
+validation page does not save changes, and the complete form remains unfinished.
+
 ## Verified private checkpoint — 18 November 2026
 
 A retained preserved-source run completed Oracle XML intake, AI mapping/review,

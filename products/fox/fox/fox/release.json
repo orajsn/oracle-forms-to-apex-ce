@@ -1,14 +1,15 @@
 {
-  "version": "0.29.6",
+  "version": "0.30.0",
   "released_on": "2026-11-18",
-  "title": "Let saved-output verification finish",
+  "title": "Generate source-linked calculations and validations",
   "changes": [
-    "Allow the read-only saved-output check up to ten minutes instead of aborting it after thirty seconds.",
-    "Show a clear waiting message while preserving source-change guards, duplicate-click prevention and backend validation.",
-    "Reuse the generated package without restarting conversion or making another AI request."
+    "Add an operator CLI that derives supported calculations and validations from original Forms XML and an exact matching parent APEX package.",
+    "Generate a CEIL report calculation or a linked numeric-validation page with explicit button, minimum-value and focus behavior; retain source references and web adaptations.",
+    "Keep an individual status for every source code unit and require fresh SQLcl format validation for the derivative package without reusing parent validation claims."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
+    "The first behavior generator is an operator CLI/library, not part of the normal web generation action. It supports two complete source patterns; other business code remains explicitly unsupported. The validation page does not save changes.",
     "Development-source processing requires explicit approval for the selected code and configured provider. Existing masked-source approvals and retained jobs keep their original meaning.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
     "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",

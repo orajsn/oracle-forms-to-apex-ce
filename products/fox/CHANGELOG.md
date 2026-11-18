@@ -8,6 +8,30 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.30.0] - 2026-11-18
+
+### [feature] Generate source-linked calculations and native APEX validations
+Impact: An operator can generate executable APEX components for two supported
+Forms business-rule patterns using the original XML and matching parent package.
+Change: A finite whole-unit parser maps a numeric CEIL expression to a report SQL
+projection, or a numeric nonzero guard and focus change to a linked validation
+page. Source minimum values remain separate validations. Every unit retains its
+status, source hashes and explicit web adaptations. The assembler preserves
+parent evidence, retires its validation claim for the new package and binds fresh
+SQLcl evidence to unchanged generated APEX bytes. No model request is needed.
+Delivery: Source release with an operator CLI/library; web generation integration
+and deployment are separate. See [operator guide](docs/source-behavior-generation.md).
+Verification: Planner/source regressions passed 115 tests; renderer regressions
+passed 232 tests; assembly passed 21 tests. The overlapping final renderer and
+assembly set passed 57 tests after the page filename correction. Independent
+review passed. The retained source produced two generated/wired/adapted units and
+51 unsupported units; actual local SQLcl 26.1.2 /nolog validation succeeded with
+APEXlang MMD 26.1.0+3102. Counts describe separate, overlapping checks.
+Remaining: This is a finite first generator slice, not a complete form conversion.
+The validation page loads an existing synthetic row, checks input on Continue
+and requests focus; it does not save or commit. Report computation uses persisted
+rows. No target import, APEX execution or business-behavior acceptance is claimed.
+
 ## [0.29.6] - 2026-11-18
 
 ### [fix] Let the saved-output check finish without restarting conversion
