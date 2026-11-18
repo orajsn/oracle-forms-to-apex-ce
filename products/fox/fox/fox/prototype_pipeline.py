@@ -62,11 +62,11 @@ class NativeBlueprintRenderer:
         return profile.deterministic_prototype_zip(spec), profile.prototype_trace(spec)
 
 
-def _saved_development_processing(job, *, requested=None, binding=None, documents=None):
+def _saved_development_processing(job, *, requested=None, requested_policy=None, binding=None, documents=None):
     """Bind new-mode retained proofs to the original immutable owner consent."""
     from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
     path = Path(job) / 'source-snapshot.json'
-    expected = None
+    expected = policy = None
     if path.exists() or path.is_symlink():
         snapshot, _ = read_prototype_snapshot(job)
         selected, approvals = snapshot.get('prototype', {}), snapshot.get('approvals', {})
@@ -77,13 +77,17 @@ def _saved_development_processing(job, *, requested=None, binding=None, document
             if selected.get('processing_mode') != 'development':
                 raise OpafError('Retained development processing mode is invalid.')
             expected = selected['development_processing_sha256']
+            policy = selected.get('chunk_evidence_policy')
             if documents is not None and retained_documents != documents:
                 raise OpafError('Retained source differs from its development processing consent.')
     if binding is not None:
+        if ((policy is None and 'chunk_evidence_policy' in binding)
+                or binding.get('chunk_evidence_policy') != policy):
+            raise OpafError('Retained source-reference policy differs from its immutable admission.')
         if ((expected is None and 'development_processing_sha256' in binding)
                 or binding.get('development_processing_sha256') != expected):
             raise OpafError('Retained pipeline differs from its development processing consent.')
-    elif requested != expected:
+    elif requested != expected or requested_policy != policy:
         raise OpafError('Pipeline development processing consent differs from the admitted snapshot.')
     return expected
 
@@ -342,6 +346,18 @@ def _scoped_review_index(checkpoints, plan):
             for name in sorted(names - existing):
                 path = checkpoints / name
                 files.append({'path':name,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
+        from . import prototype_development_reference_view as development_references
+        reference_enabled = development_references.enabled(checkpoints)
+        reference_fields = {}
+        if reference_enabled:
+            from . import prototype_development_reference_resume as reference_resume
+            technical = reference_resume.technical(checkpoints)
+            if technical is not None:
+                path = checkpoints / reference_resume.TECHNICAL
+                files.append({'path': path.relative_to(checkpoints).as_posix(),
+                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+            reference_fields = {'chunk_evidence_policy': development_references.POLICY,
+                                'reference_continuation_sha256': canonical_hash(technical) if technical is not None else None}
         if direct:
             from . import prototype_direct_container as container
             extra = [checkpoints/'assessment.json']
@@ -349,9 +365,9 @@ def _scoped_review_index(checkpoints, plan):
             for path in extra:
                 if path.is_symlink() or not path.is_file(): raise OpafError('Unsafe container provenance.')
                 files.append({'path':path.relative_to(checkpoints).as_posix(),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
-            return {'schema_version':4,'direct_container_policy':container.POLICY,'source_binding':plan['source_binding'],
+            return {'schema_version':5 if reference_enabled else 4,**reference_fields,'direct_container_policy':container.POLICY,'source_binding':plan['source_binding'],
                 'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
-        return {'schema_version':3,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
+        return {'schema_version':5 if reference_enabled else 3,**reference_fields,'candidate_format_policy':format_policy,'source_binding':plan['source_binding'],
             'focus_plan_sha256':canonical_hash(plan),'focuses':[v['proof'] for v in views],'provenance_files':files}
     if epoch is not None:
         packet = _artifact_json(checkpoints / 'packet.json')
@@ -586,7 +602,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            profile, target_profile_loader, processing_approval_check,
                            converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
                            native_input_policy=None, count_guard=None, delivery_mode=None,
-                           offline_validator=None, development_processing_sha256=None):
+                           offline_validator=None, development_processing_sha256=None, chunk_evidence_policy=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -610,7 +626,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         source_binding=expected_source_binding)
     count_guard = _saved_count_guard(job, requested=count_guard, documents=documents,
         project_id=project_id, project_name=project_name, source_binding=expected_source_binding)
-    development_processing_sha256 = _saved_development_processing(job, requested=development_processing_sha256, documents=documents)
+    development_processing_sha256 = _saved_development_processing(job, requested=development_processing_sha256, requested_policy=chunk_evidence_policy, documents=documents)
     validate_roles(profile)
     packet = local_packet(documents)
     if (job/'source-snapshot.json').is_file():
@@ -652,6 +668,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'approved_policy_id': approved_policy_id}
     if development_processing_sha256 is not None:
         binding['development_processing_sha256'] = development_processing_sha256
+    if chunk_evidence_policy is not None:
+        binding['chunk_evidence_policy'] = chunk_evidence_policy
     if delivery_mode is not None:
         binding['delivery_mode'] = delivery_mode
     if native_input_policy is not None:
@@ -705,6 +723,9 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
     from . import prototype_dsc_identity_repair as dsc
     if dsc.present(checkpoints): result['dsc_identity_repair_sha256']=canonical_hash(_json(checkpoints/dsc.RECORD))
     candidates, reviews = [], []
+    from . import prototype_development_reference_view as development_references
+    if development_references.enabled(checkpoints):
+        development_references.assert_initial_only(checkpoints)
     identity = {'job_id': job.name, 'source_hash': packet['source_binding']}
     approval_context = {**binding, 'selected_chunk_hashes': dict(approved_chunk_hashes)}
     from .prototype_mapping_epochs import active_focus

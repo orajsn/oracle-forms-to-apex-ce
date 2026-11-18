@@ -8,6 +8,31 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.1] - 2026-11-18
+
+### [fix] Continue mapping after exact source-reference mismatch
+Impact: A valid behavioral proposal that cites selected code chunks can use their
+exact source-unit references and proceed to independent review without repeating
+a completed mapper call.
+Change: A separately versioned policy proves selected chunk, complete code bytes,
+source unit and owner identity; only evidence-reference IDs change. Original
+responses and source remain immutable, with derived proof recorded separately.
+Fresh development jobs bind this policy before processing. A tightly scoped,
+owner-approved continuation can resume an older development run stopped after
+its first sealed mapper, preserving the original snapshot and all prior files.
+Duplicate continuation requests never requeue work. Existing source gates,
+legacy job semantics and uncertainty/replay controls remain intact.
+Delivery: Source release preparation; private same-run acceptance remains to be
+recorded separately. Public service is not promoted by this change.
+Verification: Synthetic projection, consent, continuation API/worker and package
+checks plus independent review. A read-only probe of the retained real mapper
+response passed strict source checks after ten exact reference corrections; all
+eleven original job files were unchanged and no provider call was made by the probe.
+Remaining: Combined envelope/Item-fact-format defects and chunk-reference defects
+are outside this narrow policy. No semantic claim, source fact or business value
+is invented or repaired. New review, full-package validation and download remain
+required; generated output is not business acceptance or a target import guarantee.
+
 ## [0.29.0] - 2026-11-17
 
 ### [docs] Record private installation and synthetic checks — 2026-11-18

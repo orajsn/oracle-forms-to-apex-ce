@@ -1,11 +1,11 @@
 {
-  "version": "0.29.0",
-  "released_on": "2026-11-17",
-  "title": "Generate APEX packages from preserved development source",
+  "version": "0.29.1",
+  "released_on": "2026-11-18",
+  "title": "Continue mapping with exact source evidence references",
   "changes": [
-    "Process preserved development XML through the existing AI mapping and independent review pipeline without masking business literals.",
-    "Bind explicit development-source processing approval to exact source, selected code, preparation provenance and configured destination.",
-    "Generate and format-validate the native APEX package, with downloadable output and explicit unsupported behavior; preserve legacy jobs and approvals."
+    "Resolve selected code-chunk references to their exact owned source-unit references without changing source or model claims.",
+    "Preserve the completed mapper response, record the correction separately and require independent review before continuing only unstarted sections.",
+    "Bind new-job reference compatibility and same-run continuation to exact source, consent, target and retained package proofs."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

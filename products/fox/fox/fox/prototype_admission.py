@@ -65,7 +65,7 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
                                 count_guard_selection=None, approved_count_guard_partial_scope=None,
                                 delivery_mode=None, processing_mode=None,
                                 development_processing=None,
-                                approved_unredacted_development_source=None):
+                                approved_unredacted_development_source=None, chunk_evidence_policy=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
@@ -73,6 +73,11 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
     Empty selection is permitted only as a clearly labelled metadata-only run.
     """
     development = None
+    if chunk_evidence_policy is not None:
+        from .prototype_chunk_evidence import POLICY
+        if (chunk_evidence_policy != POLICY or processing_mode != 'development'
+                or delivery_mode != 'apexlang_package'):
+            raise ValueError('Chunk evidence policy requires an explicit development package approval.')
     if processing_mode is not None:
         from .development_processing import PROCESSING_MODE, validate_development_processing
         if (processing_mode != PROCESSING_MODE or approved_redacted_source is not False
@@ -81,7 +86,7 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
             raise ValueError('Confirm unredacted development source, external AI processing and synthetic prototype scope.')
         development = validate_development_processing(development_processing, documents=documents,
             approved_chunk_hashes=approved_chunk_hashes, target_profile_sha256=target_profile_sha256,
-            delivery_mode=delivery_mode)
+            delivery_mode=delivery_mode, chunk_evidence_policy=chunk_evidence_policy)
     elif development_processing is not None or approved_unredacted_development_source is not None:
         raise ValueError('Development processing consent requires its explicit processing mode.')
     elif not all(value is True for value in (
@@ -94,6 +99,8 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
     if development is not None:
         strategy.update(processing_mode=processing_mode, development_processing=development,
                         development_processing_sha256=canonical_hash(development))
+    if chunk_evidence_policy is not None:
+        strategy['chunk_evidence_policy'] = chunk_evidence_policy
     if delivery_mode is not None:
         from .prototype_export_only import DELIVERY_MODE
         if delivery_mode != DELIVERY_MODE:

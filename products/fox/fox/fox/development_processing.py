@@ -35,7 +35,7 @@ def _sha(value):
 
 def describe_development_processing(documents, *, project_id, selected_source_set_id,
                                     source_hash, source_provenance,
-                                    target_profile_sha256, delivery_mode):
+                                    target_profile_sha256, delivery_mode, chunk_evidence_policy=None):
     """Bind the exact project/version/receipt/destination shown before approval.
 
     Selection is added at the explicit POST, so a client can echo this context's
@@ -71,22 +71,30 @@ def describe_development_processing(documents, *, project_id, selected_source_se
             _fail()
     if not found_development:
         _fail()
+    optional = {}
+    if chunk_evidence_policy is not None:
+        from .prototype_chunk_evidence import POLICY
+        if chunk_evidence_policy != POLICY:
+            _fail()
+        optional['chunk_evidence_policy'] = chunk_evidence_policy
     return {'schema_version': 1, 'policy_id': POLICY_ID, 'processing_mode': PROCESSING_MODE,
             'project_id': project_id, 'selected_source_set_id': selected_source_set_id,
             'source_hash': source_hash, 'source_binding': packet['source_binding'],
             'source_provenance': deepcopy(source_provenance),
-            'target_profile_sha256': target_profile_sha256, 'delivery_mode': delivery_mode}
+            'target_profile_sha256': target_profile_sha256, 'delivery_mode': delivery_mode, **optional}
 
 
 def prepare_development_processing(documents, *, context, approved_chunk_hashes):
     """Rebuild the review context and bind the exact submitted code selection."""
-    if (type(context) is not dict or set(context) != _CONTEXT_KEYS
+    optional = {'chunk_evidence_policy'} if type(context) is dict and 'chunk_evidence_policy' in context else set()
+    if (type(context) is not dict or set(context) != _CONTEXT_KEYS | optional
             or type(context.get('schema_version')) is not int or context['schema_version'] != 1
             or context.get('policy_id') != POLICY_ID or context.get('processing_mode') != PROCESSING_MODE):
         _fail()
     expected = describe_development_processing(documents,
         **{key: context[key] for key in ('project_id', 'selected_source_set_id', 'source_hash',
-            'source_provenance', 'target_profile_sha256', 'delivery_mode')})
+            'source_provenance', 'target_profile_sha256', 'delivery_mode')},
+        **({'chunk_evidence_policy': context['chunk_evidence_policy']} if optional else {}))
     if expected != context or type(approved_chunk_hashes) is not dict:
         _fail()
     available = {row['id']: row['sha256'] for row in local_packet(documents)['chunks']}
@@ -98,9 +106,11 @@ def prepare_development_processing(documents, *, context, approved_chunk_hashes)
 
 def validate_development_processing(binding, *, documents, approved_chunk_hashes,
                                     target_profile_sha256, delivery_mode, project_id=None,
-                                    selected_source_set_id=None, source_hash=None):
+                                    selected_source_set_id=None, source_hash=None, chunk_evidence_policy=None):
     """Check a full immutable binding against fresh derivation and job identity."""
-    if type(binding) is not dict or set(binding) != _CONTEXT_KEYS | {'approved_chunk_hashes'}:
+    optional = {'chunk_evidence_policy'} if type(binding) is dict and 'chunk_evidence_policy' in binding else set()
+    if (type(binding) is not dict or set(binding) != _CONTEXT_KEYS | {'approved_chunk_hashes'} | optional
+            or binding.get('chunk_evidence_policy') != chunk_evidence_policy):
         _fail()
     for key, expected in (('project_id', project_id), ('selected_source_set_id', selected_source_set_id),
                           ('source_hash', source_hash), ('target_profile_sha256', target_profile_sha256),
@@ -109,7 +119,7 @@ def validate_development_processing(binding, *, documents, approved_chunk_hashes
             continue
         if binding[key] != expected:
             _fail()
-    context = {key: binding[key] for key in _CONTEXT_KEYS}
+    context = {key: binding[key] for key in _CONTEXT_KEYS | optional}
     expected = prepare_development_processing(documents, context=context,
                                                approved_chunk_hashes=approved_chunk_hashes)
     if expected != binding:

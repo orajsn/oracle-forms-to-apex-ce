@@ -746,6 +746,9 @@ def active_focus(root, packet, plan, request, target, previous, *, runtime=None)
 
 
 def _dispatch_active_focus(root, packet, plan, request, target, previous, *, runtime=None):
+    from . import prototype_development_reference_view as development_references
+    if development_references.enabled(root):
+        return development_references.active_focus(root, packet, plan, request, target, previous, runtime=runtime)
     from . import prototype_query_omission_continuation as omission
     if omission.present(root):
         return omission.active_focus(root, packet, plan, request, target, previous, runtime=runtime)

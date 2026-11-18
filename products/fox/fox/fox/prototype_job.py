@@ -70,6 +70,12 @@ def validate_prototype_snapshot(snapshot):
                          'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
         if development is not None:
             selected_keys.update(('processing_mode', 'development_processing', 'development_processing_sha256'))
+        if 'chunk_evidence_policy' in selected:
+            from .prototype_chunk_evidence import POLICY
+            if (development is None or selected['chunk_evidence_policy'] != POLICY
+                    or selected.get('delivery_mode') != 'apexlang_package'):
+                raise ValueError()
+            selected_keys.add('chunk_evidence_policy')
         if 'delivery_mode' in selected:
             from .prototype_export_only import delivery_mode
             delivery_mode(selected)
@@ -111,7 +117,7 @@ def validate_prototype_snapshot(snapshot):
                 approved_chunk_hashes=selected['approved_chunk_hashes'],
                 target_profile_sha256=selected['target_profile_sha256'], delivery_mode=selected.get('delivery_mode'),
                 project_id=snapshot['project_id'], selected_source_set_id=snapshot['selected_source_set_id'],
-                source_hash=snapshot['source_hash'])
+                source_hash=snapshot['source_hash'], chunk_evidence_policy=selected.get('chunk_evidence_policy'))
         rebuilt = prepare_prototype_admission(documents,
             expected_source_binding=selected['source_binding'],
             approved_chunk_hashes=selected['approved_chunk_hashes'],
@@ -122,6 +128,8 @@ def validate_prototype_snapshot(snapshot):
             schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
             candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy,
             delivery_mode=selected.get('delivery_mode'),
+            **({'chunk_evidence_policy': selected['chunk_evidence_policy']}
+               if 'chunk_evidence_policy' in selected else {}),
             **({'processing_mode': selected['processing_mode'], 'development_processing': development,
                 'approved_unredacted_development_source': approvals['unredacted_development_source']}
                if development is not None else {}),
@@ -323,7 +331,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         candidate_format_policy=selected.get('candidate_format_policy'),
         native_input_policy=selected.get('native_input_policy'), count_guard=selected.get('count_guard'),
         **({'development_processing_sha256': selected['development_processing_sha256']}
-           if selected.get('processing_mode') == 'development' else {}))
+           if selected.get('processing_mode') == 'development' else {}),
+        **({'chunk_evidence_policy': selected['chunk_evidence_policy']}
+           if 'chunk_evidence_policy' in selected else {}))
     still_approved()
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record

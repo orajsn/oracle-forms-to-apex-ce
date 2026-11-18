@@ -9,6 +9,16 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Exact source-reference compatibility — 18 November 2026
+
+Patch 0.29.1 handles a mapper response that cites a selected code chunk instead
+of its exact source unit. The correspondence must be proven from original bytes
+and the same source owner; code and claim text stay unchanged. Independent review
+still checks the resulting proposal. A bounded continuation preserves a completed
+first mapper rather than starting the application conversion again. Other or
+combined defects remain explicit reconciliation needs. See the changelog for
+source, private acceptance and public deployment status.
+
 ## Development-source APEX generation — 17 November 2026
 
 Version 0.29.0 connects preserved development XML to **Generate APEX package**.

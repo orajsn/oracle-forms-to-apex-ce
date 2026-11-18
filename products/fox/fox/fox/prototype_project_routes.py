@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from . import source_history
+from .prototype_chunk_evidence import POLICY as CHUNK_EVIDENCE_POLICY
 from .source_processing_policy import (source_processing_policy, DEVELOPMENT_REASON,
                                        DEVELOPMENT_EVENT, current_processing_approval)
 from .intake import inventory, MAX_FILE_BYTES
@@ -164,6 +165,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 raise HTTPException(404, 'Prototype run not found.')
             allowed = {f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{part}' for part in ('progress', 'output', 'download')}
             route = getattr(request.scope.get('route'), 'path', None)
+            if route == '/api/projects/{pid}/prototype-runs/{rid}/development-reference-resume' and request.method in {'GET', 'POST'}:
+                return owner  # Dedicated handler revalidates exact same-run continuation authority.
             if request.method == 'GET' and route in allowed:
                 # Advisory progress stays metadata-only; output/download perform
                 # their own fresh source and consent checks in generated_prototype.
@@ -197,6 +200,10 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             return digest
         except (ValueError, OSError, KeyError, TypeError, ImportError, OpafError):
             raise HTTPException(503, 'The prototype workflow is not configured. Your source files remain saved.') from None
+
+    from .development_reference_routes import attach as attach_development_reference_routes
+    attach_development_reference_routes(app, root=root, db=db, project=project,
+        current_sources=current_sources, target_reader=target_reader)
 
     @app.get('/api/projects/{pid}/prototype-runs/{rid}/progress')
     def prototype_run_progress(pid: str, rid: str, request: Request):
@@ -253,6 +260,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                         raise OpafError('Prototype owner, source selection or run is no longer current.')
                     if not current_processing_approval(c, snapshot, rid, current_sources(pid, c)):
                         raise OpafError('The original source processing approval is no longer current.')
+                    from .prototype_development_reference_resume import validate_owner as validate_reference_owner
+                    validate_reference_owner(job, snapshot, original, c)
                     from .prototype_mapping_epochs import validate_epoch_chain
                     validate_epoch_chain(job, snapshot, original, c)
                     from . import prototype_query_omission_continuation as omission
@@ -1573,7 +1582,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     context = describe_development_processing(source_documents(sources), project_id=pid,
                         selected_source_set_id=selected, source_hash=result['source_hash'],
                         source_provenance=source_history.source_provenance(c, pid, sources),
-                        target_profile_sha256=digest, delivery_mode='apexlang_package')
+                        target_profile_sha256=digest, delivery_mode='apexlang_package',
+                        chunk_evidence_policy=CHUNK_EVIDENCE_POLICY)
                     result.update(source_processing_allowed=True, source_processing_reason=None,
                         development_processing_context_sha256=canonical_hash(context))
             except HTTPException:
@@ -1624,7 +1634,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 context = describe_development_processing(source_documents(sources), project_id=pid,
                     selected_source_set_id=body.expected_current_source_set_id, source_hash=body.source_hash,
                     source_provenance=source_history.source_provenance(c, pid, sources),
-                    target_profile_sha256=digest, delivery_mode=body.delivery_mode)
+                    target_profile_sha256=digest, delivery_mode=body.delivery_mode,
+                    chunk_evidence_policy=CHUNK_EVIDENCE_POLICY)
                 if (body.processing_mode != 'development'
                         or body.development_processing_context_sha256 != canonical_hash(context)
                         or body.approved_unredacted_development_source is not True
@@ -1632,6 +1643,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     raise HTTPException(409, 'Review and approve this exact development source without redaction for the configured processing route.')
                 try:
                     development_options = dict(processing_mode='development',
+                        chunk_evidence_policy=CHUNK_EVIDENCE_POLICY,
                         approved_unredacted_development_source=True,
                         development_processing=prepare_development_processing(source_documents(sources),
                             context=context, approved_chunk_hashes=body.approved_chunk_hashes))

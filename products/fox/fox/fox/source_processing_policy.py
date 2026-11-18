@@ -31,7 +31,8 @@ def current_processing_approval(connection, snapshot, run_id, sources):
         [(row['name'], source_history.readable_source_bytes(row)) for row in sources],
         project_id=snapshot['project_id'], selected_source_set_id=snapshot['selected_source_set_id'],
         source_hash=snapshot['source_hash'], source_provenance=provenance,
-        target_profile_sha256=selected['target_profile_sha256'], delivery_mode=selected.get('delivery_mode'))
+        target_profile_sha256=selected['target_profile_sha256'], delivery_mode=selected.get('delivery_mode'),
+        chunk_evidence_policy=selected.get('chunk_evidence_policy'))
     binding = {**context, 'approved_chunk_hashes': selected['approved_chunk_hashes']}
     if (binding != selected.get('development_processing')
             or canonical_hash(binding) != selected.get('development_processing_sha256')):

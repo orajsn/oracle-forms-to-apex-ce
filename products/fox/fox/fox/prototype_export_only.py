@@ -398,7 +398,7 @@ def retained_package(job, snapshot, target):
     binding = _json(root / 'binding.json')
     selection_keys = ('schema_version', 'max_owned_objects', 'metadata_task_policy',
                       'candidate_format_policy', 'native_input_policy', 'count_guard', 'approved_policy_id',
-                      'development_processing_sha256')
+                      'development_processing_sha256', 'chunk_evidence_policy')
     if (binding.get('delivery_mode') != DELIVERY_MODE
             or binding.get('project_id') != snapshot['project_id']
             or binding.get('project_name') != snapshot['project_name']

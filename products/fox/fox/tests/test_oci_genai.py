@@ -101,7 +101,9 @@ def test_direct_connected_design_review_render_and_historical_authority(direct_s
     assert result['facts']['native_source_rendered'] is True
     assert result['facts']['business_behavior_accepted'] is False
     assert result['facts']['technically_verified'] is False
-    assert len(service.calls) == len(approvals) == result['assessment']['focus_count'] * 2
+    assert len(approvals) == len(service.calls) * 2
+    assert approvals[::2] == approvals[1::2]
+    assert len(service.calls) == result['assessment']['focus_count'] * 2
     for path in (job / 'prototype-pipeline').glob('focus-*/mapper.json'):
         saved = json.loads(path.read_text())
         assert saved['invocation']['provider'] == 'oci_genai'

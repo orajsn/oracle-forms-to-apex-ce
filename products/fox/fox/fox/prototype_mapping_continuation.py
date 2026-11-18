@@ -26,6 +26,11 @@ def continuation_event_id(rid, record):
 def validate_job_continuation(job, snapshot, original, *, phase=None):
     """Worker-side durable consent check before configuration or a new call."""
     database = job.parent.parent / 'fox.sqlite3'
+    from . import prototype_development_reference_resume as development_resume
+    reference_recorded = any(path.exists() or path.is_symlink() for path in
+        (job / development_resume.OWNER_RECORD, job / 'prototype-pipeline' / development_resume.TECHNICAL))
+    if reference_recorded and (database.is_symlink() or not database.is_file()):
+        raise OpafError('Development reference continuation requires its durable owner database.')
     recorded = (job / RECORD).exists() or (job / RECORD).is_symlink()
     from . import prototype_preclaim_continuation as preclaim
     preclaimed = preclaim.present(job/'prototype-pipeline')
@@ -46,6 +51,7 @@ def validate_job_continuation(job, snapshot, original, *, phase=None):
     if database.is_symlink() or not database.is_file():
         raise OpafError('Continuation database is missing or unsafe.')
     with sqlite3.connect(database.absolute().as_uri() + '?mode=ro', uri=True) as connection:
+        development_resume.validate_owner(job, snapshot, original, connection)
         validation_retry.validate_owner(job, snapshot, original, connection)
         direct_container.validate_owner(job, snapshot, original, connection)
         omission.validate_record(job, snapshot, original, connection, phase=phase)
