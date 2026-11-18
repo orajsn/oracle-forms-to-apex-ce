@@ -9,6 +9,17 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Unreleased provider response hardening — 18 November 2026
+
+An optional [private response receipt component](docs/provider-response-receipts.md)
+retains bounded OCI replies before model-content parsing and provides explicit
+read-only recovery. It also records safe SDK failure metadata without repeating
+the call. Existing behavior is unchanged unless the caller supplies the store.
+Local synthetic checks and independent review passed; production pipeline wiring,
+Linux persistence and real-SDK verification remain separate. This is not enabled
+on the active conversion or public service and does not recover earlier missing
+responses. Schema-constrained generation is not introduced by this checkpoint.
+
 ## Combined reference compatibility — 18 November 2026
 
 Patch 0.29.2 also handles an exact duplicate source-binding echo accompanying

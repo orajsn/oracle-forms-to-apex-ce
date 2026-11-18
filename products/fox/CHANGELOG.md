@@ -8,6 +8,30 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [Unreleased] — response receipt component, 2026-11-18
+
+### [improvement] Retain an opt-in OCI reply before interpreting it
+Impact: Explicitly opted-in provider callers can preserve a received reply even
+when its model content is invalid, and recover a valid captured reply without
+another provider call. This does not change the currently deployed workflow.
+Change: Add create-only private intent/response receipts, persist the client
+request ID before submission, retain bounded SDK response data before parsing,
+and provide an explicit read-only recovery API. Recognized SDK service errors
+retain only status/code/request-ID metadata, never messages or auth headers.
+Historical schemas/default behavior and the existing pending-intent gate remain.
+Verification: 97 synthetic component/regression/opt-in pipeline checks passed;
+three Windows symlink-privilege cases skipped. Independent review cleared parent
+directory flushing and truthful pre-read error handling after fixes. An authored
+validator was used for the pipeline test; no actual SDK/provider/SQLcl call ran.
+Delivery: Unreleased source component, not an application release, activation or
+public rollout. No application version/tag or existing job is changed by opting
+out. See [response receipts](docs/provider-response-receipts.md).
+Remaining: Production caller integration and actual Linux persistence/SDK checks;
+schema-constrained output and backend-owned model metadata are separate changes.
+Windows guarantees cover process interruption only, not OS/power-loss durability.
+The component cannot reconstruct missing evidence from earlier calls, establish
+exactly-once execution, or authorize retries after unknown external outcomes.
+
 ## [0.29.2] - 2026-11-18
 
 ### [fix] Continue combined source-identity and reference compatibility

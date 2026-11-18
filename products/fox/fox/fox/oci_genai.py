@@ -7,16 +7,36 @@ Injected SDK/client objects are for offline contract tests only.
 from datetime import datetime, timezone
 from copy import deepcopy
 import json
+import re
 import uuid
 
 from .design_provider import DIRECT, PROMPTS, direct_config
 from .genai_prompts import PROMPTS as TEXTS, prompt_hash
 from .opaf import OpafError, canonical_hash, parse_model_message
 from .provider_timing import ProviderTiming
+from .provider_receipts import ProviderReceiptError
 
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _service_failure(sdk, failure):
+    """Selected SDK error metadata only; never its message or full headers."""
+    try:
+        service_error = sdk.exceptions.ServiceError
+        if not isinstance(failure, service_error):
+            return None
+        status, code = failure.status, failure.code
+        request_id = failure.headers.get('opc-request-id')
+        if (type(status) is not int or not 400 <= status <= 599
+                or not isinstance(code, str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}', code)
+                or not (request_id is None or isinstance(request_id, str) and len(request_id) <= 512)):
+            return None
+        return {'body': {'scope': 'fox-oci-service-error-v1', 'code': code},
+                'status': status, 'request_id': request_id}
+    except Exception:
+        return None
 
 
 class OciGenAiClient:
@@ -60,7 +80,8 @@ class OciGenAiClient:
     def invoke(self, role, request):
         return self._invoke(role, request)
 
-    def invoke_prepared(self, role, request, identity, *, role_name, target_profile, before_invoke):
+    def invoke_prepared(self, role, request, identity, *, role_name, target_profile, before_invoke,
+                        receipt_store=None):
         """Observe configured metadata, persist intent, then one non-retried chat."""
         if not callable(before_invoke):
             raise OpafError('A before-invocation intent callback is required.')
@@ -86,10 +107,53 @@ class OciGenAiClient:
         if not -5 <= lead <= 120:
             raise OpafError('Prepared model environment expired before invocation.')
         timing.mark('before_invoke_seconds')
-        output, invocation = self._invoke(role, request, timing=timing, prepared=prepared)
+        receipt_binding = self._receipt_binding(role, request, identity, role_name,
+                                                target_profile, prepared[2]) if receipt_store is not None else None
+        output, invocation = self._invoke(role, request, timing=timing, prepared=prepared,
+            receipt_store=receipt_store, receipt_binding=receipt_binding, environment=environment)
         from .design_provider import validate_environment
         validate_environment(environment, target_profile, role_name, identity, invocation)
         return output, invocation, environment, timing.finish()
+
+    def _receipt_binding(self, role, request, identity, role_name, target_profile, wire_hash):
+        return {'schema_version': 1, 'provider': DIRECT, 'job_id': identity['job_id'],
+            'source_manifest_sha256': identity['source_hash'], 'identity_sha256': canonical_hash(identity),
+            'target_profile_sha256': canonical_hash(target_profile), 'client_target_sha256': canonical_hash(self.target),
+            'role': role_name, 'model': role['model'], 'role_sha256': canonical_hash(role),
+            'prompt_version': PROMPTS[role_name], 'prompt_sha256': prompt_hash(role_name),
+            'request_sha256': canonical_hash(request), 'wire_request_sha256': wire_hash}
+
+    def recover_prepared(self, role, request, identity, *, role_name, target_profile, receipt_store):
+        """Explicit read/parse only, returning (output, invocation, environment).
+
+        Caller must independently recheck current source/owner permission before
+        adopting anything. A receipt is evidence, never authorization or business
+        acceptance. This method never initializes authentication or calls chat;
+        SDK request serialization only recomputes the exact original wire hash.
+        No historical intent/result files are changed, and no timing is invented.
+        """
+        response_read = False
+        try:
+            if (canonical_hash(target_profile) != canonical_hash(self.target)
+                    or self.config['roles'].get(role_name) != role):
+                raise ValueError()
+            name, _, wire_hash = self._prepare_request(role, request)
+            binding = self._receipt_binding(role, request, identity, role_name, target_profile, wire_hash)
+            intent, response = receipt_store.read(binding)
+            response_read = True
+            output, invocation = self._parse_response(role, request, name=name, wire_hash=wire_hash,
+                client_request_id=intent['client_request_id'], started=intent['started_at_utc'],
+                completed=response['completed_at_utc'], body=response['body'],
+                status=response['status'], request_id=response['request_id'])
+            from .design_provider import validate_environment
+            validate_environment(intent['environment'], target_profile, role_name, identity, invocation)
+            return output, invocation, intent['environment']
+        except ProviderReceiptError:
+            raise
+        except Exception:
+            if response_read:
+                raise OpafError('Captured OCI response did not seal valid structured output; reconcile without replay.') from None
+            raise OpafError('OCI response recovery inputs are unavailable or invalid; reconcile without replay.') from None
 
     def _prepare_request(self, role, request):
         name = next(n for n in PROMPTS if role == self.config['roles'][n])
@@ -105,43 +169,73 @@ class OciGenAiClient:
                           m.UserMessage(content=[m.TextContent(text=encoded)])]))
         return name, details, canonical_hash(self.sdk.util.to_dict(details))
 
-    def _invoke(self, role, request, *, timing=None, prepared=None):
+    def _invoke(self, role, request, *, timing=None, prepared=None, receipt_store=None,
+                receipt_binding=None, environment=None):
+        response_captured = False
+        service_error_captured = False
         try:
             name, details, wire_hash = self._prepare_request(role, request) if prepared is None else prepared
             client_request_id = 'fox-' + uuid.uuid4().hex
             started = _now()
+            if receipt_store is not None:
+                receipt_key = receipt_store.begin(receipt_binding, client_request_id=client_request_id,
+                    started_at_utc=started, environment=deepcopy(environment))
             if timing is not None:
                 timing.begin_request()
-            response = self._client().chat(details, opc_request_id=client_request_id,
-                retry_strategy=self.sdk.retry.NoneRetryStrategy())
+            try:
+                response = self._client().chat(details, opc_request_id=client_request_id,
+                    retry_strategy=self.sdk.retry.NoneRetryStrategy())
+            except Exception as failure:
+                details_received = _service_failure(self.sdk, failure) if receipt_store is not None else None
+                if details_received is not None:
+                    receipt_store.capture(receipt_key, completed_at_utc=_now(), **details_received)
+                    service_error_captured = True
+                raise
             completed = _now()
             if timing is not None:
                 timing.mark('request_seconds')
             body = self.sdk.util.to_dict(response.data)
-            if len(json.dumps(body, ensure_ascii=False).encode('utf-8')) > 2_000_000:
-                raise ValueError()
-            result = body['chat_response']
-            choices = result['choices']
             request_id = response.headers.get('opc-request-id')
-            if (response.status != 200 or body.get('model_id') != role['model']
-                    or not isinstance(body.get('model_version'), str) or not body['model_version']
-                    or len(body['model_version']) > 200
-                    or result.get('api_format') != 'GENERIC' or len(choices) != 1
-                    or choices[0].get('finish_reason', '').lower() != 'stop'
-                    or not isinstance(request_id, str) or not request_id):
-                raise ValueError()
-            message = choices[0]['message']
-            content = message['content']
-            if (message.get('role') != 'ASSISTANT' or not content
-                    or any(c.get('type') != 'TEXT' or not isinstance(c.get('text'), str) for c in content)
-                    or message.get('tool_calls')):
-                raise ValueError()
-            output = parse_model_message(''.join(c['text'] for c in content))
-            invocation = {'schema_version': 2, 'provider': DIRECT, 'role': name,
-                'model': body['model_id'], 'model_version': body['model_version'], 'prompt_version': PROMPTS[name], 'prompt_sha256': prompt_hash(name),
-                'request_id': request_id, 'client_request_id': client_request_id,
-                'request_sha256': canonical_hash(request), 'wire_request_sha256': wire_hash,
-                'response_sha256': canonical_hash(body), 'started_at_utc': started, 'completed_at_utc': completed}
-            return output, invocation
+            if receipt_store is not None:
+                receipt_store.capture(receipt_key, body=body, status=response.status,
+                    request_id=request_id, completed_at_utc=completed)
+                response_captured = True
+            return self._parse_response(role, request, name=name, wire_hash=wire_hash,
+                client_request_id=client_request_id, started=started, completed=completed,
+                body=body, status=response.status, request_id=request_id)
+        except ProviderReceiptError:
+            raise
         except Exception:
+            if service_error_captured:
+                raise OpafError('OCI service error metadata was captured; reconcile without replay.') from None
+            if response_captured:
+                raise OpafError('Captured OCI response did not seal valid structured output; reconcile without replay.') from None
             raise OpafError('Direct OCI inference did not seal valid structured output; reconcile without replay.') from None
+
+    @staticmethod
+    def _parse_response(role, request, *, name, wire_hash, client_request_id, started,
+                        completed, body, status, request_id):
+        if len(json.dumps(body, ensure_ascii=False).encode('utf-8')) > 2_000_000:
+            raise ValueError()
+        result = body['chat_response']
+        choices = result['choices']
+        if (status != 200 or body.get('model_id') != role['model']
+                or not isinstance(body.get('model_version'), str) or not body['model_version']
+                or len(body['model_version']) > 200
+                or result.get('api_format') != 'GENERIC' or len(choices) != 1
+                or choices[0].get('finish_reason', '').lower() != 'stop'
+                or not isinstance(request_id, str) or not request_id):
+            raise ValueError()
+        message = choices[0]['message']
+        content = message['content']
+        if (message.get('role') != 'ASSISTANT' or not content
+                or any(c.get('type') != 'TEXT' or not isinstance(c.get('text'), str) for c in content)
+                or message.get('tool_calls')):
+            raise ValueError()
+        output = parse_model_message(''.join(c['text'] for c in content))
+        invocation = {'schema_version': 2, 'provider': DIRECT, 'role': name,
+            'model': body['model_id'], 'model_version': body['model_version'], 'prompt_version': PROMPTS[name], 'prompt_sha256': prompt_hash(name),
+            'request_id': request_id, 'client_request_id': client_request_id,
+            'request_sha256': canonical_hash(request), 'wire_request_sha256': wire_hash,
+            'response_sha256': canonical_hash(body), 'started_at_utc': started, 'completed_at_utc': completed}
+        return output, invocation
