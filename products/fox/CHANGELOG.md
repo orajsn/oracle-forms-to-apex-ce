@@ -8,6 +8,29 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.29.0] - 2026-11-17
+
+### [feature] Generate APEX packages from preserved development source
+Impact: Prepared development XML can proceed through selected-code AI mapping,
+independent design review, native APEX package generation and offline format
+validation without blanket source redaction.
+Change: The user explicitly approves unredacted development source. New immutable
+consent binds exact source/version, preparation receipts, selected code units and
+configured destination; worker checks current owner/provenance/event before each
+provider operation and immediately before submission. Package proof retains the
+consent binding. Existing redacted approvals, jobs and package hashes keep their
+original meaning. Unsupported legacy recovery routes cannot reinterpret new-mode
+consent; completed and uncertain operations are never automatically replayed.
+Delivery: Reviewed source release preparation; private genuine-input acceptance
+will be recorded separately. No public promotion is included.
+Verification: Synthetic exact-byte consent and legacy compatibility tests, actual
+local API/worker execution with authored provider/validator fixtures, browser
+fixtures, production build and independent review. These are not live AI evidence.
+Remaining: Native output uses synthetic storage; general triggers, program units,
+external dependencies and unsupported widget behavior remain explicit remediation.
+Design analysis is not verified executable behavior. Format validation does not
+prove customer-target import, runtime correctness or business acceptance.
+
 ## [0.28.0] - 2026-11-17
 
 ### [docs] Record private hosted preparation acceptance — 17 November 2026

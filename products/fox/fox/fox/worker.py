@@ -66,6 +66,10 @@ def process_one(db,root:Path,*,installation_projection=_NO_INSTALLATION_PROJECTI
                             or source_history.selected_source_set_id(current, selected['project']) != bound['selected_source_set_id']
                             or source_history._hash(source_history.selected_sources(current, selected['project'])) != bound['source_hash']):
                         return False
+                    from .source_processing_policy import current_processing_approval
+                    if not current_processing_approval(current, bound, rid,
+                            source_history.selected_sources(current, selected['project'])):
+                        return False
                 return snapshot_path.read_bytes() == snapshot_raw
             options = {'approval_check': approval_check}
             if projection is not _NO_INSTALLATION_PROJECTION:

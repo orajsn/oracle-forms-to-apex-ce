@@ -16,7 +16,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, StrictBool, StrictInt, StrictStr, model_validator
 
 from . import source_history
-from .source_processing_policy import source_processing_policy, DEVELOPMENT_REASON
+from .source_processing_policy import (source_processing_policy, DEVELOPMENT_REASON,
+                                       DEVELOPMENT_EVENT, current_processing_approval)
 from .intake import inventory, MAX_FILE_BYTES
 from .partial_draft import saved_draft_scope
 from .opaf import OpafError, canonical_hash
@@ -60,6 +61,9 @@ class CountGuardSelectionInput(BaseModel):
 class PrototypeNewRunInput(PrototypeRunInput):
     # A creation-only choice: continuations cannot upgrade old immutable jobs.
     allow_count_guard_creation: ClassVar[bool] = True
+    processing_mode: Literal['development'] | None = None
+    development_processing_context_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
+    approved_unredacted_development_source: StrictBool | None = None
     delivery_mode: Literal['apexlang_package'] | None = None
     native_input_policy: Literal['forms-required-inputs-v1'] | None = None
     count_guard_policy: Literal['forms-isolated-count-check-v1'] | None = None
@@ -144,6 +148,39 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                                     admission_allowed, target_reader=configured_target,
                                     installation_projection=None, download_client_factory=None,
                                     fresh_admission_allowed=None, query_omission_admission=None):
+    owner_project = project
+
+    def project(request, pid):
+        owner = owner_project(request, pid)
+        rid = request.path_params.get('rid')
+        if rid is None:
+            return owner
+        import re
+        if not re.fullmatch(r'fox-[a-f0-9]{20}', rid):
+            raise HTTPException(404, 'Prototype run not found.')
+        with db() as c:
+            c.execute('BEGIN')
+            if not c.execute('SELECT 1 FROM runs WHERE id=? AND project=?', (rid, pid)).fetchone():
+                raise HTTPException(404, 'Prototype run not found.')
+            allowed = {f'/api/projects/{{pid}}/prototype-runs/{{rid}}/{part}' for part in ('progress', 'output', 'download')}
+            route = getattr(request.scope.get('route'), 'path', None)
+            if request.method == 'GET' and route in allowed:
+                # Advisory progress stays metadata-only; output/download perform
+                # their own fresh source and consent checks in generated_prototype.
+                return owner
+            from .prototype_job import read_prototype_snapshot
+            try:
+                snapshot, _ = read_prototype_snapshot(root / 'jobs' / rid)
+                selected, approvals = snapshot.get('prototype', {}), snapshot.get('approvals', {})
+                development = (any(key in selected for key in ('processing_mode', 'development_processing', 'development_processing_sha256'))
+                    or 'unredacted_development_source' in approvals
+                    or source_history.development_source_present(c, pid, current_sources(pid, c)))
+            except (OpafError, ValueError, TypeError, AttributeError):
+                raise HTTPException(409, 'The retained run source policy needs reconciliation; no operation was started.') from None
+        if development:
+            raise HTTPException(409, 'This development-source run uses its original processing approval. Legacy recovery cannot restart it; inspect its retained progress and output.')
+        return owner
+
     from .prototype_direct_container import attach_routes as attach_container_routes
     attach_container_routes(app, root=root, db=db, project_owner=project, current_sources=current_sources,
         admission_allowed=admission_allowed, target_reader=target_reader, input_model=PrototypeContinuationInput)
@@ -214,6 +251,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                             or inventory(current_sources(pid, c))['source_hash'] != snapshot['source_hash']
                             or source_history.selected_source_set_id(c, pid) != snapshot['selected_source_set_id']):
                         raise OpafError('Prototype owner, source selection or run is no longer current.')
+                    if not current_processing_approval(c, snapshot, rid, current_sources(pid, c)):
+                        raise OpafError('The original source processing approval is no longer current.')
                     from .prototype_mapping_epochs import validate_epoch_chain
                     validate_epoch_chain(job, snapshot, original, c)
                     from . import prototype_query_omission_continuation as omission
@@ -1522,11 +1561,23 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Select valid, redacted Forms XML files for prototype assessment. Original files are preserved.') from None
             result.update(source_hash=inventory(sources)['source_hash'], selected_source_set_id=selected)
-            result.update(source_processing_policy(c, pid, sources))
-        try:
-            result.update(target_profile_sha256=target_hash(), conversion_configured=True)
-        except HTTPException:
-            result.update(target_profile_sha256=None, conversion_configured=False)
+            policy = source_processing_policy(c, pid, sources)
+            result.update({key: value for key, value in policy.items() if key != 'processing_mode'})
+            if policy['processing_mode'] == 'development':
+                result['processing_mode'] = 'development'
+            try:
+                digest = target_hash()
+                result.update(target_profile_sha256=digest, conversion_configured=True)
+                if policy['processing_mode'] == 'development':
+                    from .development_processing import describe_development_processing
+                    context = describe_development_processing(source_documents(sources), project_id=pid,
+                        selected_source_set_id=selected, source_hash=result['source_hash'],
+                        source_provenance=source_history.source_provenance(c, pid, sources),
+                        target_profile_sha256=digest, delivery_mode='apexlang_package')
+                    result.update(source_processing_allowed=True, source_processing_reason=None,
+                        development_processing_context_sha256=canonical_hash(context))
+            except HTTPException:
+                result.update(target_profile_sha256=None, conversion_configured=False)
         return result
 
     @app.get('/api/projects/{pid}/prototype-count-checks')
@@ -1556,8 +1607,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
         with db() as c:
             c.execute('BEGIN IMMEDIATE')
             sources = current_sources(pid, c)
-            if not source_processing_policy(c, pid, sources)['source_processing_allowed']:
-                raise HTTPException(409, DEVELOPMENT_REASON)
+            policy = source_processing_policy(c, pid, sources)
             digest = target_hash()
             if digest != body.target_profile_sha256:
                 raise HTTPException(409, 'The processing destination changed. Review the prototype assessment again.')
@@ -1566,6 +1616,30 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     source_history.selected_source_set_id(c, pid) != body.expected_current_source_set_id):
                 raise HTTPException(409, 'The selected source version changed. Review it before converting.')
             saved_draft_scope(c, pid, body.source_hash)
+            development_options = {}
+            if policy['processing_mode'] == 'development':
+                from .development_processing import describe_development_processing, prepare_development_processing
+                if body.delivery_mode != 'apexlang_package':
+                    raise HTTPException(409, 'Preserved development source requires APEX package delivery.')
+                context = describe_development_processing(source_documents(sources), project_id=pid,
+                    selected_source_set_id=body.expected_current_source_set_id, source_hash=body.source_hash,
+                    source_provenance=source_history.source_provenance(c, pid, sources),
+                    target_profile_sha256=digest, delivery_mode=body.delivery_mode)
+                if (body.processing_mode != 'development'
+                        or body.development_processing_context_sha256 != canonical_hash(context)
+                        or body.approved_unredacted_development_source is not True
+                        or body.approved_redacted_source is not False):
+                    raise HTTPException(409, 'Review and approve this exact development source without redaction for the configured processing route.')
+                try:
+                    development_options = dict(processing_mode='development',
+                        approved_unredacted_development_source=True,
+                        development_processing=prepare_development_processing(source_documents(sources),
+                            context=context, approved_chunk_hashes=body.approved_chunk_hashes))
+                except (ValueError, TypeError, KeyError):
+                    raise HTTPException(409, 'The selected development code changed. Review its exact source and processing permissions.') from None
+            elif any(value is not None for value in (body.processing_mode,
+                    body.development_processing_context_sha256, body.approved_unredacted_development_source)):
+                raise HTTPException(409, 'The selected source mode changed. Review its processing permissions again.')
             try:
                 admission = prepare_prototype_admission(source_documents(sources),
                     expected_source_binding=body.source_binding,
@@ -1580,7 +1654,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                     native_input_policy=body.native_input_policy,
                     count_guard_policy=body.count_guard_policy,
                     count_guard_selection=(body.count_guard_selection.model_dump() if body.count_guard_selection is not None else None),
-                    approved_count_guard_partial_scope=body.approved_count_guard_partial_scope)
+                    approved_count_guard_partial_scope=body.approved_count_guard_partial_scope,
+                    **development_options)
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(409, 'Source approval is missing or changed. Review the exact files, code selection and processing permissions again.') from None
             old = c.execute('SELECT id,state FROM runs WHERE project=? AND source_hash=?', (pid, body.source_hash)).fetchone()
@@ -1620,6 +1695,8 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
                 'files': sources, 'prototype': admission['prototype'],
                 'approvals': {'redacted_source': True, 'external_ai': True,
                               'synthetic_prototype': True, 'owner': p['owner'], 'approved_at': now}}
+            if development_options:
+                snapshot['approvals'].update(redacted_source=False, unredacted_development_source=True)
             if 'count_guard' in admission['prototype']:
                 snapshot['approvals']['isolated_count_check'] = body.approved_count_guard_partial_scope
             raw = json.dumps(snapshot, ensure_ascii=False, allow_nan=False).encode('utf-8')
@@ -1636,7 +1713,7 @@ def attach_prototype_project_routes(app, *, root, db, project, current_sources,
             c.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?)',
                       (rid, pid, body.source_hash, 'QUEUED', 'Waiting for source-bound prototype analysis.', now, now, None))
             c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
-                      (p['owner'], 'approved_prototype_conversion', rid, now))
+                      (p['owner'], DEVELOPMENT_EVENT if development_options else 'approved_prototype_conversion', rid, now))
             if admission_recheck is not None:
                 try:
                     admission_recheck(new_run_id=rid)

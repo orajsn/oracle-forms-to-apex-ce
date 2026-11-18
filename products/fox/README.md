@@ -9,6 +9,25 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Development-source APEX generation — 17 November 2026
+
+Version 0.29.0 connects preserved development XML to **Generate APEX package**.
+Upload an FMB for Oracle extraction, add its reviewed XML to the project, review
+the prototype scope, select the code units and approve processing without
+redaction through the configured AI provider. Mapping and independent design
+review feed the native renderer and offline SQLcl validation before download.
+
+The new approval is bound to the exact source, preparation mode, selected code
+and destination. It does not relabel old masked-source approvals or restart old
+jobs. Original code and business literals remain unchanged. Existing uncertain
+provider outcomes require reconciliation, never an automatic repeat.
+
+The generated package remains a synthetic-storage development prototype. General
+PL/SQL behavior, missing APIs/libraries and unsupported features stay visible as
+remediation; AI analysis is not a claim of executable business equivalence. Source
+release and private acceptance are distinct from public deployment. Public FOX
+remains 0.27.4. See the changelog for the current verification checkpoint.
+
 ## Development-source preparation — 17 November 2026
 
 Version 0.28.0 adds an explicit **Preserve development source** preparation mode.
@@ -17,9 +36,8 @@ XML is retained, and normal business literals are preserved. Possible credential
 produce review locations and private XML downloads; correct the original source
 and upload a new request before adoption. Zero findings still requires review.
 
-Clean development XML can be added to project history for analysis. AI conversion
-for this mode is not enabled yet, and legacy redacted-source approval cannot enable
-it. Existing masked preparation and historical jobs keep their original meaning.
+Clean development XML can be added to project history for analysis. At the 0.28.0 milestone, AI conversion
+for this mode was not enabled; 0.29.0 above adds a separate explicit processing contract. Existing masked preparation and historical jobs keep their original meaning.
 See [hosted preparation](docs/server-side-fmb-preparation.md) for the modes and
 boundaries. Actual private-preview upload/extraction, XML downloads and analysis
 adoption passed on 0.28.0, retaining all 56 original non-empty code fields. No

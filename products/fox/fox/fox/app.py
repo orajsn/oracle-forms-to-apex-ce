@@ -718,8 +718,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             }
             package_configuration = package_conversion_configuration()
             p['project_capabilities']['package_delivery'] = {
-                'enabled': p['inventory']['source_processing_allowed'] and package_configuration['conversion_configured'], 'delivery_mode': 'apexlang_package',
-                'reason': p['inventory']['source_processing_reason'] if not p['inventory']['source_processing_allowed'] else None if package_configuration['conversion_configured'] else 'Configure the design provider and offline SQLcl compiler for package delivery.'}
+                'enabled': package_configuration['conversion_configured'], 'delivery_mode': 'apexlang_package',
+                'reason': None if package_configuration['conversion_configured'] else 'Configure the design provider and offline SQLcl compiler for package delivery.'}
             p['processing_notice'] = (('Conversion uses direct OCI Generative AI for design and independent review. ' if os.getenv('FOX_RUN_ADAPTER') == 'oci-genai' else 'Conversion uses embedded OPAF and the configured AI provider. ') +
                 'Only source approved for that processing route may be submitted. '
                 'Do not upload credentials or production records; generated test data is synthetic.')
@@ -749,6 +749,12 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
                 else:
                     run.update(native_progress(root, run))
                     run['downloadable'] = bool(run['artifact'] and run['state'] == 'ACCEPTED')
+                from .source_processing_policy import DEVELOPMENT_EVENT
+                if c.execute('SELECT 1 FROM events WHERE action=? AND object_id=? AND owner=?',
+                             (DEVELOPMENT_EVENT, run['id'], p['owner'])).fetchone():
+                    # Advisory display only; execution/download revalidate the
+                    # exact snapshot, source provenance and consent independently.
+                    run['processing_mode'] = 'development'
                 run['project_id'] = pid
                 run['draft_downloadable'] = bool(presentation and presentation.get('technical_verified')
                     and is_project_run(root, run) and run['state'] in {'VERIFIED','ACCEPTED'})

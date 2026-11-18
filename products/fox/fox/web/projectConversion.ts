@@ -189,7 +189,7 @@ export type RunStep={id:string;label:string;state:'pending'|'running'|'complete'
 export type FormRunStatus={module_id:string;state:'queued'|'running'|'generated'|'blocked'|'failed';message?:string;form_name?:string;source_name?:string};
 export type RecoveryAction={kind:'check_status'|'retry_step'|'resume';enabled:boolean;reason?:string;safety:'read_only'|'server_confirmed_safe';label?:string};
 export type ProjectRun={id:string;project_id:string;source_hash:string;state:string;message:string;stage_message?:string;
- draft_scope?:unknown;draft_downloadable?:boolean;
+ processing_mode?:'development';draft_scope?:unknown;draft_downloadable?:boolean;
  artifact_generated?:boolean;technical_verified?:boolean;human_accepted?:boolean;downloadable?:boolean;preview_available?:boolean;review_available?:boolean;
  steps?:RunStep[];forms?:FormRunStatus[];recovery?:RecoveryAction;verification_status?:unknown;error?:{message:string;action:string;owner:FindingOwner}};
 export type RunPresentation={label:string;tone:'neutral'|'active'|'attention'|'success';earlierSource:boolean;generated:boolean;technicalVerified:boolean;humanAccepted:boolean;canPreview:boolean;canReview:boolean;canDownload:boolean;downloadReason:string;message:string;stageMessage:string|null;error:{message:string;action:string;owner:FindingOwner}|null;steps:RunStep[];forms:FormRunStatus[];detailsIncomplete:boolean};

@@ -62,6 +62,32 @@ class NativeBlueprintRenderer:
         return profile.deterministic_prototype_zip(spec), profile.prototype_trace(spec)
 
 
+def _saved_development_processing(job, *, requested=None, binding=None, documents=None):
+    """Bind new-mode retained proofs to the original immutable owner consent."""
+    from .prototype_job import read_prototype_snapshot, validate_prototype_snapshot
+    path = Path(job) / 'source-snapshot.json'
+    expected = None
+    if path.exists() or path.is_symlink():
+        snapshot, _ = read_prototype_snapshot(job)
+        selected, approvals = snapshot.get('prototype', {}), snapshot.get('approvals', {})
+        markers = (any(key in selected for key in ('processing_mode', 'development_processing', 'development_processing_sha256'))
+                   or 'unredacted_development_source' in approvals)
+        if markers:
+            retained_documents = validate_prototype_snapshot(snapshot)
+            if selected.get('processing_mode') != 'development':
+                raise OpafError('Retained development processing mode is invalid.')
+            expected = selected['development_processing_sha256']
+            if documents is not None and retained_documents != documents:
+                raise OpafError('Retained source differs from its development processing consent.')
+    if binding is not None:
+        if ((expected is None and 'development_processing_sha256' in binding)
+                or binding.get('development_processing_sha256') != expected):
+            raise OpafError('Retained pipeline differs from its development processing consent.')
+    elif requested != expected:
+        raise OpafError('Pipeline development processing consent differs from the admitted snapshot.')
+    return expected
+
+
 def _saved_native_input_policy(job, *, binding=None, requested=None, documents=None,
                                project_id=None, project_name=None, source_binding=None,
                                staged_projection=False):
@@ -230,7 +256,12 @@ def _role(directory, name, client, role, request, identity, target_profile_loade
         raise OpafError('Prototype role differs from its approved target profile.')
     _save_once(directory / (name + '-target.json'), target)
     def before_invoke(environment):
-        # Prepared providers validate/observe once, then persist intent BEFORE POST.
+        # Recheck after provider preparation, immediately before intent and POST.
+        if processing_approval_check({**approval_context, 'role': name,
+                                      'request_sha256': binding['request_sha256']}) is not True:
+            raise OpafError('Source processing permission changed before provider submission.')
+        if canonical_hash(target_profile_loader()) != canonical_hash(target):
+            raise OpafError('Processing destination changed before provider submission.')
         _save_once(pending, binding)
     timing = None
     try:
@@ -425,6 +456,7 @@ def _authorize_prototype_request(job: Path, request: dict, *, staged_projection=
     _saved_count_guard(job, binding=binding, documents=documents,
         project_id=binding.get('project_id'), project_name=binding.get('project_name'),
         source_binding=binding.get('source_binding'), staged_projection=staged_projection)
+    _saved_development_processing(job, binding=binding, documents=documents)
     if packet != _artifact_json(checkpoints / 'packet.json'):
         raise OpafError('Prototype facts do not match fresh retained source bytes.')
     plan = build_focus_plan(documents, expected_source_binding=binding['source_binding'],
@@ -554,7 +586,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                            profile, target_profile_loader, processing_approval_check,
                            converter_adapter=None, renderer=None, focus_schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
                            native_input_policy=None, count_guard=None, delivery_mode=None,
-                           offline_validator=None):
+                           offline_validator=None, development_processing_sha256=None):
     """Return safe stage facts and evidence paths; never a business acceptance.
 
     Run behind the project's single-worker/ownership guard. The route owns
@@ -578,6 +610,7 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
         source_binding=expected_source_binding)
     count_guard = _saved_count_guard(job, requested=count_guard, documents=documents,
         project_id=project_id, project_name=project_name, source_binding=expected_source_binding)
+    development_processing_sha256 = _saved_development_processing(job, requested=development_processing_sha256, documents=documents)
     validate_roles(profile)
     packet = local_packet(documents)
     if (job/'source-snapshot.json').is_file():
@@ -617,6 +650,8 @@ def run_prototype_pipeline(job: Path, documents: list[tuple[str, bytes]], *,
                'focus_plan_sha256': canonical_hash(plan),
                'profile_sha256': canonical_hash({name: profile[name] for name in ('mapper', 'reviewer')}),
                'approved_policy_id': approved_policy_id}
+    if development_processing_sha256 is not None:
+        binding['development_processing_sha256'] = development_processing_sha256
     if delivery_mode is not None:
         binding['delivery_mode'] = delivery_mode
     if native_input_policy is not None:

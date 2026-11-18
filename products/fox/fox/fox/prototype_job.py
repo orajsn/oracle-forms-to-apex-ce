@@ -58,12 +58,18 @@ def validate_prototype_snapshot(snapshot):
                 or not re.fullmatch(r'ss-[a-f0-9]{32}', snapshot['selected_source_set_id'])):
             raise ValueError()
         approvals, selected = snapshot['approvals'], snapshot['prototype']
+        if not isinstance(approvals, dict) or not isinstance(selected, dict):
+            raise ValueError()
+        from .development_processing import bound_development_processing, validate_development_processing
+        development = bound_development_processing(selected, approvals)
         bound_focus_limit(selected)
         native_input_policy = bound_native_input_policy(selected)
         from .forms_count_guard_selection import bound_count_guard
         count_guard = bound_count_guard(selected)
         selected_keys = {'schema_version', 'source_binding', 'focus_plan_sha256',
                          'approved_chunk_hashes', 'approved_policy_id', 'target_profile_sha256'}
+        if development is not None:
+            selected_keys.update(('processing_mode', 'development_processing', 'development_processing_sha256'))
         if 'delivery_mode' in selected:
             from .prototype_export_only import delivery_mode
             delivery_mode(selected)
@@ -87,7 +93,7 @@ def validate_prototype_snapshot(snapshot):
             if selected['candidate_format_policy'] != POLICY: raise ValueError()
             selected_keys.add('candidate_format_policy')
         if (not isinstance(approvals, dict) or any(approvals.get(key) is not True for key in
-                ('redacted_source', 'external_ai', 'synthetic_prototype'))
+                ('external_ai', 'synthetic_prototype'))
                 or not isinstance(approvals.get('owner'), str) or not 1 <= len(approvals['owner']) <= 180
                 or type(approvals.get('approved_at')) not in (int, float)
                 or not math.isfinite(approvals['approved_at']) or approvals['approved_at'] <= 0
@@ -100,6 +106,12 @@ def validate_prototype_snapshot(snapshot):
         manifest = '\n'.join(row['name'] + ':' + row['sha256'] for row, _ in pairs)
         if hashlib.sha256(manifest.encode()).hexdigest() != snapshot.get('source_hash'):
             raise ValueError()
+        if development is not None:
+            validate_development_processing(development, documents=documents,
+                approved_chunk_hashes=selected['approved_chunk_hashes'],
+                target_profile_sha256=selected['target_profile_sha256'], delivery_mode=selected.get('delivery_mode'),
+                project_id=snapshot['project_id'], selected_source_set_id=snapshot['selected_source_set_id'],
+                source_hash=snapshot['source_hash'])
         rebuilt = prepare_prototype_admission(documents,
             expected_source_binding=selected['source_binding'],
             approved_chunk_hashes=selected['approved_chunk_hashes'],
@@ -110,6 +122,9 @@ def validate_prototype_snapshot(snapshot):
             schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
             candidate_format_policy=selected.get('candidate_format_policy'), native_input_policy=native_input_policy,
             delivery_mode=selected.get('delivery_mode'),
+            **({'processing_mode': selected['processing_mode'], 'development_processing': development,
+                'approved_unredacted_development_source': approvals['unredacted_development_source']}
+               if development is not None else {}),
             **({'count_guard_policy': count_guard['policy_id'], 'count_guard_selection': count_guard['selection'],
                 'approved_count_guard_partial_scope': approvals['isolated_count_check']}
                if count_guard is not None else {}))
@@ -306,7 +321,9 @@ def run_prototype_job(job: Path, *, approval_check, installation_projection=None
         delivery_mode=selected.get('delivery_mode'), offline_validator=runtime.get('offline_validator'),
         focus_schema_version=selected['schema_version'], metadata_task_policy=selected.get('metadata_task_policy'),
         candidate_format_policy=selected.get('candidate_format_policy'),
-        native_input_policy=selected.get('native_input_policy'), count_guard=selected.get('count_guard'))
+        native_input_policy=selected.get('native_input_policy'), count_guard=selected.get('count_guard'),
+        **({'development_processing_sha256': selected['development_processing_sha256']}
+           if selected.get('processing_mode') == 'development' else {}))
     still_approved()
     from . import prototype_container_epoch as container
     from .prototype_mapping_epochs import technical_record

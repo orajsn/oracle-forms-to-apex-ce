@@ -16,9 +16,11 @@ to an external model.
    credentials show numeric XML/field locations and block adoption. Correct the
    original development source and upload a new request; there is no override.
 5. When clean and reviewed, select **Add prepared form to project** for analysis.
-   AI conversion for preserved development source is not enabled. The old redacted-
-   source approval cannot enable it. Legacy masked sources retain their separate
-   source-specific AI-processing approval workflow.
+6. Open **Convert**, review the prototype scope and select the code to process.
+   Approve processing the development source without redaction through the configured
+   AI provider, then select **Generate APEX package**. Mapping/review, deterministic
+   rendering and offline format validation precede download. Legacy masked sources
+   retain their separate source-specific processing approval workflow.
 
 A lost response keeps its request reference. Check that request rather than
 submitting another copy. A blocked or interrupted native job is retained for
@@ -97,8 +99,9 @@ certificate or a guarantee that secrets/personal data are absent.
 
 Legacy mode still adopts only the strictly validated redacted document. Requests
 that omit a mode keep that behavior. Existing receipts, source history and unknown
-jobs are never upgraded or replayed. Both modes require human source review; only
-the separately supported legacy processing contract currently permits conversion.
+jobs are never upgraded or replayed. Both modes require human source review. Development generation uses a new
+exact-source/mode/provenance/code-selection/destination contract; it never inherits
+legacy redaction approval. Existing jobs and unknown outcomes are not restarted.
 
 ## Guarded upgrade activation
 

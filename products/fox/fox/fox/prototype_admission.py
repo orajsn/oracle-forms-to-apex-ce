@@ -63,20 +63,37 @@ def prepare_prototype_admission(documents, *, expected_source_binding,
                                 approved_prototype_scope, schema_version=1, metadata_task_policy=None, candidate_format_policy=None,
                                 native_input_policy=None, count_guard_policy=None,
                                 count_guard_selection=None, approved_count_guard_partial_scope=None,
-                                delivery_mode=None):
+                                delivery_mode=None, processing_mode=None,
+                                development_processing=None,
+                                approved_unredacted_development_source=None):
     """Recheck exact source, selected whole units and destination before queueing.
 
     A hash is a binding, not authorization. These booleans must come from the
     authenticated owner's explicit submission, not defaults or model output.
     Empty selection is permitted only as a clearly labelled metadata-only run.
     """
-    if not all(value is True for value in (
+    development = None
+    if processing_mode is not None:
+        from .development_processing import PROCESSING_MODE, validate_development_processing
+        if (processing_mode != PROCESSING_MODE or approved_redacted_source is not False
+                or approved_unredacted_development_source is not True
+                or approved_external_ai is not True or approved_prototype_scope is not True):
+            raise ValueError('Confirm unredacted development source, external AI processing and synthetic prototype scope.')
+        development = validate_development_processing(development_processing, documents=documents,
+            approved_chunk_hashes=approved_chunk_hashes, target_profile_sha256=target_profile_sha256,
+            delivery_mode=delivery_mode)
+    elif development_processing is not None or approved_unredacted_development_source is not None:
+        raise ValueError('Development processing consent requires its explicit processing mode.')
+    elif not all(value is True for value in (
             approved_redacted_source, approved_external_ai, approved_prototype_scope)):
         raise ValueError('Confirm redacted source, external AI processing and synthetic prototype scope.')
     if not isinstance(target_profile_sha256, str) or not re.fullmatch(r'[0-9a-f]{64}', target_profile_sha256):
         raise ValueError('The configured prototype destination must be checked before conversion.')
     description = describe_prototype_sources(documents)
     strategy = {'schema_version': schema_version}
+    if development is not None:
+        strategy.update(processing_mode=processing_mode, development_processing=development,
+                        development_processing_sha256=canonical_hash(development))
     if delivery_mode is not None:
         from .prototype_export_only import DELIVERY_MODE
         if delivery_mode != DELIVERY_MODE:

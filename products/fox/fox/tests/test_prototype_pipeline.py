@@ -146,7 +146,9 @@ def test_connected_two_form_design_and_real_renderer_candidate_without_fake_expo
     assert docs == originals
     assert result['status'] == 'BLOCKED_ADAPTER' and result['stage'] == 'validate'
     assert result['assessment']['source_count'] == 2
-    assert len(client.calls) == len(approvals) == result['assessment']['focus_count'] * 2
+    assert len(client.calls) == result['assessment']['focus_count'] * 2
+    assert len(approvals) == len(client.calls) * 2
+    assert approvals[::2] == approvals[1::2]
     assert all(set(identity) == {'job_id', 'source_hash'} for _, identity in client.observations)
     assert all(context['source_binding'] == kwargs['expected_source_binding'] for context in approvals)
     assert result['facts']['native_source_rendered'] is True
@@ -193,7 +195,7 @@ def test_fresh_processing_approval_is_checked_before_each_new_role(setup):
     with pytest.raises(OpafError, match='approval'):
         run_prototype_pipeline(job, docs, **kwargs)
     assert [role for role, _ in client.calls] == ['mapper']
-    assert [context['role'] for context in checks] == ['mapper', 'reviewer']
+    assert [context['role'] for context in checks] == ['mapper', 'mapper', 'reviewer']
     assert not list(job.rglob('reviewer-intent.json'))
 
 

@@ -148,17 +148,23 @@ def _checked(entry: dict, connection=None, project_id=None) -> dict:
     return verified
 
 
-def development_source_present(c: sqlite3.Connection, pid: str, files: list[dict]) -> bool:
-    """Pure fail-closed query: old redaction approvals cannot cover this mode."""
-    from .development_source import POLICY_ID
-    present = False
+def source_provenance(c: sqlite3.Connection, pid: str, files: list[dict]) -> list[dict]:
+    """Return exact policy/receipt identities only after checking retained bytes."""
+    result = []
     for entry in files:
         _checked(entry, c, pid)
-        receipt = _one(c, 'SELECT receipt_json FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
+        receipt = _one(c, 'SELECT receipt_json,receipt_sha256 FROM source_redaction_receipts WHERE project=? AND name=? AND sha256=?',
                        (pid, entry['name'], entry['sha256']))
-        if receipt is not None and json.loads(receipt['receipt_json'])['policy_id'] == POLICY_ID:
-            present = True
-    return present
+        result.append({'name': entry['name'], 'sha256': entry['sha256'],
+                       'policy_id': json.loads(receipt['receipt_json'])['policy_id'] if receipt else 'ordinary-intake',
+                       'receipt_sha256': receipt['receipt_sha256'] if receipt else None})
+    return sorted(result, key=lambda row: row['name'])
+
+
+def development_source_present(c: sqlite3.Connection, pid: str, files: list[dict]) -> bool:
+    """A new development mode cannot inherit historical redaction permission."""
+    from .development_source import POLICY_ID
+    return any(row['policy_id'] == POLICY_ID for row in source_provenance(c, pid, files))
 
 
 def _selection(c: sqlite3.Connection, pid: str) -> dict:
