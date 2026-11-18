@@ -26,7 +26,8 @@ The generated package remains a synthetic-storage development prototype. General
 PL/SQL behavior, missing APIs/libraries and unsupported features stay visible as
 remediation; AI analysis is not a claim of executable business equivalence. Source
 release and private acceptance are distinct from public deployment. Public FOX
-remains 0.27.4. See the changelog for the current verification checkpoint.
+remains 0.27.4. The private preview serves 0.29.0; fresh real-input provider
+acceptance for this mode is still pending. See the changelog for verified checks.
 
 ## Development-source preparation — 17 November 2026
 

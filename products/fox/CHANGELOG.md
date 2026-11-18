@@ -10,6 +10,21 @@ application version or relabel existing images.
 
 ## [0.29.0] - 2026-11-17
 
+### [docs] Record private installation and synthetic checks — 2026-11-18
+Impact: The existing private preview now serves 0.29.0 with the development-source
+processing contract. Public remains 0.27.4.
+Verification: 175 local API/worker/package regression tests, 91 Linux synthetic
+checks and two browser fixtures passed; production build and independent review
+passed. Exact selected source text reached authored mapper and reviewer fixtures.
+Installed release files were hash-checked; all 272 pre-existing private files and
+original database rows remained unchanged. Test totals overlap across platforms.
+Delivery: Source/tag and this changelog are published; private installation is
+active. No public promotion, new infrastructure or shared-dependency changes.
+Remaining: A fresh real-input provider run has not started pending exact source
+and destination approval. Actual live mapping, whole-package SQLcl validation and
+installed download acceptance for this new mode are not yet claimed.
+
+
 ### [feature] Generate APEX packages from preserved development source
 Impact: Prepared development XML can proceed through selected-code AI mapping,
 independent design review, native APEX package generation and offline format
@@ -21,8 +36,8 @@ provider operation and immediately before submission. Package proof retains the
 consent binding. Existing redacted approvals, jobs and package hashes keep their
 original meaning. Unsupported legacy recovery routes cannot reinterpret new-mode
 consent; completed and uncertain operations are never automatically replayed.
-Delivery: Reviewed source release preparation; private genuine-input acceptance
-will be recorded separately. No public promotion is included.
+Delivery: Source/tag published and private installation active; genuine-input
+provider acceptance remains separate. No public promotion is included.
 Verification: Synthetic exact-byte consent and legacy compatibility tests, actual
 local API/worker execution with authored provider/validator fixtures, browser
 fixtures, production build and independent review. These are not live AI evidence.
