@@ -1,5 +1,7 @@
 # Reusable XML-to-APEXlang mapping engine
 
+FOX 0.32.0 adds a project website route alongside the operator CLI below.
+
 FOX's XML-first engine turns supported Forms source patterns into native APEXlang
 using versioned, deterministic mapping code. Codex is used during engineering to
 understand patterns, implement mappings and verify them. A customer conversion
@@ -87,9 +89,9 @@ SQLcl /nolog](https://docs.oracle.com/en/database/oracle/apex/26.1/apxdc/using-s
 
 Generated, format validated, imported, runtime verified and business accepted
 remain separate facts. SQLcl format success does not execute supporting SQL,
-resolve external objects or verify Forms lifecycle equivalence. This increment
-provides a library/operator entry point; integration into the normal hosted FOX
-web generation action and deployment are separate work.
+resolve external objects or verify Forms lifecycle equivalence. The library/operator entry point remains available. Version 0.32.0 also connects
+this route to the project website; actual hosted deployment and acceptance must
+be checked against that release record.
 
 ## Extend knowledge into a reusable rule
 
@@ -146,3 +148,28 @@ The sample stock trigger deliberately calls an unavailable external routine. It
 must remain in the unresolved behavior ledger even though its block and formulas
 can be generated. Pack-size division retains source behavior, including a possible
 zero-denominator error; no implicit business policy is added.
+
+## Project website workflow (0.32.0)
+
+1. Open the project and select the intended source version. Existing FMB
+   preparation can supply XML; the mapping route requires the complete selected
+   source set to consist of supported XML files. It never silently drops other files.
+2. Under Convert, review Reusable XML mapping and confirm the partial synthetic
+   scope and processing on the FOX server. No source is sent to AI by this route.
+3. Start the mapping run. The queue retains source/version/catalog/owner consent
+   and the request identity. Closing or refreshing the browser does not start a
+   second job. If the response is uncertain, check saved status before any retry.
+4. Use Convert or APEX output to inspect saved runs and exact reported code counts.
+   A generated package has passed fresh SQLcl format validation, not runtime or
+   business acceptance. Download is bound to retained original source and evidence.
+
+Active or uncertain mapping requests fence other project mutations in the browser;
+read-only status remains available. Source or catalog changes before compilation
+stop the job. Interrupted processing becomes attention on restart and requires
+reconciliation; it is not replayed automatically. Historical AI runs and their
+approvals remain unchanged. This route has no model calls or database imports.
+
+The initial hosted route is disabled for the separately fenced fresh-installation
+mode until its dedicated admission contract is implemented. An installed SQLcl
+compiler is required; a configured AI provider or target database is not required
+for reusable-mapping generation itself.

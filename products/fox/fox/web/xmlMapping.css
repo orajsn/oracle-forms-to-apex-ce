@@ -1,0 +1,5 @@
+.xml-mapping { margin-bottom: 1rem; }
+.xml-mapping-run { border-top: 1px solid #d7dde3; padding: 1rem 0; overflow-wrap: anywhere; }
+.xml-mapping-download { display: inline-block; text-decoration: none; }
+.xml-mapping fieldset { min-width: 0; }
+@media (max-width: 600px) { .xml-mapping .fw-detail-heading { display: block; } .xml-mapping .fw-detail-heading button { margin-top: .5rem; } }

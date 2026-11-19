@@ -9,6 +9,17 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Reusable mappings in the project website - 19 November 2026
+
+Version 0.32.0 connects the [XML mapping engine](docs/xml-mapping-engine.md) to
+Convert and APEX output in the project website. Review the complete selected XML
+source set and explicit partial/synthetic scope, confirm local processing, then
+start a durable run. FOX reports generated and unsupported code-unit counts and
+enables the source-bound package download after fresh SQLcl format validation.
+This route makes no AI request and imports no database application. Existing
+AI-assisted conversion remains separate. See the changelog for actual delivery
+and acceptance status; source publication alone does not establish deployment.
+
 ## Reusable XML mapping engine - 19 November 2026
 
 Version 0.31.0 adds a [direct XML-to-APEXlang engine](docs/xml-mapping-engine.md).

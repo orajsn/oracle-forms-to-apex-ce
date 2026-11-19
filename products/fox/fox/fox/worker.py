@@ -44,6 +44,15 @@ def process_one(db,root:Path,*,installation_projection=_NO_INSTALLATION_PROJECTI
         snapshot = json.loads(snapshot_raw)
         if not isinstance(snapshot, dict):
             raise RuntimeError('The immutable source snapshot is invalid. The job is retained for review.')
+        from . import xml_mapping_job
+        with db() as current:
+            mapping_row = current.execute('SELECT * FROM runs WHERE id=?', (rid,)).fetchone()
+            mapping_profile = xml_mapping_job.is_mapping_run(current, mapping_row)
+        if mapping_profile or snapshot.get('conversion_profile') == xml_mapping_job.PROFILE:
+            if projection is not _NO_INSTALLATION_PROJECTION:
+                raise RuntimeError('Local XML mapping requires dedicated fresh-installation binding.')
+            xml_mapping_job.run_job(db, root, dict(mapping_row))
+            return
         prototype = snapshot.get('conversion_profile') == 'native-blueprint-prototype-v1'
         if prototype:
             # A separate explicit profile, not permission to widen historical

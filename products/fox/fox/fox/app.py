@@ -727,6 +727,11 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             p['runs'] = []
             for row in c.execute('SELECT * FROM runs WHERE project=? ORDER BY created DESC', (pid,)).fetchall():
                 run = dict(row)
+                from .xml_mapping_job import is_mapping_run, public_run as public_mapping_run
+                if is_mapping_run(c, run):
+                    p['runs'].append(public_mapping_run(c, root, run, p['inventory']['source_hash'],
+                        source_history.selected_source_set_id(c, pid)))
+                    continue
                 # Public flags are a display projection, never authorization.
                 # Mutations/download re-read the retained proof independently.
                 if is_project_run(root, run):
@@ -1151,6 +1156,8 @@ def create_app(data_dir: Path | None = None, enable_worker: bool = True, *,
             raise HTTPException(409,'Package changed after acceptance. Download is blocked.')
         return Response(raw,media_type='application/zip',
                         headers={'Content-Disposition':'attachment; filename="'+rid+'-apex.zip"'})
+    from .xml_mapping_routes import attach_xml_mapping_routes
+    attach_xml_mapping_routes(app, root=root, db=db, project=project, fresh=fresh is not None)
     from .prototype_project_routes import attach_prototype_project_routes
     def prototype_admission_allowed(connection, *, excluded_stopped_job_id=None):
         from .verification_recovery import VerificationRecovery

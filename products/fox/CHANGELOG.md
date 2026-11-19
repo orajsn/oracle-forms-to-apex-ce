@@ -8,6 +8,33 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.32.0] - 2026-11-19
+
+### [feature] Run reusable XML mappings through the FOX project website
+Impact: Users can start a reusable-mapping conversion and download its validated
+APEXlang package from the existing project, without a command line or AI request.
+Change: Authenticated project routes bind local-processing consent to original
+sources, selected version, installed catalog and an idempotent request UUID. The
+existing worker saves an immutable source snapshot and fresh SQLcl package proof.
+Run history shows exact generated/unsupported counts and source-version identity;
+download rechecks source, compiler and package evidence without execution.
+Interrupted/unknown operations remain retained and are never automatically retried.
+The browser preserves uncertain request identity, rejects stale responses and
+keeps unrelated mutations fenced while the outcome needs reconciliation.
+Delivery: Source release; hosted activation and actual browser acceptance are
+recorded separately in dated checkpoints.
+Verification: Thirty focused API checks and two additional rejection cases passed;
+154 overlapping worker/fresh-install regressions passed. The synthetic browser
+fixture covered deadlines, lost replies, rejection/uncertainty, reload locks and
+response ordering. TypeScript and production build passed. An actual local API
+run used SQLcl 26.1.2 /nolog, generated four sample behaviors with one explicit
+gap, and returned the exact retained ZIP. Read-only status/download did not rerun
+the compiler or change stored rows/files. Independent code review cleared.
+Remaining: Explicit partial synthetic mapping scope, no customer-schema or full
+business equivalence. Format validation does not establish import/runtime or human
+acceptance. Existing AI routes remain separate. Fresh-installation admission is
+not widened; a dedicated installation binding is required for that mode.
+
 ## [0.31.0] - 2026-11-19
 
 ### [feature] Reuse installed mappings to generate APEXlang directly from XML

@@ -1,15 +1,15 @@
 {
-  "version": "0.31.0",
+  "version": "0.32.0",
   "released_on": "2026-11-19",
-  "title": "Generate APEXlang directly from Forms XML",
+  "title": "Run reusable XML mappings from the project website",
   "changes": [
-    "Generate a source-linked synthetic APEXlang prototype directly from preserved XML using installed deterministic mappings, without a prior AI job or package.",
-    "Reuse a versioned mapping catalog and retain separate source-object, business-code and dependency coverage across multiple XML modules.",
-    "Translate bounded numeric formulas with arithmetic, NULL, CEIL, FLOOR, ABS, ROUND, TRUNC and NVL through a parsed expression tree and exact target bindings."
+    "Start a source-version-bound reusable mapping run from Convert and review its saved output in the project website.",
+    "Process supported XML on the FOX server without sending it to AI, using durable worker jobs and fresh offline SQLcl validation.",
+    "Show generated and unsupported code-unit counts, preserve uncertain request identities across reloads, and verify package evidence before download."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
-    "The XML mapping engine is a library/operator CLI; normal web generation integration and hosted deployment remain separate. Database blocks are read-only synthetic reports. Unsupported relationships, transactions and external routines remain explicit.",
+    "Reusable mapping produces an explicit partial synthetic package with read-only reports and supported business rules. Unconverted relationships, transactions and external routines remain listed. Dedicated fresh-installation binding is not yet enabled for this route.",
     "The deterministic XML path makes no provider calls. Existing AI-backed source processing retains its separate source/destination approvals and does not automatically receive unresolved code.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
     "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",
