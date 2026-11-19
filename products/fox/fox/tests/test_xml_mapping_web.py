@@ -346,3 +346,25 @@ def test_retained_folder_is_uncertain_not_definite_rejection(client):
     assert not (jobs.job_path(root, rid) / 'source-snapshot.json').exists()
     with connection(root)() as db:
         assert db.execute('SELECT COUNT(*) FROM runs').fetchone()[0] == 0
+
+
+def test_observed_mapping_completion_counts_generated_without_replay(client, monkeypatch):
+    from fox.worker_observability import WorkerMonitor, observed_poll
+    c, root, pid, body, run = queue(client)
+    calls, events = [], []
+    def validator(candidate, directory):
+        calls.append(jobs.sha(candidate))
+        return fake_validator(candidate, directory)
+    monkeypatch.setattr(jobs.xml_mapping, 'validate_offline', validator)
+    monitor = WorkerMonitor(emit=events.append)
+    monitor.started()
+    observed_poll(process_one, connection(root), root, monitor)
+    status = monitor.snapshot(thread_alive=True)
+    assert status['healthy'] is True and status['jobs_completed'] == 1
+    assert status['last_outcome'] == 'GENERATED' and status['errors_observed'] == 0
+    assert events[-1]['event'] == 'job_outcome' and events[-1]['outcome'] == 'GENERATED'
+    observed_poll(process_one, connection(root), root, monitor)
+    assert len(calls) == 1 and monitor.snapshot()['jobs_completed'] == 1
+    result = c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
+    assert result['state'] == 'GENERATED' and result['format_validated'] is True
+    assert result['runtime_verified'] is False and result['business_behavior_accepted'] is False

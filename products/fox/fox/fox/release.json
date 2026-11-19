@@ -1,11 +1,11 @@
 {
-  "version": "0.32.0",
+  "version": "0.32.1",
   "released_on": "2026-11-19",
-  "title": "Run reusable XML mappings from the project website",
+  "title": "Report generated mapping jobs as completed worker outcomes",
   "changes": [
-    "Start a source-version-bound reusable mapping run from Convert and review its saved output in the project website.",
-    "Process supported XML on the FOX server without sending it to AI, using durable worker jobs and fresh offline SQLcl validation.",
-    "Show generated and unsupported code-unit counts, preserve uncertain request identities across reloads, and verify package evidence before download."
+    "Recognize GENERATED as a completed worker outcome instead of reporting a successful conversion as incomplete.",
+    "Keep generated, format-validated, technically verified and business-accepted states distinct.",
+    "Preserve existing packages and request identities; no conversion is repeated by this reporting fix."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

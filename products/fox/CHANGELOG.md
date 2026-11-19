@@ -14,6 +14,20 @@ application version or relabel existing images.
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.32.1] - 2026-11-19
+
+### [fix] Count generated mapping jobs as completed worker outcomes
+Impact: A successful generated package no longer adds a false incomplete-outcome
+error to worker health or leaves the completion count at zero.
+Change: Add GENERATED to the worker monitor's completed-outcome vocabulary. This
+is a processing outcome, not a runtime, technical-verification or business claim.
+Delivery: Source patch; private activation and saved-output recheck are separate.
+Verification: The real private 0.32.0 round exposed this reporting mismatch after
+successful SQLcl validation/download. Focused monitor and real worker-path
+regressions cover GENERATED without compiler replay. Prior artifact stays intact.
+Remaining: This corrects monitoring only; no behavior coverage or runtime proof
+is added, and the completed customer conversion is not repeated.
+
 ## [0.32.0] - 2026-11-19
 
 ### [feature] Run reusable XML mappings through the FOX project website
