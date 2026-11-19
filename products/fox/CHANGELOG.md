@@ -10,6 +10,23 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [testing] Verify private discrepancy filters and saved outputs
+Impact: Verifies the released discrepancy workflow; no additional conversion rules.
+Change: The browser regression now exercises all status filters explicitly.
+Delivery: Private preview 0.37.0 active; public deployment unchanged.
+Verification: Linux suite passed366 checks. One authenticated generation produced
+and downloaded the new package. The initial checker then used an overly exact
+label selector for the status control; a read-only follow-up verified all53 units,
+6/9/38 filters,76 reference groups/153 occurrences, desktop/mobile layout and both
+old/new downloads. It made zero additional project submissions. All419 prior files
+and original non-authentication rows were preserved; only1run+2events were added.
+Worker completed once without errors. No provider call or Oracle import. Hosted
+customer files/screenshots remain on the private host. The original checker failure
+is retained separately from the successful read-only acceptance.
+Remaining: Reference candidates and generated adaptations remain unverified in an
+installed Oracle/APEX target; full business conversion and acceptance are not implied.
+
+
 ### [docs] Close private draft-record release acceptance
 Impact: Private preview 0.36.0 generates the source-bound draft-record validation
 screen through the normal package-generation and download workflow.
