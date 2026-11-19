@@ -11,6 +11,10 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## More business mappings and specific gap explanations - 19 November 2026
 
+The private preview is verified on 0.33.0. Its new browser run reports four
+generated/adapted units and 49 explained gaps, while the previous download remains
+unchanged. Public deployment is unchanged.
+
 Version 0.33.0 adds [local comparison function/formula mapping](docs/business-comparison-mapping.md),
 including concatenation and explicit control-session inputs. Helper bodies are
 counted once only when a supported caller is generated. The package and website
@@ -23,9 +27,9 @@ units. Other business workflows remain unfinished; generated and format validate
 are still distinct from target execution and business acceptance. See the changelog
 for actual deployment and acceptance status.
 
-## Verified private web checkpoint - 19 November 2026
+## Earlier private web checkpoint: 0.32.1 - 19 November 2026
 
-The private preview is on 0.32.1. An authenticated browser started one reusable
+At the earlier 0.32.1 checkpoint, an authenticated browser started one reusable
 mapping run from retained original XML, restored it after reload and downloaded
 the exact SQLcl-format-validated package. Desktop/mobile output checks passed.
 The reporting patch preserved that same package and did not rerun conversion.

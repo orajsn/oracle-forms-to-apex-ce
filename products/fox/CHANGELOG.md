@@ -10,6 +10,22 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [docs] Record private comparison mapping and gap-details acceptance
+Impact: The private website now exposes the additional comparison mappings and
+source-specific explanations for remaining units.
+Delivery: Private preview 0.33.0 active; public deployment unchanged. One new
+browser submission generated the retained-source package with four generated or
+adapted units and 49 remaining (33 engine mappings, 16 context mappings).
+Verification: Isolated Linux suite passed 299 checks. Actual SQLcl 26.1.2 /nolog,
+new package download, 49 rendered explanation rows and desktop/mobile no-overflow
+checks passed. The previous package downloaded byte-identically across the catalog
+upgrade. All 399 prior files and original non-authentication rows were preserved;
+only the new run and its two mapping events were added. Worker reported one
+GENERATED completion with zero errors. No new AI call or database import.
+Remaining: Host-side browser evidence and the new package remain private. Target
+collation/session/runtime equivalence and business acceptance are not established.
+
+
 ### [docs] Record private web conversion and saved-package acceptance
 Impact: The reusable mapping route is verified in the private FOX website.
 Change: One authenticated browser submission used retained original XML, restored
