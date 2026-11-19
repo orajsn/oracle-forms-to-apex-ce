@@ -10,6 +10,20 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [docs] Record private record-context acceptance
+Delivery: Private preview 0.34.0 active; public deployment unchanged.
+Verification: Linux checks passed 180 cases. One authenticated browser round
+completed generation, actual SQLcl 26.1.2 /nolog validation and download on the
+private host. The UI reported two read-only relationships and two assignment
+rules encoded but not event-wired, separately from four converted/adapted code
+units and 49 remaining units. Previous download and all 404 earlier files/rows
+were preserved; only the new run and its two mapping events were added. Worker
+completed once without errors. No AI call or DB import. Hosted customer files
+and browser evidence were kept on the private host, not copied to the laptop.
+Remaining: Generated APEX navigation still needs installed-target runtime checks.
+Assignment SQL remains review-only: not Oracle-compiled, installed or event-wired.
+
+
 ### [docs] Record private comparison mapping and gap-details acceptance
 Impact: The private website now exposes the additional comparison mappings and
 source-specific explanations for remaining units.

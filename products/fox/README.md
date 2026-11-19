@@ -11,6 +11,10 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 ## Parent-child context and assignment encoding - 19 November 2026
 
+Private preview 0.34.0 is verified through a fresh browser generation/download
+round. It reports two read-only relation views and two unwired assignment rules
+without inflating converted code-unit counts. Public deployment is unchanged.
+
 Version 0.34.0 adds [source-linked record context](docs/record-context-mapping.md):
 manual filtered detail pages derived from explicit Forms relations, preserving
 existing calculations and validation links. It also emits source-bound before-
@@ -20,7 +24,7 @@ for actual deployment and acceptance status.
 
 ## More business mappings and specific gap explanations - 19 November 2026
 
-The private preview is verified on 0.33.0. Its new browser run reports four
+At the earlier 0.33.0 checkpoint, its browser run reported four
 generated/adapted units and 49 explained gaps, while the previous download remains
 unchanged. Public deployment is unchanged.
 
