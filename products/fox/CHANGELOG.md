@@ -8,6 +8,12 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## Documentation updates - 2026-11-19
+
+### [docs] Normalize mapping component source formatting
+Remove an extra trailing blank line reported by the staged whitespace check.
+No runtime behavior, generated asset or software version changes.
+
 ## [0.32.0] - 2026-11-19
 
 ### [feature] Run reusable XML mappings through the FOX project website

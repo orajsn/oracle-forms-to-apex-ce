@@ -55,4 +55,3 @@ export default function XmlMappingConversion({projectId,source,busy,outputOnly=f
   {active&&polls.current>=20&&<p className="fw-small">Automatic checks have stopped. Refresh mapping status to check the saved run.</p>}
  </section>;
 }
-
