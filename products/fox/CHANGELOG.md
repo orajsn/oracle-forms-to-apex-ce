@@ -10,6 +10,23 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [docs] Record private source-policy acceptance
+Impact: Private preview 0.35.0 now exposes native ordering and separate policy
+review counts through the normal generation and download workflow.
+Delivery: Sanitized source/tag published; private 0.35.0 active. Public unchanged.
+Verification: Linux suite passed 217 checks. One authenticated browser submission
+completed actual SQLcl /nolog validation and download, with five generated/adapted
+units, 48 unfinished, seven policy review rules and two assignment review rules.
+No browser errors. Previous package download, all 409 prior files and all original
+non-authentication rows were preserved; only one run and two events were added.
+Worker completed once with zero errors. Launcher-only failures occurred before
+any browser submission and were corrected without replaying conversion. Customer
+outputs and browser evidence remain on the private host. No AI call or DB import.
+Remaining: Nine encoded review rules still need event/context wiring. Other source
+buffer/event, SQL/transaction and external-contract gaps remain explicit. Target
+runtime, policy Oracle compilation and business acceptance are unverified.
+
+
 ### [docs] Record private record-context acceptance
 Delivery: Private preview 0.34.0 active; public deployment unchanged.
 Verification: Linux checks passed 180 cases. One authenticated browser round
