@@ -62,6 +62,30 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.35.0] - 2026-11-19
+
+### [feature] Encode finite source policies and initial report ordering
+Impact: More source logic becomes reusable engine knowledge, with policy review
+progress visible separately from executable APEX behavior.
+Change: Complete bounded IF rules preserve conditional literal assignments,
+permission resets/overrides, ordered warnings, terminal failure and supported
+same-module local calls. Typed PL/SQL review procedures retain exact source and
+context bindings. Complete direct-column ORDER BY clauses generate native saved
+report sorts, respecting explicit database column names, direction and NULL order.
+Ambiguous columns and unsupported whole bodies remain gaps. Policy review counts
+are source-bound and optional for historical artifacts; no old run is regenerated.
+Delivery: Source release prepared; private activation is a separate guarded step.
+Verification: Focused integrated suite passed 99 checks; backend policy/assignment
+and assembler suite passed 225 checks (overlapping suites, not a unique total).
+Actual local SQLcl 26.1.2 /nolog passed exact original-source and multi-module
+synthetic example packages. Frontend type/build and browser fixture passed.
+Independent source/artifact review is recorded with the release evidence.
+Remaining: Policy SQL is generated but not installed, Oracle-compiled or wired to
+source events. No writes/permissions are activated. Record-buffer/query/transaction
+adapters, verified external contracts and target runtime/business acceptance remain.
+See [source-policy rules](docs/source-policy-rules.md) and the synthetic
+`examples/xml-mapping/policy_rules.xml`.
+
 ## [0.34.0] - 2026-11-19
 
 ### [feature] Encode source-defined record context and parent-value assignments

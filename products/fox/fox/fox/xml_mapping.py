@@ -11,13 +11,15 @@ import hashlib
 import json
 from pathlib import Path
 
-from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments
+from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules
 from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
 from .forms_mapping_gaps import classify_gaps
 from .forms_relation_plan import build_relation_plan
 from .forms_assignment_plan import build_assignment_plan
+from .forms_policy_plan import build_policy_plan
+from .forms_order_rules import apply_order_rules
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -32,6 +34,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
 _BEHAVIOR_RULES = {
     "local_comparison_report_column": "fox.behavior.local-comparison-report-column",
     "local_comparison_function_inlined": "fox.behavior.local-comparison-function-inlined",
+    "initial_report_order": "fox.query.initial-report-order",
     "ceil_report_column": "fox.behavior.ceil-report-column",
     "numeric_expression_report_column": "fox.behavior.numeric-expression-report-column",
     "numeric_nonzero_then_focus": "fox.behavior.numeric-nonzero-then-focus",
@@ -73,19 +76,24 @@ def mapping_catalog():
          "Protected parent-row navigation and filtered read-only detail pages.", "Persisted synthetic rows and manual session selection only; no automatic query, cascading delete or write lifecycle."),
         ("fox.assignment.parent-copy-review", "Complete block-owned PRE-INSERT/PRE-UPDATE value copy under a proven direct source relation.",
          "Namespaced pure IN/OUT PL/SQL review procedures and exact source/event bindings.", "Generated but not Oracle-compiled, installed or event-wired; remains in not-yet-converted coverage."),
+        ("fox.query.initial-report-order", "Complete ORDER BY of 1..6 direct mapped database columns, direction and NULL placement.",
+         "Initial native saved-report sort, also retained by related report pages.", "Persisted synthetic rows; users may change report sorting. Equal-key order is unspecified; compatible database collation is required."),
+        ("fox.policy.finite-review", "Complete finite IF/scalar/property/warning/failure rules, with proven same-module local calls.",
+         "Typed PL/SQL review procedures and ordered effects with exact source/context bindings.", "Generated but not installed, Oracle-compiled or event-wired. No permissions or writes are activated."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 3,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 4,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
                       "forms2apex/native_relations.py": _sha(Path(native_relations.__file__).read_bytes()),
-                      "forms2apex/native_assignments.py": _sha(Path(native_assignments.__file__).read_bytes())},
+                      "forms2apex/native_assignments.py": _sha(Path(native_assignments.__file__).read_bytes()),
+                      "forms2apex/native_policy_rules.py": _sha(Path(native_policy_rules.__file__).read_bytes())},
                "rules": [{"id": key, "revision": 1, "guards": guard,
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
@@ -182,6 +190,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         files["fox-package/behavior-plan.json"] = _bytes(behavior_plan)
     # Relation and assignment knowledge is rebuilt from the same originals.
     # Read navigation and unwired review code are distinct from converted units.
+    files, order_receipt = apply_order_rules(documents, packet, chunks, trace, files)
+    files["fox-package/order-receipt.json"] = _bytes(order_receipt)
     relation_parent = _zip(files)
     relation_plan = build_relation_plan(documents, relation_parent)
     assignment_plan = build_assignment_plan(documents, relation_plan, trace)
@@ -196,7 +206,26 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files["fox-package/assignment-plan.json"] = _bytes(assignment_plan)
     files["fox-package/assignment-receipt.json"] = _bytes(assignment_receipt)
     encoded = {op["source_unit_id"]: op for op in assignment_receipt["generated_operations"]}
+    policy_plan = build_policy_plan(documents, trace)
+    policy_sql, policy_receipt = native_policy_rules.render_policy_code(policy_plan)
+    files[native_policy_rules.CODE_MEMBER] = policy_sql.encode("utf-8")
+    files["fox-package/policy-plan.json"] = _bytes(policy_plan)
+    files["fox-package/policy-receipt.json"] = _bytes(policy_receipt)
+    policy_encoded = {op["source_unit_id"]: op for op in policy_receipt["generated_operations"]}
+    if set(policy_encoded) & set(encoded):
+        raise ValueError("A source unit cannot have two review-code owners.")
+    ordered = {op["source_unit_id"]: op for op in order_receipt["generated_operations"]}
     coverage = deepcopy(coverage)
+    for row in coverage:
+        uid = row["source_unit_id"]
+        if uid in policy_encoded:
+            if row["status"] == "generated_wired_adapted":
+                raise ValueError("Policy review code cannot replace wired behavior.")
+            row.update(encoding_status="generated_unwired", reason="policy_rule_encoded_event_context_unimplemented",
+                       policy_operation_id=policy_encoded[uid]["operation_id"])
+        if uid in ordered:
+            row.update(status="generated_wired_adapted", reason="initial_report_order_generated",
+                       operation_id=ordered[uid]["operation_id"])
     for row in coverage:
         if row["source_unit_id"] in encoded:
             if row["status"] == "generated_wired_adapted":
@@ -210,6 +239,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "assignments_generated_unwired": len(encoded)}
     generated = {row["source_unit_id"]: row for row in
                  behavior_receipt["generated_operations"]} if behavior_receipt else {}
+    generated.update(ordered)
     remediation = deepcopy(native_plan["remediation"])
     for row in remediation:
         if row.get("code") == "code_unit_not_translated" and row.get("code_unit_id") in generated:
@@ -221,6 +251,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             row.update(code="assignment_generated_unwired", encoding_status="generated_unwired",
                 reason="Value-copy review code is generated; insert/update event wiring and required guards remain pending.",
                 next_action="Review assignment-review.sql and activate only after the native write lifecycle is implemented.")
+    for row in remediation:
+        if row.get("code_unit_id") in policy_encoded and row.get("code") == "code_unit_not_translated":
+            row.update(code="policy_generated_unwired", encoding_status="generated_unwired",
+                reason="Complete policy review code generated; original event and state providers remain unwired.",
+                next_action="Review policy-review.sql and its ordered effects; implement event/context adapters and server-side enforcement before activation.")
     trace_blocks = {block["source_block_id"]: block for block in trace["blocks"]}
     source_files = {obj["id"]: {key: entry["source"][key] for key in ("name", "sha256", "bytes")}
                     for entry in packet["sources"] for obj in entry["facts"]["objects"]}
@@ -256,6 +291,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     for row in ledger_units:
         if row["source_unit_id"] in encoded:
             row.update(rule_id="fox.assignment.parent-copy-review", target=deepcopy(encoded[row["source_unit_id"]]))
+        if row["source_unit_id"] in policy_encoded:
+            row.update(rule_id="fox.policy.finite-review", target=deepcopy(policy_encoded[row["source_unit_id"]]))
     gap_report = classify_gaps(packet, chunks, coverage)
     catalog = mapping_catalog()
     catalog_rules = {row["id"]: row for row in catalog["rules"]}
@@ -263,6 +300,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "source_binding": packet["source_binding"], "catalog_sha256": catalog["catalog_sha256"],
         "objects": ledger_objects, "code_units": ledger_units,
         "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
+        "policy_review": policy_receipt["generated_operations"],
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -287,12 +325,14 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "structural_coverage": deepcopy(native_plan["coverage"]),
         "behavior_coverage": {"total": len(coverage), "counts": counts},
         "context_summary": context_summary,
+        "policy_summary": {"rules_generated_unwired": len(policy_encoded)},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
         "generated_operations": list(generated.values()),
         "structural_trace_path": "fox-package/source-to-page.json",
         "current_mapping_ledger_path": "fox-package/mapping-ledger.json",
         "relation_plan_sha256": relation_plan["plan_sha256"],
         "assignment_plan_sha256": assignment_plan["plan_sha256"],
+        "policy_plan_sha256": policy_plan["plan_sha256"], "order_receipt_sha256": order_receipt["receipt_sha256"],
         "native_plan_sha256": native_plan["plan_sha256"], "behavior_plan_sha256": behavior_plan["plan_sha256"],
         "adaptations": native_plan["assumptions"] + [{"scope": "generated_behavior",
             "rule_id": _BEHAVIOR_RULES[op["kind"]], "source_unit_id": op["source_unit_id"],
@@ -327,6 +367,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Source-supported related-record links are manual, read-only adaptations; retained session selection is explicit. "
         "assignment-review.sql contains generated value-copy procedures only: not installed, Oracle-compiled or event-wired. "
         "Their original insert/update events remain unconverted; no write, cascade or validation guard is bypassed. "
+        "policy-review.sql preserves complete supported scalar, permission, warning and failure rules as ordered effects; it is not installed, Oracle-compiled or event-wired. "
+        "Initial source report ordering is generated when every sort column is directly mapped; users may change the saved-report sort. "
         "Other dependencies, relationship lifecycle, source transactions and behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
         "before a format-validated handoff. Import/schema changes require separate authorization.\n"
@@ -341,7 +383,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
         "mapping_ledger": ledger, "gap_report": gap_report, "relation_plan": relation_plan,
-        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "apex_members": metadata["apex_members"],
+        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 

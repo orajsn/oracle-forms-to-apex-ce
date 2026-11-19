@@ -71,6 +71,10 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The parent-value copy procedure is generated, but its insert/update event is not wired.'
             action = 'Wire the original write event and required validation/permission guards before activating the generated review code.'
+        elif reason == 'policy_rule_encoded_event_context_unimplemented':
+            category = 'engine_context'
+            message = 'The complete rule is encoded as review PL/SQL, but its Forms event and required state providers are not wired.'
+            action = 'Wire the original event, scalar context and ordered effects; enforce permissions on the server before activating writes.'
         elif reason in _MISSING:
             category = 'missing_source'
             message = 'The called routine definition was not found in the supplied source set.'

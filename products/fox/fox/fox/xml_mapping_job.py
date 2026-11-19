@@ -147,8 +147,33 @@ def checked_output(c, root, run):
     generated = sum(1 for row in ledger['code_units'] if row['status'] == 'generated_wired_adapted')
     details = _gap_fields(gaps, ledger, snapshot['source_binding'])
     details['context_summary'] = _context_fields(metadata, ledger)
+    details['policy_summary'] = _policy_fields(metadata, ledger)
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _policy_fields(metadata, ledger):
+    summary = metadata.get('policy_summary')
+    if summary is None:
+        return None  # Historical packages retain their original capabilities.
+    if (type(summary) is not dict or set(summary) != {'rules_generated_unwired'}
+            or type(summary['rules_generated_unwired']) is not int or summary['rules_generated_unwired'] < 0):
+        raise ValueError('Saved policy summary is invalid.')
+    rows = ledger.get('policy_review')
+    units = {r['source_unit_id']: r for r in ledger['code_units']}
+    if (type(rows) is not list or len(rows) != summary['rules_generated_unwired']
+            or len({r['source_unit_id'] for r in rows}) != len(rows)):
+        raise ValueError('Saved policy counts differ from their evidence.')
+    for row in rows:
+        unit = units.get(row['source_unit_id'])
+        if (unit is None or unit['status'] == 'generated_wired_adapted'
+                or unit.get('encoding_status') != 'generated_unwired'
+                or unit.get('rule_id') != 'fox.policy.finite-review'
+                or unit.get('target') != row
+                or row.get('generation_status') != 'generated_unwired'
+                or any(row.get(k) is not False for k in ('event_activated', 'oracle_compiled', 'runtime_verified', 'business_accepted'))):
+            raise ValueError('An unwired policy was incorrectly promoted or changed.')
+    return summary
 
 
 def _context_fields(metadata, ledger):
@@ -211,7 +236,7 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[], context_summary=None)
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

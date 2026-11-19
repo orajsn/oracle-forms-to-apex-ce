@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="REVIEW_POLICIES">
+  <Block Name="ORDERS" DatabaseBlock="true" OrderByClause="ORDER_NO DESC NULLS LAST, STATUS ASC">
+    <Item Name="ORDER_NO" ItemType="Text Item" DataType="Number" DatabaseItem="true"/>
+    <Item Name="STATUS" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="1"/>
+    <Item Name="NOTE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="80"/>
+    <Item Name="ACTION_BUTTON" ItemType="Push Button"/>
+    <Trigger Name="WHEN-VALIDATE-RECORD" TriggerText="IF :ORDERS.STATUS IS NULL THEN MESSAGE('Choose a status'); MESSAGE('Choose a status'); END IF;"/>
+    <Trigger Name="WHEN-NEW-RECORD-INSTANCE" TriggerText="REFRESH_ACCESS;"/>
+    <Trigger Name="WHEN-VALIDATE-ITEM" TriggerText="IF :ORDERS.STATUS = 'Y' THEN :ORDERS.NOTE := 'Approved'; END IF;"/>
+  </Block>
+  <ProgramUnit Name="REFRESH_ACCESS" ProgramUnitType="Procedure" ProgramUnitText="PROCEDURE REFRESH_ACCESS IS BEGIN SET_ITEM_PROPERTY('ORDERS.ACTION_BUTTON', ENABLED, PROPERTY_TRUE); SET_BLOCK_PROPERTY('ORDERS', UPDATE_ALLOWED, PROPERTY_TRUE); IF :ORDERS.STATUS = 'Y' THEN SET_ITEM_PROPERTY('ORDERS.ACTION_BUTTON', ENABLED, PROPERTY_FALSE); SET_BLOCK_PROPERTY('ORDERS', UPDATE_ALLOWED, PROPERTY_FALSE); END IF; END;"/>
+  <ProgramUnit Name="CHECK_FAILURE" ProgramUnitType="Procedure" ProgramUnitText="PROCEDURE CHECK_FAILURE IS BEGIN IF NOT FORM_SUCCESS THEN RAISE FORM_TRIGGER_FAILURE; END IF; END;"/>
+</FormModule>
