@@ -10,6 +10,24 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [docs] Close private draft-record release acceptance
+Impact: Private preview 0.36.0 generates the source-bound draft-record validation
+screen through the normal package-generation and download workflow.
+Delivery: Sanitized source/tag published; private 0.36.0 active. Public unchanged.
+Verification: Linux checks passed 287 cases. One authenticated browser submission
+completed generation, actual SQLcl /nolog validation and package download, showing
+six generated/adapted units, 47 unfinished and one connected draft check. Seven
+policy and two assignment review rules remain unwired. No browser errors; previous
+package download, all 414 prior files and original non-authentication rows were
+preserved. Only one run and two events were added. Worker completed once with zero
+errors. The retained outcomes and current healthy private worker were rechecked
+read-only after the user-requested pause; no conversion or deployment was repeated.
+Remaining: The hosted check verifies FOX generation/download, not execution of
+the generated screen inside Oracle APEX. Installed runtime, failed-submit checksum
+refresh, concurrency, character compatibility and business acceptance remain
+unverified. Customer-table saves and broader source lifecycle are separate work.
+
+
 ### [docs] Record private source-policy acceptance
 Impact: Private preview 0.35.0 now exposes native ordering and separate policy
 review counts through the normal generation and download workflow.
