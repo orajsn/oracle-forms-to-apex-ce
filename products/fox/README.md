@@ -9,6 +9,15 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Verified private web checkpoint - 19 November 2026
+
+The private preview is on 0.32.1. An authenticated browser started one reusable
+mapping run from retained original XML, restored it after reload and downloaded
+the exact SQLcl-format-validated package. Desktop/mobile output checks passed.
+The reporting patch preserved that same package and did not rerun conversion.
+Public deployment remains unchanged. This verifies the website integration;
+unsupported business behavior and target runtime testing remain separate.
+
 ## Reusable mappings in the project website - 19 November 2026
 
 Version 0.32.0 connects the [XML mapping engine](docs/xml-mapping-engine.md) to

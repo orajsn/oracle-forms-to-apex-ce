@@ -10,6 +10,24 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-19
 
+### [docs] Record private web conversion and saved-package acceptance
+Impact: The reusable mapping route is verified in the private FOX website.
+Change: One authenticated browser submission used retained original XML, restored
+its run after reload, generated a package and downloaded matching bytes. A browser
+checker subsequently used the wrong Output-tab label; read-only follow-ups completed
+the desktop/mobile checks without another conversion. The run retained two generated
+or adapted code units and 51 unsupported units, with full source/dependency ledgers.
+Delivery: Private preview 0.32.1 active; public deployment unchanged. The 0.32.0
+round exposed the worker outcome reporting issue fixed by 0.32.1. Saved output was
+rechecked on the patch and remained byte-identical; no customer run was repeated.
+Verification: Linux integration checks passed 75 cases; patch checks passed 27.
+Actual SQLcl 26.1.2 /nolog and authenticated browser/download checks passed.
+All earlier source/job files and rows were preserved; the patch retained all 399
+current files and all non-authentication rows. No new provider call or DB import.
+Remaining: Synthetic format-validated output is not full Forms behavior, APEX
+runtime verification or business acceptance. Unsupported mappings remain explicit.
+
+
 ### [docs] Normalize mapping component source formatting
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
