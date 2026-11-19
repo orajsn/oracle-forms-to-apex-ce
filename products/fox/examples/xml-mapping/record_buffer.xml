@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="SHIPMENT_DRAFT">
+  <Block Name="ORDERS" DatabaseBlock="true">
+    <Item Name="ORDER_ID" ItemType="Text Item" DatabaseItem="true" DataType="Number"/>
+    <Relation Name="ORDER_PACKS" RelationType="Join" DetailBlock="PACKS" JoinCondition="PACKS.ORDER_ID = ORDERS.ORDER_ID" AutoQuery="false" Deferred="false" DeleteRecord="Cascading" PreventMasterlessOperations="false"/>
+  </Block>
+  <Block Name="PACKS" DatabaseBlock="true">
+    <Item Name="ORDER_ID" ItemType="Text Item" DatabaseItem="true" DataType="Number"/>
+    <Item Name="PREFIX" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16"/>
+    <Item Name="CODE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16"/>
+    <Item Name="MATCHES" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Formula" Formula="KEY_MATCH(:CONTROL.KEY_VALUE, :PACKS.PREFIX || :PACKS.CODE)"/>
+    <Trigger Name="WHEN-VALIDATE-RECORD" TriggerText="BEGIN :CONTROL.KEY_VALUE := :PACKS.PREFIX || :PACKS.CODE; IF :CONTROL.MATCH_COUNT &gt; 1 THEN MESSAGE('This record already exists'); MESSAGE('This record already exists'); RAISE FORM_TRIGGER_FAILURE; END IF; END;"/>
+  </Block>
+  <Block Name="CONTROL" DatabaseBlock="false">
+    <Item Name="KEY_VALUE" ItemType="Text Item" DatabaseItem="false" DataType="Char" MaximumLength="50" DataLengthSemantics="BYTE"/>
+    <Item Name="MATCH_COUNT" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Summary" SummaryFunction="Sum" SummaryBlockName="PACKS" SummaryItemName="MATCHES"/>
+  </Block>
+  <ProgramUnit Name="KEY_MATCH" ProgramUnitType="Function" ProgramUnitText="FUNCTION KEY_MATCH(val1 VARCHAR2, val2 VARCHAR2) RETURN NUMBER IS answer NUMBER := 0; BEGIN IF val1 = val2 THEN answer := 1; END IF; RETURN(answer); END;"/>
+</FormModule>

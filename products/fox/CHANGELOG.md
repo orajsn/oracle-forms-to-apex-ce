@@ -79,6 +79,29 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.36.0] - 2026-11-19
+
+### [feature] Connect source duplicate checks to draft-record actions
+Impact: Supported complete source duplicate-validation pipelines now generate a
+native draft screen with Keep, Previous, Next and New actions, instead of leaving
+the record event disconnected from its current values and loaded related records.
+Change: Source-bound parent/session collections retain edited records and failed
+candidates. Protected request-only identity/revision checks, source size/required
+rules, edited-only casing and exact concatenation/SUM semantics precede navigation.
+Source messages remain ordered; whitespace and fetched internal casing are kept.
+A capacity overflow remains an explicit gap with no partial page or false count.
+Delivery: Source release prepared; private activation is a separate guarded step.
+Verification: Integration 86 checks, native renderer 7, source/model 62 and
+converter-only 35 passed (overlapping suites). Relevant unchanged regression295
+is retained. Actual local SQLcl26.1.2 /nolog passed exact source and multi-module
+example packages; independent review reconstructed both byte-for-byte. Frontend
+checks and the emitted input-tracking script browser check passed; the latter used
+a synthetic DOM and is not Oracle/APEX runtime evidence.
+Remaining: Session drafts do not save customer tables or implement all Forms
+lifecycle/transaction rules. Oracle/APEX runtime, failed-submit checksum refresh,
+concurrency, source-compatible charset/collation and business acceptance remain
+unverified. See [record-event adapter](docs/record-event-adapter.md).
+
 ## [0.35.0] - 2026-11-19
 
 ### [feature] Encode finite source policies and initial report ordering

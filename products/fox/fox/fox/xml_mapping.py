@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules
+from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules, native_buffer, record_buffer
 from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
@@ -20,6 +20,7 @@ from .forms_relation_plan import build_relation_plan
 from .forms_assignment_plan import build_assignment_plan
 from .forms_policy_plan import build_policy_plan
 from .forms_order_rules import apply_order_rules
+from .forms_buffer_plan import build_buffer_plan
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -32,6 +33,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "loaded_draft_duplicate_record": "fox.buffer.duplicate-record-validation",
     "local_comparison_report_column": "fox.behavior.local-comparison-report-column",
     "local_comparison_function_inlined": "fox.behavior.local-comparison-function-inlined",
     "initial_report_order": "fox.query.initial-report-order",
@@ -80,20 +82,24 @@ def mapping_catalog():
          "Initial native saved-report sort, also retained by related report pages.", "Persisted synthetic rows; users may change report sorting. Equal-key order is unspecified; compatible database collation is required."),
         ("fox.policy.finite-review", "Complete finite IF/scalar/property/warning/failure rules, with proven same-module local calls.",
          "Typed PL/SQL review procedures and ordered effects with exact source/context bindings.", "Generated but not installed, Oracle-compiled or event-wired. No permissions or writes are activated."),
+        ("fox.buffer.duplicate-record-validation", "Complete source duplicate trigger, local helper/formula and control SUM with proven parent relation and bounded direct character fields.",
+         "Native session-draft editor validates the current record against loaded same-parent drafts before keeping or moving records.", "No customer-table save. Explicit draft lifecycle, 1000-row cap, source size limits and matching binary comparison/encoding prerequisites; target runtime remains unverified."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 4,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 5,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
                       "forms2apex/native_relations.py": _sha(Path(native_relations.__file__).read_bytes()),
                       "forms2apex/native_assignments.py": _sha(Path(native_assignments.__file__).read_bytes()),
-                      "forms2apex/native_policy_rules.py": _sha(Path(native_policy_rules.__file__).read_bytes())},
+                      "forms2apex/native_policy_rules.py": _sha(Path(native_policy_rules.__file__).read_bytes()),
+                      "forms2apex/native_buffer.py": _sha(Path(native_buffer.__file__).read_bytes()),
+                      "forms2apex/record_buffer.py": _sha(Path(record_buffer.__file__).read_bytes())},
                "rules": [{"id": key, "revision": 1, "guards": guard,
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
@@ -214,10 +220,31 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     policy_encoded = {op["source_unit_id"]: op for op in policy_receipt["generated_operations"]}
     if set(policy_encoded) & set(encoded):
         raise ValueError("A source unit cannot have two review-code owners.")
+    buffer_parent = _zip(files)
+    buffer_plan = build_buffer_plan(documents, buffer_parent)
+    buffer_receipt = None
+    if buffer_plan["operations"]:
+        if buffer_plan != build_buffer_plan(documents, buffer_parent):
+            raise ValueError("Record-buffer plan differs from fresh original-source rebuilding.")
+        buffered_package, buffer_receipt = native_buffer.render_buffer_package(buffer_parent, buffer_plan)
+        files = _members(buffered_package)
+    else:
+        files["fox-package/buffer-plan.json"] = _bytes(buffer_plan)
+    buffered = {op["source_unit_id"]: op for op in buffer_receipt["generated_operations"]} if buffer_receipt else {}
+    buffer_gaps = {op["source_unit_id"]: op["reason"] for op in buffer_receipt["unrendered_operations"]} if buffer_receipt else {}
+    if set(buffered) & (set(encoded) | set(policy_encoded)):
+        raise ValueError("A record event cannot also be counted as unwired review code.")
     ordered = {op["source_unit_id"]: op for op in order_receipt["generated_operations"]}
     coverage = deepcopy(coverage)
     for row in coverage:
         uid = row["source_unit_id"]
+        if uid in buffer_gaps:
+            row.update(reason=buffer_gaps[uid])
+        if uid in buffered:
+            if row["status"] == "generated_wired_adapted":
+                raise ValueError("A buffer event cannot replace an existing operation.")
+            row.update(status="generated_wired_adapted", reason="duplicate_record_draft_event_generated",
+                       operation_id=buffered[uid]["operation_id"])
         if uid in policy_encoded:
             if row["status"] == "generated_wired_adapted":
                 raise ValueError("Policy review code cannot replace wired behavior.")
@@ -240,6 +267,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     generated = {row["source_unit_id"]: row for row in
                  behavior_receipt["generated_operations"]} if behavior_receipt else {}
     generated.update(ordered)
+    generated.update(buffered)
     remediation = deepcopy(native_plan["remediation"])
     for row in remediation:
         if row.get("code") == "code_unit_not_translated" and row.get("code_unit_id") in generated:
@@ -301,6 +329,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "objects": ledger_objects, "code_units": ledger_units,
         "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
         "policy_review": policy_receipt["generated_operations"],
+        "buffer_flows": list(buffered.values()),
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -326,13 +355,15 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "behavior_coverage": {"total": len(coverage), "counts": counts},
         "context_summary": context_summary,
         "policy_summary": {"rules_generated_unwired": len(policy_encoded)},
+        "buffer_summary": {"record_validation_flows": len(buffered)},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
         "generated_operations": list(generated.values()),
         "structural_trace_path": "fox-package/source-to-page.json",
         "current_mapping_ledger_path": "fox-package/mapping-ledger.json",
         "relation_plan_sha256": relation_plan["plan_sha256"],
         "assignment_plan_sha256": assignment_plan["plan_sha256"],
-        "policy_plan_sha256": policy_plan["plan_sha256"], "order_receipt_sha256": order_receipt["receipt_sha256"],
+        "policy_plan_sha256": policy_plan["plan_sha256"],
+        "buffer_plan_sha256": buffer_plan["plan_sha256"], "order_receipt_sha256": order_receipt["receipt_sha256"],
         "native_plan_sha256": native_plan["plan_sha256"], "behavior_plan_sha256": behavior_plan["plan_sha256"],
         "adaptations": native_plan["assumptions"] + [{"scope": "generated_behavior",
             "rule_id": _BEHAVIOR_RULES[op["kind"]], "source_unit_id": op["source_unit_id"],
@@ -361,7 +392,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Database blocks default to read-only reports; control values use APEX session state, not customer-table writes. "
         "Supported report formulas use persisted synthetic rows, not the unsaved Forms buffer. "
         "Referenced control values can be submitted explicitly; original Forms events that populate them remain separate. "
-        "Pure local comparison functions are inlined only into supported callers; duplicate-record workflows are not inferred. "
+        "Pure local comparison functions are inlined only into supported callers. Complete supported duplicate-record pipelines receive a separate session-draft adapter, described in buffer-plan.json and buffer-receipt.json. "
         "Comparison collation/session compatibility requires target verification; casts preserve VARCHAR2 nonpadding, not an unconditional environment equivalence. "
         "Any linked Continue page validates an existing synthetic row without saving it. "
         "Source-supported related-record links are manual, read-only adaptations; retained session selection is explicit. "
@@ -369,6 +400,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Their original insert/update events remain unconverted; no write, cascade or validation guard is bypassed. "
         "policy-review.sql preserves complete supported scalar, permission, warning and failure rules as ordered effects; it is not installed, Oracle-compiled or event-wired. "
         "Initial source report ordering is generated when every sort column is directly mapped; users may change the saved-report sort. "
+        "Draft edits use a source-bound parent context and current-record validation before navigation; no customer-table save, source transaction or full Forms lifecycle is implied. "
         "Other dependencies, relationship lifecycle, source transactions and behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
         "before a format-validated handoff. Import/schema changes require separate authorization.\n"
@@ -383,7 +415,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
         "mapping_ledger": ledger, "gap_report": gap_report, "relation_plan": relation_plan,
-        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "apex_members": metadata["apex_members"],
+        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "buffer_plan": buffer_plan, "buffer_receipt": buffer_receipt, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 

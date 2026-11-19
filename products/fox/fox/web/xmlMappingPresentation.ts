@@ -1,7 +1,7 @@
 import type {SourceBinding} from './projectConversion';
 export type GapCategory = 'engine_mapping'|'engine_context'|'missing_source'|'review_required';
 export type MappingGap = {source_unit_id:string;source_name:string;source_file:string;source_line:number;category:GapCategory;reason:string;message:string;next_action:string;owner:'FOX_ENGINE'|'SOURCE_OWNER'|'REVIEWER'};
-export type MappingRun = {id:string;request_id:string|null;project_id:string;source_hash:string;selected_source_set_id:string|null;state:'QUEUED'|'PROCESSING'|'GENERATED'|'ATTENTION';message:string;created:number;updated:number;format_validated:boolean;generated_units:number|null;unsupported_units:number|null;total_units:number|null;download_url:string|null;package_sha256:string|null;current_source:boolean;runtime_verified:false;business_behavior_accepted:false;conversion_profile:'xml-mapping-v1';policy_summary?:{rules_generated_unwired:number}|null;context_summary?:{relations_generated:number;relations_not_converted:number;assignments_generated_unwired:number}|null;gap_summary?:Record<GapCategory,number>|null;gaps_available?:boolean;gaps?:MappingGap[]};
+export type MappingRun = {id:string;request_id:string|null;project_id:string;source_hash:string;selected_source_set_id:string|null;state:'QUEUED'|'PROCESSING'|'GENERATED'|'ATTENTION';message:string;created:number;updated:number;format_validated:boolean;generated_units:number|null;unsupported_units:number|null;total_units:number|null;download_url:string|null;package_sha256:string|null;current_source:boolean;runtime_verified:false;business_behavior_accepted:false;conversion_profile:'xml-mapping-v1';buffer_summary?:{record_validation_flows:number}|null;policy_summary?:{rules_generated_unwired:number}|null;context_summary?:{relations_generated:number;relations_not_converted:number;assignments_generated_unwired:number}|null;gap_summary?:Record<GapCategory,number>|null;gaps_available?:boolean;gaps?:MappingGap[]};
 export type MappingOverview = {project_id:string;source_hash:string;selected_source_set_id:string|null;source_binding:string|null;catalog_sha256:string;available:boolean;reason:string|null;source_count:number|null;code_unit_count:number|null;scope_notice:string;runs:MappingRun[]};
 const record=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
 const hash=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
@@ -21,6 +21,10 @@ export function parseRun(value:unknown,source:SourceBinding,expectedId?:string,e
  if(value.policy_summary!==undefined&&value.policy_summary!==null){
   const p=value.policy_summary;
   if(value.state!=='GENERATED'||!record(p)||Object.keys(p).length!==1||!Number.isSafeInteger(p.rules_generated_unwired)||(p.rules_generated_unwired as number)<0||(p.rules_generated_unwired as number)+(record(value.context_summary)?value.context_summary.assignments_generated_unwired as number:0)>(value.unsupported_units as number))return null;
+ }
+ if(value.buffer_summary!==undefined&&value.buffer_summary!==null){
+  const b=value.buffer_summary;
+  if(value.state!=='GENERATED'||!record(b)||Object.keys(b).length!==1||!Number.isSafeInteger(b.record_validation_flows)||(b.record_validation_flows as number)<0||(b.record_validation_flows as number)>(value.generated_units as number))return null;
  }
  const fields=['gap_summary','gaps_available','gaps'];
  const present=fields.filter(k=>Object.prototype.hasOwnProperty.call(value,k)).length;

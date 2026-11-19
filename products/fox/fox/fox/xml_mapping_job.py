@@ -21,7 +21,7 @@ APPROVAL = 'xml_mapping_local_consent:'
 RESULT = 'xml_mapping_result:'
 SCOPE_NOTICE = ('Installed deterministic mappings process the complete original XML locally, including unredacted '
     'source. No AI transmission or database import. One synthetic APEX application; database blocks are '
-    'read-only reports. Unconverted code and unverified dependencies remain explicit. Format validation, runtime '
+    'read-only tables and supported session-draft screens. Unconverted code and unverified dependencies remain explicit. Format validation, runtime '
     'verification and business acceptance are separate.')
 
 
@@ -148,8 +148,32 @@ def checked_output(c, root, run):
     details = _gap_fields(gaps, ledger, snapshot['source_binding'])
     details['context_summary'] = _context_fields(metadata, ledger)
     details['policy_summary'] = _policy_fields(metadata, ledger)
+    details['buffer_summary'] = _buffer_fields(metadata, ledger)
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _buffer_fields(metadata, ledger):
+    summary = metadata.get('buffer_summary')
+    if summary is None:
+        return None
+    if (type(summary) is not dict or set(summary) != {'record_validation_flows'}
+            or type(summary['record_validation_flows']) is not int or summary['record_validation_flows'] < 0):
+        raise ValueError('Saved draft-flow summary is invalid.')
+    rows = ledger.get('buffer_flows')
+    units = {r['source_unit_id']: r for r in ledger['code_units']}
+    if (type(rows) is not list or len(rows) != summary['record_validation_flows']
+            or len({r['source_unit_id'] for r in rows}) != len(rows)):
+        raise ValueError('Saved draft counts differ from their evidence.')
+    for row in rows:
+        unit = units.get(row['source_unit_id'])
+        if (unit is None or unit['status'] != 'generated_wired_adapted'
+                or unit.get('target') != row or unit.get('rule_id') != 'fox.buffer.duplicate-record-validation'
+                or row.get('native_event_wired') is not True
+                or row.get('generation_status') != 'generated_wired_adapted'
+                or any(row.get(k) is not False for k in ('event_activated','customer_table_writes','oracle_compiled','runtime_verified','business_accepted'))):
+            raise ValueError('Saved draft event evidence is invalid.')
+    return summary
 
 
 def _policy_fields(metadata, ledger):
@@ -236,7 +260,7 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None)
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

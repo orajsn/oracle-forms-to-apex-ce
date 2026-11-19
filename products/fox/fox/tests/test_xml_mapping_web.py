@@ -418,3 +418,31 @@ def test_policy_rules_appear_in_download_and_separate_unwired_api_count(client):
     assert b'CREATE OR REPLACE PACKAGE' in files['fox-package/policy-review.sql']
     assert not any(b'FOX_POL_' in raw for name,raw in files.items() if name.endswith('.apx'))
     assert not result['runtime_verified']
+
+
+def test_connected_record_check_appears_in_native_package_and_api(client):
+    from pathlib import Path
+    c,root,pid=client
+    example=Path(__file__).resolve().parents[2]/'examples/xml-mapping/record_buffer.xml'
+    upload(c,pid,[('record_buffer.xml',example.read_bytes())])
+    scope=c.get(f'/api/projects/{pid}/xml-mapping').json()
+    body={key:scope[key] for key in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    response=c.post(f'/api/projects/{pid}/xml-mapping/runs',json=body)
+    assert response.status_code==202
+    run=response.json();assert run['buffer_summary'] is None
+    process_one(connection(root),root)
+    result=c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
+    assert result['state']=='GENERATED' and result['format_validated'] is True
+    assert (result['generated_units'],result['unsupported_units'],result['total_units'])==(3,0,3)
+    assert result['buffer_summary']=={'record_validation_flows':1}
+    assert result['policy_summary']=={'rules_generated_unwired':0}
+    package=c.get(result['download_url']);assert package.status_code==200
+    files=_members(package.content)
+    receipt=json.loads(files['fox-package/buffer-receipt.json'])
+    assert len(receipt['generated_operations'])==1
+    op=receipt['generated_operations'][0]
+    assert b'apex_collection.update_member_attribute' in files[op['page_file']]
+    assert b'Keep draft' in files[op['page_file']]
+    assert op['native_event_wired'] and not op['event_activated']
+    assert not result['runtime_verified']
