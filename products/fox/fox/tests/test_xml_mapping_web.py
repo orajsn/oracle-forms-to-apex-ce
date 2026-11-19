@@ -470,3 +470,26 @@ def test_partial_source_discrepancies_visible_after_generation(client):
     assert d['summary']['unimplemented_units']==1
     assert result['unsupported_units']==6
     assert c.get(result['download_url']).status_code==200
+
+
+def test_source_lookup_handlers_are_generated_but_original_reads_stay_disabled(client):
+    from pathlib import Path
+    c,root,pid=client
+    example=Path(__file__).resolve().parents[2]/'examples/xml-mapping/source_lookups.xml'
+    upload(c,pid,[('source_lookups.xml',example.read_bytes())])
+    scope=c.get(f'/api/projects/{pid}/xml-mapping').json()
+    body={key:scope[key] for key in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    response=c.post(f'/api/projects/{pid}/xml-mapping/runs',json=body)
+    assert response.status_code==202
+    run=response.json();assert run['lookup_summary'] is None
+    process_one(connection(root),root)
+    result=c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
+    assert result['state']=='GENERATED' and result['format_validated'] is True
+    assert (result['generated_units'],result['unsupported_units'],result['total_units'])==(3,0,3)
+    assert result['lookup_summary']=={'generated_lookup_handlers':3,'original_reads_enabled':False}
+    assert result['discrepancies']['summary']['generated_units']==3
+    package=c.get(result['download_url']);assert package.status_code==200
+    files=_members(package.content)
+    assert files['shared-components/app-items.apx'].count(b'sessionStateProtection: restricted')==3
+    assert not result['runtime_verified']

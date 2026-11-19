@@ -1,0 +1,20 @@
+<FormModule Name="SHIPMENT_LOOKUPS">
+  <Block Name="HEADER" DatabaseBlock="true">
+    <Item Name="ROUTE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="20" DataLengthSemantics="BYTE" Required="true" InsertAllowed="true" UpdateAllowed="false">
+      <Trigger Name="POST-CHANGE" TriggerText="BEGIN SELECT DEST_CODE, CITY_LABEL INTO :DESTINATION, :DEST_LABEL FROM SOURCE_ROUTES, SOURCE_CITIES WHERE ROUTE_CODE = :ROUTE AND CITY_CODE = DEST_CODE; EXCEPTION WHEN NO_DATA_FOUND THEN :DESTINATION := NULL; :DEST_LABEL := NULL; END;"/>
+    </Item>
+    <Item Name="DESTINATION" ItemType="Text Item" DataType="Char" DatabaseItem="false" MaximumLength="10"/>
+    <Item Name="DEST_LABEL" ItemType="Text Item" DataType="Char" DatabaseItem="false" MaximumLength="40"/>
+    <Item Name="THRU" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="10"/>
+    <Item Name="TO_CITY" ItemType="Text Item" DataType="Char" DatabaseItem="false" MaximumLength="40"/>
+    <Trigger Name="POST-QUERY" TriggerText="BEGIN SELECT CITY_LABEL INTO :TO_CITY FROM SOURCE_CITIES WHERE CITY_CODE = :THRU; EXCEPTION WHEN OTHERS THEN :TO_CITY := NULL; END;"/>
+  </Block>
+  <Block Name="PACKS" DatabaseBlock="true">
+    <Item Name="CODE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="20"/>
+    <Item Name="QTY" ItemType="Text Item" DataType="Number" DatabaseItem="true"/>
+    <Item Name="DESCRIPTION" ItemType="Text Item" DataType="Char" DatabaseItem="false" MaximumLength="80"/>
+    <Item Name="CITY" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="10"/>
+    <Item Name="SERVICE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="6"/>
+    <Trigger Name="POST-QUERY" TriggerText="BEGIN SELECT QTY, DESCRIPTION, CITY_CODE, SERVICE_CODE INTO :QTY, :DESCRIPTION, :CITY, :SERVICE FROM SOURCE_SHIPMENTS WHERE CODE = :CODE; EXCEPTION WHEN OTHERS THEN :QTY := NULL; :DESCRIPTION := NULL; :CITY := NULL; :SERVICE := NULL; END;"/>
+  </Block>
+</FormModule>

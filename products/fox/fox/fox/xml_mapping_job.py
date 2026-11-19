@@ -151,6 +151,7 @@ def checked_output(c, root, run):
     details['context_summary'] = _context_fields(metadata, ledger)
     details['policy_summary'] = _policy_fields(metadata, ledger)
     details['buffer_summary'] = _buffer_fields(metadata, ledger)
+    details['lookup_summary'] = _lookup_fields(metadata, ledger)
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
@@ -178,6 +179,31 @@ def _discrepancy_fields(metadata, ledger, gaps, files):
     # source/version consent, compiler proof and immutable catalog. Do not
     # reclassify an old saved report with a newer parser or mapping registry.
     return validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
+
+
+def _lookup_fields(metadata, ledger):
+    summary = metadata.get('lookup_summary')
+    if summary is None:
+        return None
+    if (type(summary) is not dict or set(summary) != {'generated_lookup_handlers','original_reads_enabled'}
+            or type(summary['generated_lookup_handlers']) is not int or summary['generated_lookup_handlers'] < 0
+            or summary['original_reads_enabled'] is not False):
+        raise ValueError('Saved lookup summary is invalid.')
+    rows = ledger.get('source_lookups')
+    units = {r['source_unit_id']: r for r in ledger['code_units']}
+    if (type(rows) is not list or len(rows) != summary['generated_lookup_handlers']
+            or len({r['source_unit_id'] for r in rows}) != len(rows)):
+        raise ValueError('Saved lookup counts differ from their evidence.')
+    for row in rows:
+        unit = units.get(row['source_unit_id'])
+        if (unit is None or unit['status'] != 'generated_wired_adapted'
+                or unit.get('target') != row or unit.get('rule_id') != 'fox.lookup.source-read-event'
+                or row.get('native_event_wired') is not True
+                or row.get('generation_status') != 'generated_wired_adapted'
+                or any(row.get(k) is not False for k in ('event_activated','original_interface_enabled',
+                    'source_query_executed','customer_table_writes','oracle_compiled','runtime_verified','business_accepted'))):
+            raise ValueError('Saved source lookup evidence is invalid.')
+    return summary
 
 
 def _buffer_fields(metadata, ledger):
@@ -287,7 +313,7 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None, discrepancies=None)
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None, lookup_summary=None, discrepancies=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

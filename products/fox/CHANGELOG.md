@@ -114,6 +114,30 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.38.0] - 2026-11-20
+
+### [feature] Generate connected source lookup event handlers
+Impact: Complete SELECT-INTO lookup triggers now generate native APEX pages and
+connected processing instead of remaining unimplemented source.
+Change: Selected-record POST-QUERY runs after initialization; POST-CHANGE is adapted
+to explicit Apply lookup processing. Whole query projections, bindings, exactly-one
+cardinality and source-specific NO_DATA_FOUND/WHEN OTHERS reset behavior are retained.
+Typed locals are block-qualified against SQL name capture. Source field edit and
+length restrictions remain enforced; occupied action slots and unsupported cased
+editing stay explicit gaps. Existing report and related-record navigation is kept.
+Original read interfaces are preserved behind restricted, unset server readiness
+items and native execution conditions; no original query runs during conversion.
+Delivery: Reviewed source and local packages prepared. Deployment is separate from
+this evidence; the coordinating public0.37 promotion must remain preserved.
+Verification: Backend115 checks, integrated141 checks and focused native6 checks
+passed (overlapping suites). UI fixture, TypeScript and production build passed.
+Actual SQLcl26.1.2 /nolog passed exact original-source and multi-module example
+packages. Independent review reconstructed final candidates/sealed ZIPs exactly.
+Remaining: Original objects, types, privileges, authorization and target semantics
+must be verified before enabling source reads. This emits no customer Save/DML and
+does not complete the broader Forms lifecycle. Oracle compilation/runtime and
+business acceptance remain unverified. See [source lookup events](docs/source-lookup-events.md).
+
 ## [0.37.0] - 2026-11-19
 
 ### [improvement] Show discrepancies while supported conversion continues
