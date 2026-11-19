@@ -8,6 +8,29 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## Documentation updates - 2026-11-20
+
+### [docs] Record public 0.37.0 promotion and real-FMB flow
+
+Impact: The public preview now exposes source-preserving hosted FMB preparation,
+reusable XML mapping generation, package download and source discrepancy details.
+Delivery: Accepted source `f921243` / `fox-v0.37.0` promoted from private to public;
+this documentation update does not change software versions or conversion rules.
+Verification: Rehearsed the upgrade against a cloned store, retained rollback
+files and original login, then tested one real FMB through public HTTPS. Oracle
+Forms preparation/adoption ran once; one local mapping run produced a downloadable
+APEXlang ZIP. Exact downloaded bytes passed SQLcl 26.1.2.0 `/nolog` validation.
+The UI reported 6 generated/adapted, 9 encoded/unwired and 38 unimplemented units,
+with 76 reference groups/153 occurrences separately. Status filters, mobile
+overflow checks and anonymous-download rejection passed. Existing public rows,
+private files/non-authentication rows, credentials and configuration were preserved.
+No paid AI call, database import, shared dependency change or new infrastructure.
+Remaining: Initial post-adoption mapping display timed out before generation;
+reopening the saved project recovered without repeating preparation or conversion.
+Cause remains unproven. The generated result is partial and format-validated, not
+target-imported, runtime-tested or business-accepted. Hosted customer artifacts
+remain on their host and are not included in this repository.
+
 ## Documentation updates - 2026-11-19
 
 ### [testing] Verify private discrepancy filters and saved outputs

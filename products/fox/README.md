@@ -9,6 +9,24 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Current hosted preview — 20 November 2026
+
+The public preview is now **0.37.0**, promoted from the accepted private build.
+Users can upload an FMB, prepare it with hosted Oracle Forms, and generate/download
+a partial native APEXlang package through the reusable XML mapping workflow.
+Original code is retained in the selected development-preserve mode; this route
+makes no AI request and does not connect to a target database.
+
+A real 53-unit module completed the hosted generation/download check: **6 units
+generated/adapted, 9 encoded but not wired, 38 not implemented**. All gaps remain
+visible in the output. Actual SQLcl 26.1.2.0 offline validation passed on the
+downloaded ZIP; target import, runtime and business behavior remain unverified.
+
+The first attempt needed the saved project reopened after preparation; no upload
+or conversion was replayed. See [the preview walkthrough and limitations](docs/public-preview-0370.md)
+and [changelog](CHANGELOG.md). Earlier checkpoint statements below describe their
+original deployment dates, not the current public version.
+
 ## Parent-child context and assignment encoding - 19 November 2026
 
 Private preview 0.34.0 is verified through a fresh browser generation/download
