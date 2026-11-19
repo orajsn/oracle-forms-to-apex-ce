@@ -8,6 +8,25 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## Documentation updates - 2026-11-20
+
+### [docs] Record private lookup-engine acceptance
+Impact: Private0.38.0 now generates the three additional source lookup handlers
+through the ordinary package workflow. Public0.37.0 remains unchanged.
+Delivery: Reviewed source/tag published; private0.38.0 active.
+Verification: Linux426 checks passed. Exactly one authenticated private browser
+submission generated and downloaded the package, with9 generated/adapted units,
+9 encoded/unwired and35 unimplemented. All status filters, lookup prerequisite
+notice and old/new output checks passed with no browser errors. All424 old private
+files and original rows were preserved; only1run+2events added. Public service,
+23 captured public files and all ten public non-authentication table snapshots
+were preserved. Worker completed once without errors. No original datasource
+query, paid model call or Oracle import was executed; hosted evidence stays local
+to the VM.
+Remaining: Original lookup interfaces remain disabled until trusted target setup
+is verified. The generated handlers have no customer Save/DML. Installed Oracle
+behavior, broader source lifecycle and business acceptance remain unverified.
+
 ## Documentation updates - 2026-11-19
 
 ### [testing] Verify private discrepancy filters and saved outputs
