@@ -97,6 +97,29 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.37.0] - 2026-11-19
+
+### [improvement] Show discrepancies while supported conversion continues
+Impact: Users can inspect every source unit's conversion state, adaptations and
+next action without treating each unverified dependency as a reason to stop.
+Change: The UI separates generated/adapted, encoded but awaiting connection and
+unimplemented units, with searchable source locations. Module-scoped references
+are grouped separately as database objects, Forms behavior, local routines,
+report registrations and other candidates. Additive source evidence handles
+encoded line breaks and simple comma joins that previously hid references, while
+preserving original XML, legacy source identity and old saved classifications.
+Delivery: Source release prepared; private activation is a separate guarded step.
+Verification: Integrated suite passed165 checks; new and existing browser fixtures,
+TypeScript and production build passed. Actual generated reports passed the UI
+parser. Independent review reconstructed both exact candidates and sealed ZIPs;
+SQLcl26.1.2 /nolog passed. APEX member hashes are unchanged from0.36 for the same
+inputs and project parameters. Repeated source coordinates remain valid, while
+mismatched linked locations and altered evidence are rejected.
+Remaining: This adds no converted business units. Reference candidates are not
+proof of missing files, reachability or target availability. Oracle/APEX runtime,
+external interfaces and business acceptance remain unverified. See
+[conversion discrepancies](docs/conversion-discrepancies.md).
+
 ## [0.36.0] - 2026-11-19
 
 ### [feature] Connect source duplicate checks to draft-record actions

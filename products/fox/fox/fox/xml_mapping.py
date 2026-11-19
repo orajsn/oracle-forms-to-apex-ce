@@ -16,6 +16,7 @@ from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
 from .forms_mapping_gaps import classify_gaps
+from .forms_discrepancies import build_discrepancies, validate_discrepancies, build_dependency_evidence
 from .forms_relation_plan import build_relation_plan
 from .forms_assignment_plan import build_assignment_plan
 from .forms_policy_plan import build_policy_plan
@@ -87,11 +88,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 5,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 6,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -333,6 +334,13 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
+    dependency_evidence = build_dependency_evidence(packet, chunks, ledger)
+    discrepancies = build_discrepancies(packet, ledger, gap_report, catalog, chunks=chunks,
+        dependency_evidence=dependency_evidence)
+    validate_discrepancies(discrepancies, ledger, gap_report, catalog, packet=packet, chunks=chunks,
+        dependency_evidence=dependency_evidence)
+    files["fox-package/discrepancy-evidence.json"] = _bytes(dependency_evidence)
+    files["fox-package/discrepancies.json"] = _bytes(discrepancies)
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})
     if context_summary["relations_generated"]:
         applied = sorted(set(applied) | {"fox.relation.read-context"})
@@ -357,6 +365,10 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "policy_summary": {"rules_generated_unwired": len(policy_encoded)},
         "buffer_summary": {"record_validation_flows": len(buffered)},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
+        "discrepancy_report_path": "fox-package/discrepancies.json",
+        "discrepancy_report_sha256": _sha(files["fox-package/discrepancies.json"]),
+        "discrepancy_evidence_path": "fox-package/discrepancy-evidence.json",
+        "discrepancy_evidence_sha256": _sha(files["fox-package/discrepancy-evidence.json"]),
         "generated_operations": list(generated.values()),
         "structural_trace_path": "fox-package/source-to-page.json",
         "current_mapping_ledger_path": "fox-package/mapping-ledger.json",
@@ -388,6 +400,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Original XML is retained byte-for-byte under sources/. No AI was invoked or approved this mapping.\n\n"
         "CURRENT format status is in metadata.json. Generated, format validated, imported, runtime "
         "verified and business accepted are separate states. This package has no target import or runtime proof.\n\n"
+        "Read discrepancies.json for all source-unit statuses, generated adaptations and reference candidates to verify. Findings do not imply missing files or prevent generation of supported parts. "
         "Read mapping-ledger.json, behavior-coverage.json, remediation.json and supporting-schema.sql. "
         "Database blocks default to read-only reports; control values use APEX session state, not customer-table writes. "
         "Supported report formulas use persisted synthetic rows, not the unsaved Forms buffer. "
@@ -414,7 +427,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "source_binding": packet["source_binding"], "metadata": metadata,
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
-        "mapping_ledger": ledger, "gap_report": gap_report, "relation_plan": relation_plan,
+        "mapping_ledger": ledger, "gap_report": gap_report, "discrepancies": discrepancies, "dependency_evidence": dependency_evidence, "relation_plan": relation_plan,
         "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "buffer_plan": buffer_plan, "buffer_receipt": buffer_receipt, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 

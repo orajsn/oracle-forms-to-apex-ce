@@ -1,0 +1,8 @@
+.xml-discrepancies { border-top: 1px solid var(--fw-border, #d9dfe5); margin-top: 1rem; padding-top: .75rem; overflow-wrap: anywhere; }
+.xml-discrepancies details { margin: .75rem 0; }
+.xml-discrepancies summary { cursor: pointer; font-weight: 600; }
+.xml-discrepancies li { margin: .75rem 0; }
+.xml-discrepancies li p { margin: .3rem 0; }
+.xml-discrepancy-filters { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .75rem; }
+.xml-discrepancy-filters label { display: grid; gap: .25rem; max-width: 100%; }
+.xml-discrepancy-filters input, .xml-discrepancy-filters select { max-width: 100%; }

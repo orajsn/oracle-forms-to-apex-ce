@@ -446,3 +446,27 @@ def test_connected_record_check_appears_in_native_package_and_api(client):
     assert b'Keep draft' in files[op['page_file']]
     assert op['native_event_wired'] and not op['event_activated']
     assert not result['runtime_verified']
+
+
+def test_partial_source_discrepancies_visible_after_generation(client):
+    from pathlib import Path
+    c,root,pid=client
+    example=Path(__file__).resolve().parents[2]/'examples/xml-mapping/policy_rules.xml'
+    raw=example.read_bytes().replace(b'</FormModule>',b'<Trigger Name="KEY-PRINT" TriggerText="BEGIN REMOTE_REPORT.RUN; END;"/></FormModule>')
+    upload(c,pid,[('policy_with_gaps.xml',raw)])
+    scope=c.get(f'/api/projects/{pid}/xml-mapping').json()
+    body={key:scope[key] for key in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    response=c.post(f'/api/projects/{pid}/xml-mapping/runs',json=body)
+    assert response.status_code==202
+    run=response.json();assert run['discrepancies'] is None
+    process_one(connection(root),root)
+    result=c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
+    assert result['state']=='GENERATED'
+    d=result['discrepancies'];assert d['source_binding']==scope['source_binding']
+    assert d['summary']['total_units']==result['total_units']==7
+    assert d['summary']['generated_units']==result['generated_units']==1
+    assert d['summary']['encoded_unwired_units']==5
+    assert d['summary']['unimplemented_units']==1
+    assert result['unsupported_units']==6
+    assert c.get(result['download_url']).status_code==200

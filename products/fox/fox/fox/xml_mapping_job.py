@@ -12,9 +12,10 @@ import time
 from . import source_history, xml_mapping
 from .forms_native_plan import POLICY_ID
 from .forms_understanding_packet import _build
-from .prototype_export_only import _sqlcl_path
+from .prototype_export_only import _sqlcl_path, _members
 from .xml_mapping_retained import verify_retained_package
 from .forms_mapping_gaps import CATEGORIES
+from .forms_discrepancies import validate_discrepancies
 
 PROFILE = 'xml-mapping-v1'
 APPROVAL = 'xml_mapping_local_consent:'
@@ -135,6 +136,7 @@ def checked_output(c, root, run):
         if proof != receipt['proof'] or package != sealed:
             raise ValueError('XML mapping package proof changed.')
         metadata, ledger, gaps = report['metadata'], report['mapping_ledger'], report.get('gap_report')
+        files = _members(package)
     else:
         # Original consent/result event anchors were verified above. Preserve
         # old completed output under its own catalog, not current-engine claims.
@@ -149,8 +151,33 @@ def checked_output(c, root, run):
     details['context_summary'] = _context_fields(metadata, ledger)
     details['policy_summary'] = _policy_fields(metadata, ledger)
     details['buffer_summary'] = _buffer_fields(metadata, ledger)
+    details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _discrepancy_fields(metadata, ledger, gaps, files):
+    path = metadata.get('discrepancy_report_path')
+    if path is None:
+        return None  # Historical outputs do not acquire new classifications.
+    if path != 'fox-package/discrepancies.json' or path not in files:
+        raise ValueError('Saved discrepancy report is missing or has an invalid path.')
+    raw = files[path]
+    if metadata.get('discrepancy_report_sha256') != sha(raw):
+        raise ValueError('Saved discrepancy report changed.')
+    report = json.loads(raw)
+    evidence_path = metadata.get('discrepancy_evidence_path')
+    evidence = None
+    if evidence_path is not None:
+        if (evidence_path != 'fox-package/discrepancy-evidence.json' or evidence_path not in files
+                or metadata.get('discrepancy_evidence_sha256') != sha(files[evidence_path])):
+            raise ValueError('Saved discrepancy reference evidence changed.')
+        evidence = json.loads(files[evidence_path])
+    catalog = json.loads(files['fox-package/mapping-catalog.json'])
+    # checked_output has already authenticated exact candidate/final bytes,
+    # source/version consent, compiler proof and immutable catalog. Do not
+    # reclassify an old saved report with a newer parser or mapping registry.
+    return validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
 
 
 def _buffer_fields(metadata, ledger):
@@ -260,7 +287,7 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None)
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None, discrepancies=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

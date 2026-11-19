@@ -1,16 +1,17 @@
 {
-  "version": "0.36.0",
+  "version": "0.37.0",
   "released_on": "2026-11-19",
-  "title": "Connect duplicate checks to draft-record actions",
+  "title": "Show conversion discrepancies while supported generation continues",
   "changes": [
-    "Generate a session-draft record screen from complete source duplicate-validation, comparison and summary rules.",
-    "Validate the current edited record before keeping a draft or moving to another record; preserve failed edits and reject stale page state.",
-    "Preserve required values, whitespace, source length limits and edited-only case conversion; keep customer-table saving and unconverted workflows separate."
+    "Show every source unit as generated/adapted, encoded but awaiting connection, or not yet implemented, with its source location and next action.",
+    "Explain generated behavior differences and group database, routine, report and Forms references separately from conversion counts.",
+    "Recover dependency references hidden by encoded XML line breaks while preserving original sources and previous run identities."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
     "Reusable mapping produces an explicit partial synthetic package with read-only reports and supported business rules. Unconverted relationships, transactions and external routines remain listed. Dedicated fresh-installation binding is not yet enabled for this route.",
     "Relationship mapping covers manual read navigation over persisted synthetic rows, not automatic Forms query, dirty buffers or delete lifecycle. Assignment SQL is generated but not installed, Oracle-compiled or event-wired.",
+    "Discrepancy reports explain partial output; they do not add converted units or verify referenced interfaces, APEX runtime or business acceptance. Unverified references are not automatically missing files.",
     "Draft-record event wiring covers a bounded generated synthetic screen, not customer-table save or the complete Forms lifecycle. APEX runtime, locking, input semantics and business acceptance remain unverified.",
     "Policy review code is not installed, Oracle-compiled or event-wired. Permission effects require server-side enforcement and exact event/state adapters; no new write behavior is activated.",
     "Comparison generation preserves native VARCHAR2/nonpadding under explicit target collation/session prerequisites. Automatic Forms event and duplicate-record workflows are not inferred; runtime equivalence remains unverified.",
