@@ -9,6 +9,15 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Parent-child context and assignment encoding - 19 November 2026
+
+Version 0.34.0 adds [source-linked record context](docs/record-context-mapping.md):
+manual filtered detail pages derived from explicit Forms relations, preserving
+existing calculations and validation links. It also emits source-bound before-
+insert/update value-copy procedures as review code, without claiming event wiring.
+The website reports these separately from converted code units. See the changelog
+for actual deployment and acceptance status.
+
 ## More business mappings and specific gap explanations - 19 November 2026
 
 The private preview is verified on 0.33.0. Its new browser run reports four

@@ -19,3 +19,7 @@ comparison helpers/controls in two different modules. Each has two callers,
 including a trailing-blank literal case, to exercise safe module binding and
 helper deduplication. See the business comparison mapping guide for target
 collation/session requirements and unverified runtime boundaries.
+
+record_context.xml demonstrates a source-defined two-level relation chain,
+composite detail keys, a preserved calculation and two generated-but-unwired
+insert/update assignment rules. No writes are enabled by this example.

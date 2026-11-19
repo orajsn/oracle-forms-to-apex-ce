@@ -67,7 +67,11 @@ def classify_gaps(packet, chunks, coverage):
             code = _mask_code(semantic)
         except UnsupportedBehavior:
             code = ''
-        if reason in _MISSING:
+        if reason == 'parent_value_copy_encoded_write_lifecycle_unimplemented':
+            category = 'engine_context'
+            message = 'The parent-value copy procedure is generated, but its insert/update event is not wired.'
+            action = 'Wire the original write event and required validation/permission guards before activating the generated review code.'
+        elif reason in _MISSING:
             category = 'missing_source'
             message = 'The called routine definition was not found in the supplied source set.'
             action = 'Supply the routine source or identify its authoritative database/library implementation.'

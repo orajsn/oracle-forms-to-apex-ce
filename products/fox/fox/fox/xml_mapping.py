@@ -11,11 +11,13 @@ import hashlib
 import json
 from pathlib import Path
 
-from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison
+from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments
 from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
 from .forms_mapping_gaps import classify_gaps
+from .forms_relation_plan import build_relation_plan
+from .forms_assignment_plan import build_assignment_plan
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -67,17 +69,23 @@ def mapping_catalog():
          "Numeric report CASE expression with native VARCHAR2 comparison and concatenation.", "Persisted rows/submitted control values; compatible USING_NLS_COMP collation/session settings required and unverified; original lifecycle separate."),
         ("fox.behavior.local-comparison-function-inlined", "Complete side-effect-free same-module VARCHAR2 equality function with at least one emitted caller.",
          "Function semantics inlined into supported formula callers, counted once per original body.", "Unsupported callers and duplicate-record workflows remain explicit; no standalone database function is installed."),
+        ("fox.relation.read-context", "Explicit same-module bounded AND equality relation with exact native database fields and unambiguous acyclic context.",
+         "Protected parent-row navigation and filtered read-only detail pages.", "Persisted synthetic rows and manual session selection only; no automatic query, cascading delete or write lifecycle."),
+        ("fox.assignment.parent-copy-review", "Complete block-owned PRE-INSERT/PRE-UPDATE value copy under a proven direct source relation.",
+         "Namespaced pure IN/OUT PL/SQL review procedures and exact source/event bindings.", "Generated but not Oracle-compiled, installed or event-wired; remains in not-yet-converted coverage."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 2,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 3,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
-                      "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes())},
+                      "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
+                      "forms2apex/native_relations.py": _sha(Path(native_relations.__file__).read_bytes()),
+                      "forms2apex/native_assignments.py": _sha(Path(native_assignments.__file__).read_bytes())},
                "rules": [{"id": key, "revision": 1, "guards": guard,
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
@@ -172,6 +180,34 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     else:
         coverage = behavior_plan["coverage"]
         files["fox-package/behavior-plan.json"] = _bytes(behavior_plan)
+    # Relation and assignment knowledge is rebuilt from the same originals.
+    # Read navigation and unwired review code are distinct from converted units.
+    relation_parent = _zip(files)
+    relation_plan = build_relation_plan(documents, relation_parent)
+    assignment_plan = build_assignment_plan(documents, relation_plan, trace)
+    relation_receipt = None
+    if relation_plan["operations"]:
+        related, relation_receipt = native_relations.render_relation_package(relation_parent, relation_plan)
+        files = _members(related)
+    else:
+        files["fox-package/relation-plan.json"] = _bytes(relation_plan)
+    assignment_sql, assignment_receipt = native_assignments.render_assignment_code(assignment_plan)
+    files[native_assignments.CODE_MEMBER] = assignment_sql.encode("utf-8")
+    files["fox-package/assignment-plan.json"] = _bytes(assignment_plan)
+    files["fox-package/assignment-receipt.json"] = _bytes(assignment_receipt)
+    encoded = {op["source_unit_id"]: op for op in assignment_receipt["generated_operations"]}
+    coverage = deepcopy(coverage)
+    for row in coverage:
+        if row["source_unit_id"] in encoded:
+            if row["status"] == "generated_wired_adapted":
+                raise ValueError("An assignment review artifact cannot replace an already generated behavior.")
+            row.update(encoding_status="generated_unwired",
+                reason="parent_value_copy_encoded_write_lifecycle_unimplemented",
+                assignment_operation_id=encoded[row["source_unit_id"]]["operation_id"])
+    relation_coverage = relation_receipt["coverage"] if relation_receipt else relation_plan["coverage"]
+    context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
+        "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
+        "assignments_generated_unwired": len(encoded)}
     generated = {row["source_unit_id"]: row for row in
                  behavior_receipt["generated_operations"]} if behavior_receipt else {}
     remediation = deepcopy(native_plan["remediation"])
@@ -180,6 +216,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             row.update(code="behavior_generated_runtime_pending", generation_status="generated_wired_adapted",
                 reason="Supported complete source behavior generated with explicit adaptations; runtime and business checks pending.",
                 next_action="Review the generated operation and verify it in an authorized synthetic target.")
+    for row in remediation:
+        if row.get("code_unit_id") in encoded and row.get("code") == "code_unit_not_translated":
+            row.update(code="assignment_generated_unwired", encoding_status="generated_unwired",
+                reason="Value-copy review code is generated; insert/update event wiring and required guards remain pending.",
+                next_action="Review assignment-review.sql and activate only after the native write lifecycle is implemented.")
     trace_blocks = {block["source_block_id"]: block for block in trace["blocks"]}
     source_files = {obj["id"]: {key: entry["source"][key] for key in ("name", "sha256", "bytes")}
                     for entry in packet["sources"] for obj in entry["facts"]["objects"]}
@@ -212,16 +253,22 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         ledger_units.append({**deepcopy(row), "rule_id": _BEHAVIOR_RULES[op["kind"]] if op else "fox.behavior.unresolved-unit",
             "source_file": source_files[row["source_owner_id"]],
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
+    for row in ledger_units:
+        if row["source_unit_id"] in encoded:
+            row.update(rule_id="fox.assignment.parent-copy-review", target=deepcopy(encoded[row["source_unit_id"]]))
     gap_report = classify_gaps(packet, chunks, coverage)
     catalog = mapping_catalog()
     catalog_rules = {row["id"]: row for row in catalog["rules"]}
     ledger = {"schema_version": 1, "scope": "fox-xml-source-to-target-v1",
         "source_binding": packet["source_binding"], "catalog_sha256": catalog["catalog_sha256"],
         "objects": ledger_objects, "code_units": ledger_units,
+        "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})
+    if context_summary["relations_generated"]:
+        applied = sorted(set(applied) | {"fox.relation.read-context"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
@@ -236,13 +283,16 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "applied_rule_ids": applied, "source_parser_rebuilt": True,
         "ai_review": {"performed": False, "approval_recorded": False, "origin": "none"},
         "format_validated": False, "validation": None, "native_apex_generated": True,
-        "data_mode": "synthetic_test_only", "structural_only": not bool(generated),
+        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"]),
         "structural_coverage": deepcopy(native_plan["coverage"]),
         "behavior_coverage": {"total": len(coverage), "counts": counts},
+        "context_summary": context_summary,
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
         "generated_operations": list(generated.values()),
         "structural_trace_path": "fox-package/source-to-page.json",
         "current_mapping_ledger_path": "fox-package/mapping-ledger.json",
+        "relation_plan_sha256": relation_plan["plan_sha256"],
+        "assignment_plan_sha256": assignment_plan["plan_sha256"],
         "native_plan_sha256": native_plan["plan_sha256"], "behavior_plan_sha256": behavior_plan["plan_sha256"],
         "adaptations": native_plan["assumptions"] + [{"scope": "generated_behavior",
             "rule_id": _BEHAVIOR_RULES[op["kind"]], "source_unit_id": op["source_unit_id"],
@@ -274,7 +324,10 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Pure local comparison functions are inlined only into supported callers; duplicate-record workflows are not inferred. "
         "Comparison collation/session compatibility requires target verification; casts preserve VARCHAR2 nonpadding, not an unconditional environment equivalence. "
         "Any linked Continue page validates an existing synthetic row without saving it. "
-        "Dependencies, relationships, source transactions and unsupported behavior remain unresolved.\n\n"
+        "Source-supported related-record links are manual, read-only adaptations; retained session selection is explicit. "
+        "assignment-review.sql contains generated value-copy procedures only: not installed, Oracle-compiled or event-wired. "
+        "Their original insert/update events remain unconverted; no write, cascade or validation guard is bypassed. "
+        "Other dependencies, relationship lifecycle, source transactions and behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
         "before a format-validated handoff. Import/schema changes require separate authorization.\n"
     ).encode("utf-8")
@@ -287,7 +340,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "source_binding": packet["source_binding"], "metadata": metadata,
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
-        "mapping_ledger": ledger, "gap_report": gap_report, "apex_members": metadata["apex_members"],
+        "mapping_ledger": ledger, "gap_report": gap_report, "relation_plan": relation_plan,
+        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 

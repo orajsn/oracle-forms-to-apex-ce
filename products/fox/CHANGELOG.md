@@ -48,6 +48,29 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.34.0] - 2026-11-19
+
+### [feature] Encode source-defined record context and parent-value assignments
+Impact: Generated APEX includes filtered related-record views, with separate
+progress for read navigation and assignment code that still needs event wiring.
+Change: Explicit same-module AND/equality relations become protected parent-row
+links and dedicated detail pages. Existing calculations and validation links stay
+intact, including intermediate pages in a relation chain. Complete PRE-INSERT and
+PRE-UPDATE parent-value copies produce namespaced pure IN/OUT PL/SQL review code.
+These procedures remain in Not yet converted; no save/delete action is enabled.
+Delivery: Source release; private deployment and hosted acceptance recorded separately.
+Verification: Relation/assignment integration passed 130 checks, emitted-query
+model checks passed 9, and API/upgrade integration passed 87 (overlapping suites).
+Browser fixture, TypeScript and production build passed. Actual local SQLcl
+26.1.2 /nolog accepted customer and synthetic example packages. The customer
+package retains four wired/adapted code units, two read-only relationships and
+two unwired assignments; the latter are not included in the converted count.
+Remaining: Manual navigation and persisted synthetic data are explicit adaptations.
+Session selection can persist across report refreshes. Automatic query, unsaved
+buffers, cascading deletion and write lifecycle remain unconverted. Assignment
+SQL is not installed, Oracle-compiled or event-wired; runtime/business acceptance
+is not asserted. Source code-unit coverage is not inflated by relation or review-code counts.
+
 ## [0.33.0] - 2026-11-19
 
 ### [feature] Convert local comparison logic and explain unconverted source

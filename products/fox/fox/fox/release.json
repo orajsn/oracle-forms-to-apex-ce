@@ -1,15 +1,16 @@
 {
-  "version": "0.33.0",
+  "version": "0.34.0",
   "released_on": "2026-11-19",
-  "title": "Translate local comparison logic and explain remaining conversion gaps",
+  "title": "Generate source-linked parent-child views and assignment review code",
   "changes": [
-    "Translate complete pure local VARCHAR2 comparison functions and their formula callers, including concatenation and explicitly submitted control-session values.",
-    "Explain each remaining code unit as a FOX mapping gap, record/context gap, missing definition or review need, with source location and next action.",
-    "Preserve completed packages under their original source/catalog/compiler receipts after the mapping library advances; fresh generation still uses current strict validation."
+    "Generate filtered read-only parent-child pages from explicit source relations, including chained and composite-key relationships.",
+    "Preserve existing calculations and validation links while passing only protected synthetic parent-row identity through navigation.",
+    "Encode complete before-insert/update parent-value copies as review-only PL/SQL, explicitly excluded from converted counts until event wiring and guards exist."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
     "Reusable mapping produces an explicit partial synthetic package with read-only reports and supported business rules. Unconverted relationships, transactions and external routines remain listed. Dedicated fresh-installation binding is not yet enabled for this route.",
+    "Relationship mapping covers manual read navigation over persisted synthetic rows, not automatic Forms query, dirty buffers or delete lifecycle. Assignment SQL is generated but not installed, Oracle-compiled or event-wired.",
     "Comparison generation preserves native VARCHAR2/nonpadding under explicit target collation/session prerequisites. Automatic Forms event and duplicate-record workflows are not inferred; runtime equivalence remains unverified.",
     "The deterministic XML path makes no provider calls. Existing AI-backed source processing retains its separate source/destination approvals and does not automatically receive unresolved code.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",

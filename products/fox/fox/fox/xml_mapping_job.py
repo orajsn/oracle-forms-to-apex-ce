@@ -146,8 +146,38 @@ def checked_output(c, root, run):
     counts = metadata['behavior_coverage']
     generated = sum(1 for row in ledger['code_units'] if row['status'] == 'generated_wired_adapted')
     details = _gap_fields(gaps, ledger, snapshot['source_binding'])
+    details['context_summary'] = _context_fields(metadata, ledger)
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _context_fields(metadata, ledger):
+    summary = metadata.get('context_summary')
+    if summary is None:
+        return None  # Older artifacts did not record this capability.
+    keys = {'relations_generated', 'relations_not_converted', 'assignments_generated_unwired'}
+    if (type(summary) is not dict or set(summary) != keys
+            or any(type(value) is not int or value < 0 for value in summary.values())):
+        raise ValueError('Saved record-context summary is invalid.')
+    relations, assignments = ledger.get('relations'), ledger.get('assignment_review')
+    if type(relations) is not list or type(assignments) is not list:
+        raise ValueError('Saved record-context evidence is missing.')
+    generated = sum(row['status'] == 'read_navigation_generated' for row in relations)
+    ids = {row['source_unit_id'] for row in assignments}
+    units = {row['source_unit_id']:row for row in ledger['code_units']}
+    if (len(ids) != len(assignments) or not ids <= set(units)
+            or summary != {'relations_generated': generated, 'relations_not_converted': len(relations)-generated,
+                           'assignments_generated_unwired': len(assignments)}):
+        raise ValueError('Saved record-context counts differ from their evidence.')
+    for row in assignments:
+        unit = units[row['source_unit_id']]
+        if (row.get('generation_status') != 'generated_unwired'
+                or unit['status'] == 'generated_wired_adapted'
+                or unit.get('encoding_status') != 'generated_unwired'
+                or any(row.get(k) is not False for k in
+                       ('write_lifecycle','event_activated','oracle_compiled','runtime_verified','business_accepted'))):
+            raise ValueError('An unwired assignment was incorrectly promoted to converted behavior.')
+    return summary
 
 
 def _gap_fields(report, ledger, source_binding):
@@ -181,7 +211,7 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[])
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

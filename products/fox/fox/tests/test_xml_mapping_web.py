@@ -369,3 +369,27 @@ def test_observed_mapping_completion_counts_generated_without_replay(client, mon
     result = c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
     assert result['state'] == 'GENERATED' and result['format_validated'] is True
     assert result['runtime_verified'] is False and result['business_behavior_accepted'] is False
+
+
+def test_record_context_summary_keeps_review_assignments_out_of_converted_count(client):
+    from pathlib import Path
+    c,root,pid=client
+    example=Path(__file__).resolve().parents[2]/'examples/xml-mapping/record_context.xml'
+    upload(c,pid,[('record_context.xml',example.read_bytes())])
+    scope=c.get(f'/api/projects/{pid}/xml-mapping').json()
+    body={key:scope[key] for key in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    response=c.post(f'/api/projects/{pid}/xml-mapping/runs',json=body)
+    assert response.status_code==202
+    run=response.json();assert run['context_summary'] is None
+    process_one(connection(root),root)
+    result=c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
+    assert result['state']=='GENERATED' and result['format_validated'] is True
+    assert (result['generated_units'],result['unsupported_units'],result['total_units'])==(1,2,3)
+    assert result['context_summary']=={'relations_generated':2,'relations_not_converted':0,'assignments_generated_unwired':2}
+    assert all('not wired' in gap['message'] for gap in result['gaps'])
+    package=c.get(result['download_url']);assert package.status_code==200
+    files=_members(package.content)
+    assert b'GENERATED_UNWIRED' in files['fox-package/assignment-review.sql']
+    assert b'CREATE OR REPLACE PACKAGE' in files['fox-package/assignment-review.sql']
+    assert not any(b'FOX_ASG_' in raw for name,raw in files.items() if name.endswith('.apx'))
