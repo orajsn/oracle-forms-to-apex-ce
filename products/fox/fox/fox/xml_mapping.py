@@ -11,10 +11,11 @@ import hashlib
 import json
 from pathlib import Path
 
-from forms2apex import native_blueprint, native_behavior, numeric_expression
+from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison
 from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
+from .forms_mapping_gaps import classify_gaps
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -27,6 +28,8 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "local_comparison_report_column": "fox.behavior.local-comparison-report-column",
+    "local_comparison_function_inlined": "fox.behavior.local-comparison-function-inlined",
     "ceil_report_column": "fox.behavior.ceil-report-column",
     "numeric_expression_report_column": "fox.behavior.numeric-expression-report-column",
     "numeric_nonzero_then_focus": "fox.behavior.numeric-nonzero-then-focus",
@@ -60,16 +63,21 @@ def mapping_catalog():
         ("fox.behavior.numeric-nonzero-then-focus", "Complete supported KEY-NEXT-ITEM guard; distinct same-block focus item; first supported guard per report; within the 100-operation package bound.",
          "Linked native validation-only page with Continue action and focus request.",
          "Existing synthetic row only; no save/DML/commit; repeated MESSAGE becomes one notification."),
+        ("fox.behavior.local-comparison-report-column", "Complete local equality helper call; same-row VARCHAR2 and proven control-session bindings.",
+         "Numeric report CASE expression with native VARCHAR2 comparison and concatenation.", "Persisted rows/submitted control values; compatible USING_NLS_COMP collation/session settings required and unverified; original lifecycle separate."),
+        ("fox.behavior.local-comparison-function-inlined", "Complete side-effect-free same-module VARCHAR2 equality function with at least one emitted caller.",
+         "Function semantics inlined into supported formula callers, counted once per original body.", "Unsupported callers and duplicate-record workflows remain explicit; no standalone database function is installed."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 1,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 2,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
-                      "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes())},
+                      "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
+                      "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes())},
                "rules": [{"id": key, "revision": 1, "guards": guard,
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
@@ -130,6 +138,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     # Use the existing renderer, templates, trace and synthetic schema verbatim.
     files = _members(native_blueprint.deterministic_prototype_zip(spec))
     trace = native_blueprint.prototype_trace(spec)
+    source_objects = {obj["id"]: obj for entry in packet["sources"] for obj in entry["facts"]["objects"]}
+    for block in trace["blocks"]:
+        block["source_module_id"] = source_objects[block["source_block_id"]]["module_id"]
     manifest = {"schema_version": 1, "source_binding": packet["source_binding"],
         "origin": "deterministic_local_xml", "code_scope": "all_original_units_locally_assessed",
         "files": [{key: entry["source"][key] for key in ("name", "sha256", "bytes")}
@@ -188,7 +199,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         if target and row["kind"] == "Item":
             item_ops = generated_by_item.get(row["source_object_id"], [])
             target["value_computation_implemented"] = any(op["kind"] in {
-                "ceil_report_column", "numeric_expression_report_column"} for op in item_ops)
+                "ceil_report_column", "numeric_expression_report_column", "local_comparison_report_column"} for op in item_ops)
             target["generated_behavior_operation_ids"] = [op["operation_id"] for op in item_ops]
         ledger_objects.append({**deepcopy(row), "rule_id": rule_id, "rule_revision": 1,
             "source_file": source_files[row["source_object_id"]],
@@ -197,10 +208,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             "target": target, "business_behavior_accepted": False})
     ledger_units = []
     for row in coverage:
-        op = operations.get(row["source_unit_id"])
+        op = operations.get(row["source_unit_id"]) or generated.get(row["source_unit_id"])
         ledger_units.append({**deepcopy(row), "rule_id": _BEHAVIOR_RULES[op["kind"]] if op else "fox.behavior.unresolved-unit",
             "source_file": source_files[row["source_owner_id"]],
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
+    gap_report = classify_gaps(packet, chunks, coverage)
     catalog = mapping_catalog()
     catalog_rules = {row["id"]: row for row in catalog["rules"]}
     ledger = {"schema_version": 1, "scope": "fox-xml-source-to-target-v1",
@@ -227,6 +239,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "data_mode": "synthetic_test_only", "structural_only": not bool(generated),
         "structural_coverage": deepcopy(native_plan["coverage"]),
         "behavior_coverage": {"total": len(coverage), "counts": counts},
+        "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
         "generated_operations": list(generated.values()),
         "structural_trace_path": "fox-package/source-to-page.json",
         "current_mapping_ledger_path": "fox-package/mapping-ledger.json",
@@ -238,10 +251,13 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "compatibility": compatibility, "omissions": remediation,
         "prerequisites": ["Matching APEXlang-capable SQLcl/Java for offline format validation.",
             "Separate authority and compatible isolated APEX workspace/schema before any import.",
-            "Review synthetic supporting-schema.sql, unresolved behavior and lifecycle adaptations."],
+            "Review synthetic supporting-schema.sql, unresolved behavior and lifecycle adaptations."]
+            + (["Comparison inputs require target VARCHAR2 collation compatible with USING_NLS_COMP and matching source comparison session settings; format validation does not establish this."]
+               if any(op["kind"] == "local_comparison_report_column" for op in behavior_plan["operations"]) else []),
         "provider_calls": 0, "database_imports": 0, **{name: False for name in _FALSE}}
     files.update({"fox-package/" + name: _bytes(value) for name, value in (
         ("mapping-catalog.json", catalog), ("mapping-ledger.json", ledger),
+        ("mapping-gaps.json", gap_report),
         ("native-plan.json", native_plan), ("blueprint.json", blueprint),
         ("blueprint-validation.json", blueprint_validation), ("behavior-coverage.json", coverage),
         ("remediation.json", remediation))})
@@ -252,8 +268,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "CURRENT format status is in metadata.json. Generated, format validated, imported, runtime "
         "verified and business accepted are separate states. This package has no target import or runtime proof.\n\n"
         "Read mapping-ledger.json, behavior-coverage.json, remediation.json and supporting-schema.sql. "
-        "Database blocks default to read-only reports; control items have no persistence. "
+        "Database blocks default to read-only reports; control values use APEX session state, not customer-table writes. "
         "Supported report formulas use persisted synthetic rows, not the unsaved Forms buffer. "
+        "Referenced control values can be submitted explicitly; original Forms events that populate them remain separate. "
+        "Pure local comparison functions are inlined only into supported callers; duplicate-record workflows are not inferred. "
+        "Comparison collation/session compatibility requires target verification; casts preserve VARCHAR2 nonpadding, not an unconditional environment equivalence. "
         "Any linked Continue page validates an existing synthetic row without saving it. "
         "Dependencies, relationships, source transactions and unsupported behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
@@ -268,7 +287,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "source_binding": packet["source_binding"], "metadata": metadata,
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
-        "mapping_ledger": ledger, "apex_members": metadata["apex_members"],
+        "mapping_ledger": ledger, "gap_report": gap_report, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 

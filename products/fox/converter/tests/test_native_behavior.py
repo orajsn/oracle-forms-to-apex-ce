@@ -12,6 +12,7 @@ import pytest
 from forms2apex import native_behavior as renderer
 from forms2apex import native_blueprint
 from forms2apex.numeric_expression import parse_expression
+from forms2apex.local_comparison import parse_call
 from test_native_blueprint import spec
 
 
@@ -453,3 +454,58 @@ def test_unselected_source_units_remain_visible_without_authorizing_operations()
     plan["code_unit_count"] += 1
     _, receipt = renderer.render_behavior_package(parent, seal(plan))
     assert receipt["coverage"][-1]["status"] == "missing_input"
+
+
+def comparison_fixture():
+    parent, plan, files = fixture()
+    trace = json.loads(files["fox-package/source-to-page.json"])
+    for block in trace["blocks"]:
+        block["source_module_id"] = "module-one"
+    files["fox-package/source-to-page.json"] = canonical(trace)
+    parent = pack(files)
+    plan.update(parent_zip_sha256=sha(parent), parent_trace_sha256=sha(files["fox-package/source-to-page.json"]))
+    item = trace["blocks"][0]["items"][0]
+    op = plan["operations"][0]
+    op.pop("input_source_item_id")
+    op["target"].pop("input_column")
+    op.update(kind="local_comparison_report_column",
+              expression=parse_call(f"MATCH_TEXT(:{item['source_name']}, 'X ' || '')"),
+              input_bindings=[{"source_item_id": item["source_item_id"], "column": item["column"]}],
+              supporting_units=[{"source_unit_id": "unit-unsupported", "source_chunk_id": "chunk-unsupported",
+                  "source_unit_sha256": "e" * 64, "source_owner_id": "helper-owner", "module_id": "module-one",
+                  "function_name": "MATCH_TEXT", "semantic_kind": "equality-indicator-v1", "decode_receipt": {}}])
+    plan["coverage"][-1].update(status="planned_wired_adapted", source_owner_id="helper-owner",
+        operation_id=op["operation_id"], operation_ids=[op["operation_id"]], reason="pure_local_function_inlined")
+    return parent, seal(plan), files
+
+
+def test_comparison_renderer_emits_varchar2_casts_and_one_bound_helper_receipt():
+    parent, plan, _ = comparison_fixture()
+    output, receipt = renderer.render_behavior_package(parent, plan)
+    with zipfile.ZipFile(io.BytesIO(output)) as archive:
+        text = archive.read(plan["operations"][0]["target"]["report_file"]).decode()
+    assert text.count("as varchar2(4000)") == 2
+    assert "'X ' || ''" in text
+    assert "then 1 else 0 end" in text
+    helper = [row for row in receipt["generated_operations"] if row["kind"] == "local_comparison_function_inlined"]
+    assert len(helper) == 1
+    assert helper[0]["source_unit_sha256"] == "e" * 64
+    assert helper[0]["caller_operation_ids"] == ["op-0"]
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda op: op["input_bindings"][0].update(column="OTHER_COLUMN"),
+    lambda op: op["input_bindings"].clear(),
+    lambda op: op["target"].update(output_column="OTHER_OUTPUT"),
+    lambda op: op["supporting_units"][0].update(source_unit_sha256="f" * 64),
+    lambda op: op["supporting_units"][0].update(source_chunk_id="absent"),
+    lambda op: op["supporting_units"][0].update(function_name="OTHER_FUNCTION"),
+    lambda op: op["supporting_units"][0].update(semantic_kind="other"),
+    lambda op: op["supporting_units"].clear(),
+    lambda op: op["expression"]["args"][0]["parts"][0].update(parts=["OTHER", "VALUE"]),
+])
+def test_comparison_renderer_rejects_tampered_targets_and_helper_evidence(mutate):
+    parent, plan, _ = comparison_fixture()
+    mutate(plan["operations"][0])
+    with pytest.raises(renderer.BehaviorRenderError):
+        renderer.render_behavior_package(parent, seal(plan))

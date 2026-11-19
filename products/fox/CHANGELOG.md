@@ -32,6 +32,34 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.33.0] - 2026-11-19
+
+### [feature] Convert local comparison logic and explain unconverted source
+Impact: Supported local comparison helpers and their formula callers become actual
+APEX report expressions. Remaining units explain whether FOX lacks a mapping or
+record context, needs a definition, or requires review, instead of one blanket
+unsupported label.
+Change: A bounded whole-body parser recognizes pure two-VARCHAR2 equality helpers,
+resolves same-module calls and emits native CASE with VARCHAR2 casts. Concatenation
+and proven control-session values retain source bindings; referenced controls get
+explicit persistent session state and an Apply action. Helper coverage is counted
+once only when a complete supported caller is emitted. Historical downloads verify
+original DB-anchored snapshot/result/candidate/compiler/package evidence across
+catalog changes; fresh candidate reconstruction remains strict.
+Delivery: Source release; private deployment and hosted acceptance are recorded
+separately in dated checkpoints.
+Verification: Backend parser/binding/renderer regression passed 283 checks; the
+integrated gap/upgrade/web/release set passed 90 checks. The browser fixture,
+TypeScript and production build passed. Actual local SQLcl 26.1.2 /nolog accepted
+the retained-source package (four generated/adapted units, 49 remaining) and two
+same-named synthetic modules (six units generated). Retained actual compiler
+output survived a catalog upgrade byte-for-byte with generation/compilation
+forbidden. Independent source review cleared the reported semantic/binding issues.
+Remaining: The duplicate-record workflow, parent-child write lifecycle and other
+unconverted behavior remain explicit. Comparison collation/session compatibility
+must be verified on a target; casts do not prove unconditional runtime equivalence.
+No target import, business acceptance or new AI call is introduced.
+
 ## [0.32.1] - 2026-11-19
 
 ### [fix] Count generated mapping jobs as completed worker outcomes

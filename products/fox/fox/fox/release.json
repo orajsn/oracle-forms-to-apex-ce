@@ -1,15 +1,16 @@
 {
-  "version": "0.32.1",
+  "version": "0.33.0",
   "released_on": "2026-11-19",
-  "title": "Report generated mapping jobs as completed worker outcomes",
+  "title": "Translate local comparison logic and explain remaining conversion gaps",
   "changes": [
-    "Recognize GENERATED as a completed worker outcome instead of reporting a successful conversion as incomplete.",
-    "Keep generated, format-validated, technically verified and business-accepted states distinct.",
-    "Preserve existing packages and request identities; no conversion is repeated by this reporting fix."
+    "Translate complete pure local VARCHAR2 comparison functions and their formula callers, including concatenation and explicitly submitted control-session values.",
+    "Explain each remaining code unit as a FOX mapping gap, record/context gap, missing definition or review need, with source location and next action.",
+    "Preserve completed packages under their original source/catalog/compiler receipts after the mapping library advances; fresh generation still uses current strict validation."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
     "Reusable mapping produces an explicit partial synthetic package with read-only reports and supported business rules. Unconverted relationships, transactions and external routines remain listed. Dedicated fresh-installation binding is not yet enabled for this route.",
+    "Comparison generation preserves native VARCHAR2/nonpadding under explicit target collation/session prerequisites. Automatic Forms event and duplicate-record workflows are not inferred; runtime equivalence remains unverified.",
     "The deterministic XML path makes no provider calls. Existing AI-backed source processing retains its separate source/destination approvals and does not automatically receive unresolved code.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
     "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",

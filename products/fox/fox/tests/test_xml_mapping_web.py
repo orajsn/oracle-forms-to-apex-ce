@@ -281,13 +281,14 @@ def test_multiple_forms_one_application_and_visible_unsupported(client):
         assert files['fox-package/sources/' + name] == raw
 
 
-def test_catalog_change_blocks_worker_and_retained_download(client, monkeypatch):
+def test_catalog_change_preserves_completed_download_but_rejects_stale_admission(client, monkeypatch):
     c, root, pid, body, run = finish(client)
     original = jobs.xml_mapping.mapping_catalog
     def changed_catalog():
         return {**original(), 'catalog_sha256': 'f'*64}
     monkeypatch.setattr(jobs.xml_mapping, 'mapping_catalog', changed_catalog)
-    assert c.get(run['download_url']).status_code == 409
+    download = c.get(run['download_url'])
+    assert download.status_code == 200 and jobs.sha(download.content) == run['package_sha256']
     assert c.post(f'/api/projects/{pid}/xml-mapping/runs', json={**body, 'request_id': str(uuid.uuid4())}).status_code == 409
 
 

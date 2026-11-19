@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 import re
 import zipfile
 
-from . import native, native_project, numeric_expression
+from . import native, native_project, numeric_expression, local_comparison
 
 SCOPE = "fox-forms-behavior-plan-v1"
 RENDERER = "fox-native-behavior-v1"
@@ -24,7 +24,7 @@ MAX_OPERATIONS = 100
 _IDENT = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _PREFIX = "fox-package/behavior-"
-_CALCULATIONS = {"ceil_report_column", "numeric_expression_report_column"}
+_CALCULATIONS = {"ceil_report_column", "numeric_expression_report_column", "local_comparison_report_column"}
 _BASE = {"operation_id", "kind", "source_unit_id", "source_unit_sha256", "source_chunk_id",
          "source_block_id", "source_item_id", "decode_receipt", "target"}
 _ROOT = {"schema_version", "scope", "source_binding", "parent_zip_sha256",
@@ -129,12 +129,98 @@ def _expression_sql(operation, block, field):
         raise BehaviorRenderError("BEHAVIOR_EXPRESSION_INVALID") from None
 
 
+def control_binding(files, trace, item_id):
+    """Prove one source-free visible text page item against exact native trace."""
+    matches = [(block, item) for block in trace["blocks"] for item in block.get("items", [])
+               if item.get("source_item_id") == item_id]
+    _need(len(matches) == 1, "CONTROL_TARGET_NOT_UNIQUE")
+    block, item = matches[0]
+    page, filename, name = block.get("page_id"), block.get("page_file"), item.get("native_item")
+    _need(block.get("classification") == "control" and item.get("data_type") == "VARCHAR2"
+          and item.get("widget") == "text" and item.get("database_bound") is False
+          and item.get("native_item_page_id") == page and type(page) is int and 0 < page < 9999
+          and type(filename) is str and filename in files, "CONTROL_TARGET_INVALID")
+    _identifier(name)
+    _need(name.startswith(f"P{page}_"), "CONTROL_PAGE_MISMATCH")
+    _need(sum(candidate.get("native_item") == name for entry in trace["blocks"]
+              for candidate in entry.get("items", [])) == 1, "CONTROL_ITEM_NOT_UNIQUE")
+    text = files[filename].decode("utf-8")
+    _need(text.startswith(f"page {page} (\n"), "CONTROL_PAGE_MISMATCH")
+    fragments = re.findall(r"^    pageItem " + re.escape(name) + r" \(\n(.*?)^    \)", text, re.M | re.S)
+    _need(len(fragments) == 1 and len(re.findall(r"\bpageItem\s+" + re.escape(name) + r"\s*\(", text)) == 1,
+          "CONTROL_ITEM_NOT_UNIQUE")
+    fragment = fragments[0]
+    _need(fragment.count("        type: textField\n") == 1
+          and not re.search(r"\b(?:source|default|computation|security|serverSideCondition|authorization)\s*\{", fragment)
+          and "sessionState" not in fragment, "CONTROL_ITEM_NOT_SOURCE_FREE")
+    return {"source_item_id": item_id, "source_block_id": block["source_block_id"],
+            "page_item": name, "page_id": page, "page_file": filename}
+
+
+def _comparison_sql(operation, block, field, files, trace):
+    try:
+        refs = local_comparison.validate_expression(operation["expression"])
+    except local_comparison.ComparisonError:
+        raise BehaviorRenderError("BEHAVIOR_COMPARISON_INVALID") from None
+    _need(field["data_type"] == "NUMBER" and field["column"] == operation["target"]["output_column"],
+          "COMPARISON_OUTPUT_MISMATCH")
+    module = block.get("source_module_id")
+    _need(type(module) is str and module, "COMPARISON_MODULE_SCOPE_MISSING")
+    expected, columns = {}, {}
+    for parts in refs:
+        same_row = len(parts) == 1 or parts[0] == (block.get("name") or "").upper()
+        if same_row:
+            matches = [item for item in block["items"]
+                       if (item.get("source_name") or "").upper() == parts[-1]]
+            _need(len(matches) == 1, "COMPARISON_REFERENCE_NOT_UNIQUE")
+            item = matches[0]
+            _one(block["items"], "source_item_id", item["source_item_id"])
+            _need(item["data_type"] == "VARCHAR2" and item["source_item_id"] != field["source_item_id"],
+                  "COMPARISON_INPUT_MISMATCH")
+            _identifier(item["column"])
+            binding = {"source_item_id": item["source_item_id"], "column": item["column"]}
+            target = item["column"]
+        else:
+            matches = [item for candidate in trace["blocks"]
+                       if candidate.get("source_module_id") == module
+                       and (candidate.get("name") or "").upper() == parts[0]
+                       for item in candidate.get("items", []) if (item.get("source_name") or "").upper() == parts[-1]]
+            _need(len(matches) == 1, "CONTROL_REFERENCE_NOT_UNIQUE")
+            item = matches[0]
+            binding = control_binding(files, trace, item["source_item_id"])
+            target = ":" + binding["page_item"]
+        expected[item["source_item_id"]] = binding
+        columns[parts] = target
+    _need(operation["input_bindings"] == [expected[key] for key in sorted(expected)], "COMPARISON_BINDING_MISMATCH")
+    supports = operation["supporting_units"]
+    _need(type(supports) is list and len(supports) == 1, "COMPARISON_HELPER_INVALID")
+    support = supports[0]
+    _need(type(support) is dict and set(support) == {"source_unit_id", "source_unit_sha256", "source_chunk_id",
+          "source_owner_id", "module_id", "function_name", "semantic_kind", "decode_receipt"}
+          and support["function_name"] == operation["expression"]["function"]
+          and support["module_id"] == module
+          and support["semantic_kind"] == "equality-indicator-v1"
+          and all(type(support[key]) is str and support[key] for key in
+                  ("source_unit_id", "source_chunk_id", "source_owner_id", "module_id"))
+          and type(support["source_unit_sha256"]) is str and _SHA.fullmatch(support["source_unit_sha256"])
+          and type(support["decode_receipt"]) is dict, "COMPARISON_HELPER_INVALID")
+    try:
+        return local_comparison.render_sql(operation["expression"], columns)
+    except local_comparison.ComparisonError:
+        raise BehaviorRenderError("BEHAVIOR_COMPARISON_INVALID") from None
+
+
 def _validate(files, raw, value):
     _need(type(value) is dict and set(value) == _ROOT, "PLAN_FIELDS_INVALID")
     # Bound untrusted expression trees before deepcopy/canonical JSON recursion.
     _need(type(value["operations"]) is list and 1 <= len(value["operations"]) <= MAX_OPERATIONS,
           "OPERATION_COUNT_INVALID")
     for operation in value["operations"]:
+        if type(operation) is dict and operation.get("kind") == "local_comparison_report_column":
+            try:
+                local_comparison.validate_expression(operation.get("expression"))
+            except local_comparison.ComparisonError:
+                raise BehaviorRenderError("BEHAVIOR_COMPARISON_INVALID") from None
         if type(operation) is dict and operation.get("kind") == "numeric_expression_report_column":
             try:
                 numeric_expression.validate_expression(operation.get("expression"))
@@ -192,6 +278,7 @@ def _validate(files, raw, value):
         kind = operation.get("kind")
         extras = ({"input_source_item_id"} if kind == "ceil_report_column" else
                   {"expression", "input_bindings"} if kind == "numeric_expression_report_column" else
+                  {"expression", "input_bindings", "supporting_units"} if kind == "local_comparison_report_column" else
                   {"focus_source_item_id", "message", "message_call_count", "minimum"}
                   if kind == "numeric_nonzero_then_focus" else None)
         _need(extras is not None and set(operation) == _BASE | extras, "OPERATION_FIELDS_INVALID")
@@ -212,7 +299,7 @@ def _validate(files, raw, value):
         target = operation["target"]
         base_fields = {"table", "report_file", "report_page_id"}
         expected = base_fields | ({"input_column", "output_column"} if kind == "ceil_report_column" else
-                                 {"output_column"} if kind == "numeric_expression_report_column" else
+                                 {"output_column"} if kind in {"numeric_expression_report_column", "local_comparison_report_column"} else
                                  {"row_id_column", "value_column", "focus_column", "value_data_type", "focus_data_type"})
         _need(type(target) is dict and set(target) == expected, "TARGET_FIELDS_INVALID")
         _need(target["table"] == block["table_name"] and target["report_file"] == block["report_file"]
@@ -229,6 +316,10 @@ def _validate(files, raw, value):
             slot = (target["report_file"], field["column"])
         elif kind == "numeric_expression_report_column":
             _expression_sql(operation, block, field)
+            source = None
+            slot = (target["report_file"], field["column"])
+        elif kind == "local_comparison_report_column":
+            _comparison_sql(operation, block, field, files, trace)
             source = None
             slot = (target["report_file"], field["column"])
         else:
@@ -257,9 +348,25 @@ def _validate(files, raw, value):
     for op in operations:
         inputs = ([op["input_source_item_id"]] if op["kind"] == "ceil_report_column" else
                   [entry["source_item_id"] for entry in op["input_bindings"]]
-                  if op["kind"] == "numeric_expression_report_column" else [])
+                  if op["kind"] in {"numeric_expression_report_column", "local_comparison_report_column"} else [])
         _need(not outputs.intersection(inputs), "COMPUTED_INPUT_UNSUPPORTED")
-    _need({unit for unit, row in units.items() if row["status"] == "planned_wired_adapted"} == seen_units,
+    supporting = {}
+    for op in operations:
+        for support in op.get("supporting_units", []):
+            unit = support["source_unit_id"]
+            _need(unit not in seen_units and unit in units and support["source_chunk_id"] in hashes
+                  and hashes[support["source_chunk_id"]] == support["source_unit_sha256"]
+                  and units[unit]["source_chunk_id"] == support["source_chunk_id"]
+                  and units[unit]["source_unit_sha256"] == support["source_unit_sha256"]
+                  and units[unit].get("source_owner_id") == support["source_owner_id"], "SUPPORTING_UNIT_MISMATCH")
+            if unit in supporting:
+                _need(supporting[unit][0] == support, "SUPPORTING_UNIT_MISMATCH")
+            supporting.setdefault(unit, (support, []))[1].append(op["operation_id"])
+    for unit, (_, callers) in supporting.items():
+        _need(units[unit].get("operation_ids") == sorted(callers)
+              and units[unit].get("operation_id") == sorted(callers)[0]
+              and units[unit].get("reason") == "pure_local_function_inlined", "SUPPORTING_CALLER_MISMATCH")
+    _need({unit for unit, row in units.items() if row["status"] == "planned_wired_adapted"} == seen_units | set(supporting),
           "COVERAGE_OPERATION_MISMATCH")
     return plan, bound
 
@@ -274,12 +381,14 @@ def _report(text, block):
     return source
 
 
-def _ceil(text, operations, block):
+def _ceil(text, operations, block, files, trace):
     old = _report(text, block)
     replacements = {}
     for operation in operations:
         target = operation["target"]
         expression = (f"ceil({target['input_column']})" if operation["kind"] == "ceil_report_column" else
+                      _comparison_sql(operation, block, _one(block["items"], "source_item_id", operation["source_item_id"]), files, trace)
+                      if operation["kind"] == "local_comparison_report_column" else
                       _expression_sql(operation, block,
                                       _one(block["items"], "source_item_id", operation["source_item_id"])))
         replacements[target["output_column"]] = expression
@@ -485,6 +594,7 @@ def render_behavior_package(parent_zip, plan):
     """
     raw, infos, files, comment = _archive(parent_zip)
     normalized, bound = _validate(files, raw, plan)
+    trace = json.loads(files["fox-package/source-to-page.json"])
     changes, additions, generated = {}, {}, []
     occupied = {int(m.group(1)) for name in files
                 if (m := re.fullmatch(r"pages/p(\d+)-[^/]+\.apx", name))}
@@ -512,6 +622,38 @@ def render_behavior_package(parent_zip, plan):
         generated.append({"operation_id": operation["operation_id"], "kind": operation["kind"],
                           "source_unit_id": operation["source_unit_id"],
                           "generation_status": "generated_wired_adapted", **result})
+    controls = {}
+    for operation, _, _, _ in bound:
+        for binding in operation.get("input_bindings", []):
+            if "page_item" in binding:
+                controls.setdefault(binding["page_file"], {})[binding["page_item"]] = binding
+    for filename, bindings in controls.items():
+        text = files[filename].decode("utf-8")
+        _need("button apply-control-values (" not in text and text.endswith(")\n"), "CONTROL_SUBMIT_COLLISION")
+        for name in sorted(bindings):
+            anchor = f"    pageItem {name} (\n"
+            _need(text.count(anchor) == 1, "CONTROL_ITEM_NOT_UNIQUE")
+            text = text.replace(anchor, anchor + "        sessionState {\n            storage: session\n            dataType: varchar2\n        }\n", 1)
+        text = text[:-2] + '''    button apply-control-values (
+        buttonName: FOX_APPLY_CONTROL_VALUES
+        label: Apply control values
+        layout {
+            sequence: 900
+            region: @controls
+            slot: regionBody
+        }
+        appearance {
+            buttonTemplate: @/text
+        }
+        behavior {
+            action: submitPage
+            executeValidations: true
+            warnOnUnsavedChanges: doNotCheck
+        }
+    )
+)
+'''
+        changes[filename] = text.encode("utf-8")
     # Compose all same-report calculations once; retain any validation-page link
     # already added above. Each expression reads the original input column, so
     # no unrequested chained computation or evaluation order is inferred.
@@ -520,14 +662,23 @@ def render_behavior_package(parent_zip, plan):
         if operation["kind"] in _CALCULATIONS:
             calculations.setdefault(operation["target"]["report_file"], (block, []))[1].append(operation)
     for report, (block, operations) in calculations.items():
-        changes[report] = _ceil(changes[report].decode("utf-8"), operations, block).encode("utf-8")
+        changes[report] = _ceil(changes[report].decode("utf-8"), operations, block, files, trace).encode("utf-8")
+    support_callers = {}
+    for operation, _, _, _ in bound:
+        for support in operation.get("supporting_units", []):
+            support_callers.setdefault(support["source_unit_id"], (support, []))[1].append(operation["operation_id"])
+    for unit, (support, callers) in sorted(support_callers.items()):
+        generated.append({"kind": "local_comparison_function_inlined", "source_unit_id": unit,
+                          "source_unit_sha256": support["source_unit_sha256"],
+                          "source_chunk_id": support["source_chunk_id"], "caller_operation_ids": sorted(callers),
+                          "generation_status": "generated_wired_adapted"})
     coverage = deepcopy(normalized["coverage"])
     for row in coverage:
         if row["status"] == "planned_wired_adapted":
             row["status"] = "generated_wired_adapted"
     receipt = {"schema_version": 1, "scope": RENDERER, "parent_zip_sha256": _sha(raw),
                "renderer_sources": {name: _sha(Path(__file__).with_name(name).read_bytes()) for name in
-                                    ("native_behavior.py", "numeric_expression.py", "native.py", "native_project.py")},
+                                    ("native_behavior.py", "numeric_expression.py", "local_comparison.py", "native.py", "native_project.py")},
                "plan_sha256": normalized["plan_sha256"],
                "plan_artifact_sha256": _sha(_json(normalized)), "source_binding": normalized["source_binding"],
                "generated_operations": generated, "coverage": coverage, "native_generated": True,

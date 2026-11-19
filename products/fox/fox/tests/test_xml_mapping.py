@@ -322,3 +322,32 @@ def test_formula_only_package_reports_only_applicable_behavior_adaptations():
     notes = report["behavior_plan"]["adaptations"]
     assert any("persisted synthetic rows" in value for value in notes)
     assert not any("Continue" in value or "MESSAGE" in value for value in notes)
+
+
+def test_two_real_generator_modules_isolate_equal_named_helpers_and_controls():
+    examples = Path(__file__).resolve().parents[2] / 'examples' / 'xml-mapping'
+    documents = [(name, (examples/name).read_bytes()) for name in ('local_compare.xml','local_compare_second.xml')]
+    candidate, report = generate(documents)
+    assert report['metadata']['behavior_coverage'] == {'total':6,'counts':{'generated_wired_adapted':6}}
+    assert report['gap_report']['not_yet_converted'] == 0
+    operations=report['behavior_plan']['operations']
+    assert len(operations)==4
+    controls={b['page_item'] for op in operations for b in op.get('input_bindings',[]) if 'page_item' in b}
+    assert len(controls)==2
+    files=_members(candidate)
+    sql='\n'.join(raw.decode() for name,raw in files.items() if name.endswith('.apx'))
+    assert sql.count('button apply-control-values (') == 2
+    assert "cast(('X') as varchar2(4000)) = cast(('X ') as varchar2(4000))" in sql
+    assert all(':'+name in sql for name in controls)
+    helper_rows=[r for r in report['mapping_ledger']['code_units'] if r['rule_id']=='fox.behavior.local-comparison-function-inlined']
+    assert len(helper_rows)==2 and all(len(r['operation_ids'])==2 for r in helper_rows)
+
+
+def test_gap_report_is_complete_and_never_blames_unknown_builtin_on_missing_source():
+    from test_forms_behavior_plan import comparison_documents
+    documents=comparison_documents(helper=False)
+    documents=[(name,raw.replace(b'MATCH_TEXT(',b'INSTR(')) for name,raw in documents]
+    _,report=generate(documents)
+    assert report['gap_report']['not_yet_converted']==1
+    assert report['gap_report']['summary']['missing_source']==0
+    assert report['gap_report']['gaps'][0]['owner']=='FOX_ENGINE'

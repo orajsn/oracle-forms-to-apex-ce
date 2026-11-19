@@ -3,3 +3,8 @@
 .xml-mapping-download { display: inline-block; text-decoration: none; }
 .xml-mapping fieldset { min-width: 0; }
 @media (max-width: 600px) { .xml-mapping .fw-detail-heading { display: block; } .xml-mapping .fw-detail-heading button { margin-top: .5rem; } }
+
+.xml-mapping-gaps details { margin: .75rem 0; }
+.xml-mapping-gaps summary { cursor: pointer; font-weight: 600; }
+.xml-mapping-gaps li { overflow-wrap: anywhere; margin: .75rem 0; }
+.xml-mapping-gaps li p { margin: .3rem 0; }

@@ -335,3 +335,218 @@ def test_formula_ambiguous_case_insensitive_source_names_fail_closed():
     plan = build_behavior_plan(docs, package(docs, add_target))
     assert not plan["operations"]
     assert sum(row["reason"] == "item_reference_is_not_unique" for row in plan["coverage"]) == 2
+
+
+def comparison_documents(name="MATCH_TEXT", module="SHIPMENTS", *, callers=1, helper=True):
+    body = (f"FUNCTION {name}(first_value VARCHAR2, second_value VARCHAR2) RETURN NUMBER IS "
+            "answer NUMBER := 0; BEGIN IF first_value = second_value THEN answer := 1; "
+            "END IF; RETURN(answer); END;")
+    formula = escape(f"{name}(:PANEL.SAVED_VALUE, :ROWS.PREFIX || :ROWS.CODE)", quote=True)
+    xml = (f'<FormModule Name="{module}"><Block Name="ROWS" DatabaseBlock="true">'
+           '<Item Name="PREFIX" ItemType="Text Item" DataType="Char" MaximumLength="16"/>'
+           '<Item Name="CODE" ItemType="Text Item" DataType="Char" MaximumLength="16"/>'
+           + ''.join(f'<Item Name="MATCH_{i}" ItemType="Display Item" DataType="Number" Formula="{formula}"/>'
+                     for i in range(callers))
+           + '</Block><Block Name="PANEL" DatabaseBlock="false">'
+           '<Item Name="SAVED_VALUE" ItemType="Text Item" DataType="Char" MaximumLength="50"/>'
+           '</Block>' + (f'<ProgramUnit Name="{name}" ProgramUnitType="Function" ProgramUnitText="{escape(body, quote=True)}"/>' if helper else '')
+           + '</FormModule>')
+    return [(module.lower() + '.xml', xml.encode())]
+
+
+def comparison_package(docs, mutate=None):
+    from fox.forms_native_plan import POLICY_ID, build_native_prototype_plan
+    from fox.xml_mapping import _blueprint
+    from forms2apex import native_blueprint
+    packet, chunks = _build(docs)
+    spec = build_native_prototype_plan(docs, _blueprint(packet), project_id="synthetic-comparison",
+               project_name="Synthetic comparison", approved_policy_id=POLICY_ID)["rendering_spec"]
+    members = {name: text.encode() for name, text in native_blueprint.render_native_blueprint(spec).items()}
+    manifest = {"source_binding": packet["source_binding"],
+                "files": [{key: entry["source"][key] for key in ("name", "sha256", "bytes")} for entry in packet["sources"]],
+                "selected_chunk_hashes": {c["id"]: c["sha256"] for c in chunks}}
+    members["fox-package/source-manifest.json"] = json.dumps(manifest).encode()
+    trace = native_blueprint.prototype_trace(spec)
+    objects = {obj["id"]: obj for entry in packet["sources"] for obj in entry["facts"]["objects"]}
+    for block in trace["blocks"]:
+        block["source_module_id"] = objects[block["source_block_id"]]["module_id"]
+    members["fox-package/source-to-page.json"] = json.dumps(trace).encode()
+    members["fox-package/supporting-schema.sql"] = native_blueprint.render_prototype_schema(spec).encode()
+    if mutate:
+        mutate(members)
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        for name, raw in members.items():
+            archive.writestr(name, raw)
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("name,module", [("MATCH_TEXT", "SHIPMENTS"), ("EQUAL_VALUE", "ORDERS")])
+def test_complete_renamed_local_function_caller_and_control_are_generated(name, module):
+    from forms2apex.native_behavior import render_behavior_package
+    docs = comparison_documents(name, module, callers=2)
+    parent = comparison_package(docs)
+    before = deepcopy(docs), parent
+    plan = build_behavior_plan(docs, parent)
+    assert len(plan["operations"]) == 2
+    assert all(op["kind"] == "local_comparison_report_column" for op in plan["operations"])
+    assert len(plan["coverage"]) == 3
+    assert all(row["status"] == "planned_wired_adapted" for row in plan["coverage"])
+    helper = next(row for row in plan["coverage"] if row["reason"] == "pure_local_function_inlined")
+    assert helper["operation_ids"] == sorted(op["operation_id"] for op in plan["operations"])
+    output, receipt = render_behavior_package(parent, plan)
+    assert len(receipt["generated_operations"]) == 3
+    assert sum(op["kind"] == "local_comparison_function_inlined" for op in receipt["generated_operations"]) == 1
+    with zipfile.ZipFile(io.BytesIO(output)) as archive:
+        trace = json.loads(archive.read("fox-package/source-to-page.json"))
+        database, control = trace["blocks"]
+        row = archive.read(database["report_file"]).decode()
+        state = archive.read(control["page_file"]).decode()
+        assert row.count("case when cast((") == 2
+        assert " || " in row and "then 1 else 0 end" in row
+        assert ":" + control["items"][0]["native_item"] in row
+        assert "storage: session" in state and "dataType: varchar2" in state
+        assert state.count("label: Apply control values") == 1
+        assert "action: submitPage" in state
+        assert "formAutoRowProcessing" not in state
+    assert (docs, parent) == before
+    assert receipt["runtime_verified"] is receipt["business_accepted"] is False
+
+
+@pytest.mark.parametrize("old,new", [
+    (b'Name="PREFIX"', b'Name="PREFIX" CalculateMode="Summary"'),
+    (b'Name="SAVED_VALUE"', b'Name="SAVED_VALUE" CalculateMode="Summary"'),
+    (b'Name="SAVED_VALUE"', b'Name="SAVED_VALUE" Visible="false"'),
+    (b'Name="SAVED_VALUE"', b'Name="SAVED_VALUE" ConcealData="true"'),
+    (b'MaximumLength="16"', b'MaximumLength="2500"'),
+    (b'MaximumLength="16"', b''),
+    (b'DataType="Number"', b'DataType="Char"'),
+    (b'RETURN(answer);', b'COMMIT; RETURN(answer);'),
+    (b'MATCH_TEXT(:PANEL', b'OTHER_TEXT(:PANEL'),
+])
+def test_comparison_context_missing_or_unsafe_source_is_not_counted(old, new):
+    docs = comparison_documents()
+    docs = [(name, raw.replace(old, new)) for name, raw in docs]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+    assert not any(row["status"] == "planned_wired_adapted" for row in plan["coverage"])
+
+
+def test_local_function_never_resolves_from_another_form_or_an_overload():
+    first = comparison_documents(helper=False)
+    second = comparison_documents(module="OTHER", callers=0)
+    docs = first + second
+    assert not build_behavior_plan(docs, comparison_package(docs))["operations"]
+    docs = comparison_documents()
+    name, raw = docs[0]
+    helper = raw[raw.index(b'<ProgramUnit'):raw.index(b'</FormModule>')]
+    docs = [(name, raw.replace(b'</FormModule>', helper + b'</FormModule>'))]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+
+
+def test_unused_or_unselected_helper_has_no_generated_coverage():
+    docs = comparison_documents(callers=0)
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+    assert plan["coverage"][0]["reason"] == "supported_local_function_has_no_supported_caller"
+    docs = comparison_documents()
+    parent = comparison_package(docs)
+    plan = build_behavior_plan(docs, parent)
+    caller = plan["operations"][0]["source_unit_id"]
+    assert not build_behavior_plan(docs, parent, [caller])["operations"]
+
+
+def test_missing_control_native_target_remains_visible_context_gap():
+    docs = comparison_documents()
+    def remove_control(members):
+        trace = json.loads(members["fox-package/source-to-page.json"])
+        trace["blocks"][1]["items"][0]["native_item"] = None
+        members["fox-package/source-to-page.json"] = json.dumps(trace).encode()
+    plan = build_behavior_plan(docs, comparison_package(docs, remove_control))
+    assert not plan["operations"]
+    assert any(row["status"] == "missing_input" and row["reason"] == "source_control_has_no_proven_native_page_item"
+               for row in plan["coverage"])
+
+
+def test_comparison_capacity_counts_callers_but_helper_only_once():
+    docs = comparison_documents(callers=101)
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert len(plan["operations"]) == 100
+    assert len(plan["coverage"]) == 102
+    assert sum(row["status"] == "planned_wired_adapted" for row in plan["coverage"]) == 101
+    assert sum(row["reason"] == "behavior_operation_capacity_exceeded" for row in plan["coverage"]) == 1
+
+
+@pytest.mark.parametrize("function", ["UNKNOWN_TEXT", "DECODE", "INSTR", "REGEXP_INSTR"])
+def test_undeclared_routine_is_an_engine_resolution_gap_without_claiming_missing_source(function):
+    docs = comparison_documents(helper=False)
+    docs = [(name, raw.replace(b'MATCH_TEXT(', (function + '(').encode())) for name, raw in docs]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+    assert plan["coverage"][0]["reason"] == "function_target_resolution_not_implemented"
+
+
+@pytest.mark.parametrize("attribute", [b'', b' ProgramUnitText=""'])
+def test_only_declared_local_routine_with_absent_body_is_missing_source(attribute):
+    docs = comparison_documents(helper=False)
+    docs = [(name, raw.replace(b'</FormModule>',
+        b'<ProgramUnit Name="MATCH_TEXT" ProgramUnitType="Function"' + attribute + b'/></FormModule>'))
+        for name, raw in docs]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+    assert plan["coverage"][0]["reason"] == "local_function_definition_missing"
+
+
+def test_declared_routine_with_text_body_is_not_mislabeled_missing_source():
+    docs = comparison_documents(helper=False)
+    docs = [(name, raw.replace(b'</FormModule>',
+        b'<ProgramUnit Name="MATCH_TEXT" ProgramUnitType="Function">BEGIN NULL; END;</ProgramUnit></FormModule>'))
+        for name, raw in docs]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert not plan["operations"]
+    assert plan["coverage"][0]["reason"] == "local_function_complete_body_not_supported"
+
+
+@pytest.mark.parametrize("length,accepted", [("333", True), ("334", False)])
+def test_concatenated_declared_character_lengths_have_conservative_byte_bound(length, accepted):
+    docs = [(name, raw.replace(b'MaximumLength="16"', f'MaximumLength="{length}"'.encode()))
+            for name, raw in comparison_documents()]
+    plan = build_behavior_plan(docs, comparison_package(docs))
+    assert bool(plan["operations"]) is accepted
+    if not accepted:
+        assert any(row["reason"] == "character_concatenation_length_exceeds_sql_limit" for row in plan["coverage"])
+
+
+def test_same_named_controls_and_helpers_are_isolated_across_two_forms():
+    from forms2apex.native_behavior import BehaviorRenderError, render_behavior_package
+    docs = comparison_documents(module="FORM_ONE") + comparison_documents(module="FORM_TWO")
+    parent = comparison_package(docs)
+    plan = build_behavior_plan(docs, parent)
+    assert len(plan["operations"]) == 2
+    output, receipt = render_behavior_package(parent, plan)
+    assert len(receipt["generated_operations"]) == 4
+    with zipfile.ZipFile(io.BytesIO(output)) as archive:
+        for op in plan["operations"]:
+            control = next(binding for binding in op["input_bindings"] if "page_item" in binding)
+            text = archive.read(op["target"]["report_file"]).decode()
+            assert ":" + control["page_item"] in text
+    bad = deepcopy(plan)
+    first, second = bad["operations"]
+    other_control = next(binding for binding in second["input_bindings"] if "page_item" in binding)
+    first["input_bindings"] = sorted([binding for binding in first["input_bindings"] if "page_item" not in binding]
+                                      + [other_control], key=lambda entry: entry["source_item_id"])
+    bad["plan_sha256"] = hashlib.sha256(json.dumps({key: value for key, value in bad.items() if key != "plan_sha256"},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    with pytest.raises(BehaviorRenderError, match="COMPARISON_BINDING_MISMATCH"):
+        render_behavior_package(parent, bad)
+
+
+def test_parent_control_scope_tampering_is_rejected_against_original_source():
+    docs = comparison_documents()
+    def tamper(members):
+        trace = json.loads(members["fox-package/source-to-page.json"])
+        trace["blocks"][1]["source_module_id"] = "other-module"
+        members["fox-package/source-to-page.json"] = json.dumps(trace).encode()
+    with pytest.raises(ValueError, match="source module mismatch"):
+        build_behavior_plan(docs, comparison_package(docs, tamper))

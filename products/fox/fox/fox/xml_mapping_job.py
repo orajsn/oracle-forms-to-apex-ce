@@ -13,13 +13,15 @@ from . import source_history, xml_mapping
 from .forms_native_plan import POLICY_ID
 from .forms_understanding_packet import _build
 from .prototype_export_only import _sqlcl_path
+from .xml_mapping_retained import verify_retained_package
+from .forms_mapping_gaps import CATEGORIES
 
 PROFILE = 'xml-mapping-v1'
 APPROVAL = 'xml_mapping_local_consent:'
 RESULT = 'xml_mapping_result:'
 SCOPE_NOTICE = ('Installed deterministic mappings process the complete original XML locally, including unredacted '
     'source. No AI transmission or database import. One synthetic APEX application; database blocks are '
-    'read-only reports. Unsupported code and dependencies remain explicit. Format validation, runtime '
+    'read-only reports. Unconverted code and unverified dependencies remain explicit. Format validation, runtime '
     'verification and business acceptance are separate.')
 
 
@@ -121,23 +123,56 @@ def checked_output(c, root, run):
     receipt = json.loads(receipt_raw)
     if receipt['snapshot_sha256'] != sha(encoded(snapshot)):
         raise ValueError('XML mapping snapshot identity changed.')
-    if snapshot['catalog_sha256'] != xml_mapping.mapping_catalog()['catalog_sha256']:
-        raise ValueError('Installed XML mapping catalog changed; retained proof needs reconciliation.')
     docs = [(row['name'], source_history.readable_source_bytes(row)) for row in snapshot['files']]
-    candidate, report = xml_mapping.generate_xml_package(docs, snapshot['project_id'], snapshot['project_name'], POLICY_ID)
-    if (report['source_binding'] != snapshot['source_binding']
-            or read_file(root, directory / 'candidate.zip') != candidate):
-        raise ValueError('XML mapping candidate differs from the approved original source.')
-    # The sealer rechecks actual compiler log bytes and exact final APEX members.
-    package, proof = xml_mapping._seal_validated_xml_package(candidate,
-        {'candidate_sha256': sha(candidate), 'validation': receipt['proof']['validation']}, directory / 'validation')
-    if (proof != receipt['proof'] or read_file(root, directory / 'apexlang.zip') != package
-            or receipt['source_binding'] != snapshot['source_binding']):
-        raise ValueError('XML mapping package proof changed.')
-    counts = report['metadata']['behavior_coverage']
-    generated = sum(1 for row in report['mapping_ledger']['code_units'] if row['status'] == 'generated_wired_adapted')
+    stored_candidate = read_file(root, directory / 'candidate.zip')
+    package = read_file(root, directory / 'apexlang.zip')
+    if snapshot['catalog_sha256'] == xml_mapping.mapping_catalog()['catalog_sha256']:
+        candidate, report = xml_mapping.generate_xml_package(docs, snapshot['project_id'], snapshot['project_name'], POLICY_ID)
+        if report['source_binding'] != snapshot['source_binding'] or stored_candidate != candidate:
+            raise ValueError('XML mapping candidate differs from the approved original source.')
+        sealed, proof = xml_mapping._seal_validated_xml_package(candidate,
+            {'candidate_sha256': sha(candidate), 'validation': receipt['proof']['validation']}, directory / 'validation')
+        if proof != receipt['proof'] or package != sealed:
+            raise ValueError('XML mapping package proof changed.')
+        metadata, ledger, gaps = report['metadata'], report['mapping_ledger'], report.get('gap_report')
+    else:
+        # Original consent/result event anchors were verified above. Preserve
+        # old completed output under its own catalog, not current-engine claims.
+        metadata, ledger, files = verify_retained_package(stored_candidate, package,
+            receipt['proof'], snapshot, docs, directory / 'validation')
+        gaps = json.loads(files['fox-package/mapping-gaps.json']) if 'fox-package/mapping-gaps.json' in files else None
+    if receipt['source_binding'] != snapshot['source_binding']:
+        raise ValueError('XML mapping source binding changed.')
+    counts = metadata['behavior_coverage']
+    generated = sum(1 for row in ledger['code_units'] if row['status'] == 'generated_wired_adapted')
+    details = _gap_fields(gaps, ledger, snapshot['source_binding'])
     return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
-                     'total_units': counts['total'], 'package_sha256': sha(package)}
+                     'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _gap_fields(report, ledger, source_binding):
+    if report is None:
+        return {'gaps_available': False, 'gap_summary': None, 'gaps': []}
+    remaining = {r['source_unit_id'] for r in ledger['code_units'] if r['status'] != 'generated_wired_adapted'}
+    rows, summary = report['gaps'], report['summary']
+    if (report['scope'] != 'fox-source-mapping-gaps-v1' or report['source_binding'] != source_binding
+            or type(rows) is not list or len(rows) != len(remaining)
+            or {r['source_unit_id'] for r in rows} != remaining
+            or report['not_yet_converted'] != len(rows) or set(summary) != set(CATEGORIES)):
+        raise ValueError('Saved mapping gaps do not match the source coverage.')
+    owners = {'engine_mapping': 'FOX_ENGINE', 'engine_context': 'FOX_ENGINE',
+              'missing_source': 'SOURCE_OWNER', 'review_required': 'REVIEWER'}
+    fields = {'source_unit_id', 'source_name', 'source_file', 'source_line',
+              'category', 'reason', 'message', 'next_action', 'owner'}
+    for row in rows:
+        if (set(row) != fields or row['category'] not in owners or row['owner'] != owners[row['category']]
+                or type(row['source_line']) is not int or row['source_line'] < 1
+                or any(type(row[k]) is not str or not 0 < len(row[k]) <= 4000 for k in fields - {'source_line'})):
+            raise ValueError('Saved mapping gap fields are invalid.')
+    if any(type(summary[k]) is not int or summary[k] < 0
+           or summary[k] != sum(r['category'] == k for r in rows) for k in CATEGORIES):
+        raise ValueError('Saved mapping gap counts are invalid.')
+    return {'gaps_available': True, 'gap_summary': summary, 'gaps': rows}
 
 
 def public_run(c, root, run, current_hash=None, current_sid=None):
@@ -145,7 +180,8 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
     result.update(project_id=run['project'], conversion_profile=PROFILE, request_id=None,
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
-        download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False)
+        download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
+        gaps_available=False, gap_summary=None, gaps=[])
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])
@@ -190,4 +226,4 @@ def run_job(db, root, run):
         c.execute('INSERT INTO events(owner,action,object_id,created) VALUES(?,?,?,?)',
                   (snapshot['owner'], RESULT + sha(receipt), run['id'], time.time()))
         c.execute("UPDATE runs SET state='GENERATED',message=?,artifact=NULL,updated=? WHERE id=?",
-                  ('APEXlang generated and format validated. Unsupported units remain listed; runtime and business acceptance are pending.', time.time(), run['id']))
+                  ('APEXlang generated and format validated. Remaining conversion gaps are explained; runtime and business acceptance are pending.', time.time(), run['id']))

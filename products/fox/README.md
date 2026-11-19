@@ -9,6 +9,20 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## More business mappings and specific gap explanations - 19 November 2026
+
+Version 0.33.0 adds [local comparison function/formula mapping](docs/business-comparison-mapping.md),
+including concatenation and explicit control-session inputs. Helper bodies are
+counted once only when a supported caller is generated. The package and website
+explain each unconverted unit as an engine mapping/context gap, a positively
+identified missing definition, or a review need. Historical completed packages
+retain their original source/catalog/compiler proof across library upgrades.
+
+The retained-source candidate increases from two to four generated/adapted code
+units. Other business workflows remain unfinished; generated and format validated
+are still distinct from target execution and business acceptance. See the changelog
+for actual deployment and acceptance status.
+
 ## Verified private web checkpoint - 19 November 2026
 
 The private preview is on 0.32.1. An authenticated browser started one reusable

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="SECOND_COMPARISON">
+  <Block Name="ROWS" DatabaseBlock="true">
+    <Item Name="PREFIX" ItemType="Text Item" DataType="Char" MaximumLength="16" DatabaseItem="true"/>
+    <Item Name="CODE" ItemType="Text Item" DataType="Char" MaximumLength="16" DatabaseItem="true"/>
+    <Item Name="MATCH_CODE" ItemType="Display Item" DataType="Number" DatabaseItem="false" Formula="SAME_TEXT(:PANEL.INPUT_VALUE, :ROWS.PREFIX || :ROWS.CODE)"/>
+    <Item Name="TRAILING_SPACE" ItemType="Display Item" DataType="Number" DatabaseItem="false" Formula="SAME_TEXT('X', 'X ')"/>
+  </Block>
+  <Block Name="PANEL" DatabaseBlock="false">
+    <Item Name="INPUT_VALUE" ItemType="Text Item" DataType="Char" MaximumLength="50" DatabaseItem="false"/>
+  </Block>
+  <ProgramUnit Name="SAME_TEXT" ProgramUnitText="FUNCTION SAME_TEXT(left_value VARCHAR2, right_value VARCHAR2) RETURN NUMBER IS result_value NUMBER := 0; BEGIN IF left_value = right_value THEN result_value := 1; END IF; RETURN(result_value); END;"/>
+</FormModule>

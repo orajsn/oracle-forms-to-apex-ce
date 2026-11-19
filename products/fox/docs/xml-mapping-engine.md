@@ -1,6 +1,7 @@
 # Reusable XML-to-APEXlang mapping engine
 
 FOX 0.32.0 adds a project website route alongside the operator CLI below.
+FOX 0.33.0 adds [source-backed local comparison helpers and classified gaps](business-comparison-mapping.md).
 
 FOX's XML-first engine turns supported Forms source patterns into native APEXlang
 using versioned, deterministic mapping code. Codex is used during engineering to

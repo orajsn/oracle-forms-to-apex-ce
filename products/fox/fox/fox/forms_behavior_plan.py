@@ -16,8 +16,8 @@ import zipfile
 
 from . import forms_facts
 from .forms_understanding_packet import _build
-from forms2apex import numeric_expression
-from forms2apex.native_behavior import MAX_OPERATIONS
+from forms2apex import numeric_expression, local_comparison
+from forms2apex.native_behavior import MAX_OPERATIONS, control_binding
 
 SCOPE = "fox-forms-behavior-plan-v1"
 _IDENT = re.compile(r"[A-Za-z][A-Za-z0-9_$#]{0,127}\Z")
@@ -181,7 +181,10 @@ def _recognize(unit, owner, text):
         try:
             expression = numeric_expression.parse_expression(text)
         except numeric_expression.NumericExpressionError as exc:
-            raise UnsupportedBehavior(str(exc)) from None
+            try:
+                return {"kind": "local_comparison_report_column", "expression": local_comparison.parse_call(text)}
+            except local_comparison.ComparisonError:
+                raise UnsupportedBehavior(str(exc)) from None
         root = expression["root"]
         if (root["kind"] == "call" and root["function"] == "CEIL"
                 and root["args"][0]["kind"] == "reference"):
@@ -301,6 +304,8 @@ def _parent(raw, packet, chunks):
         if (source is None or source["kind"] != "Block" or source["name"] != block.get("name")
                 or block_id in seen_blocks):
             raise ValueError("Parent block identity collision or mismatch.")
+        if "source_module_id" in block and block["source_module_id"] != source["module_id"]:
+            raise ValueError("Parent block source module mismatch.")
         seen_blocks.add(block_id)
         if block.get("classification") != "database":
             continue
@@ -366,6 +371,106 @@ def _resolve(parts, owner, objects):
     if len(found) != 1:
         raise UnsupportedBehavior("item_reference_is_not_unique")
     return found[0]
+
+
+def _bind_comparison(recognized, owner, objects, metadata, targets, members, helpers, code_owners):
+    expression = recognized["expression"]
+    candidates = [obj for obj in objects.values() if obj["kind"] == "ProgramUnit"
+                  and obj["module_id"] == owner["module_id"]
+                  and (obj["name"] or "").upper() == expression["function"]]
+    if len(candidates) > 1:
+        raise UnsupportedBehavior("local_function_target_not_unique")
+    if not candidates:
+        # A name absent from module-local declarations may be a database or
+        # builtin routine. Absence alone never proves that customer source is
+        # missing; resolving those targets is a separate engine capability.
+        raise UnsupportedBehavior("function_target_resolution_not_implemented")
+    helper = helpers.get(candidates[0]["id"])
+    if helper is None:
+        if candidates[0]["id"] not in code_owners:
+            raise UnsupportedBehavior("local_function_definition_missing")
+        raise UnsupportedBehavior("local_function_complete_body_not_supported")
+    if metadata[owner["id"]].get("DataType", "").strip().upper() != "NUMBER":
+        raise UnsupportedBehavior("direct_source_number_type_required")
+    if owner["id"] not in targets:
+        raise LookupError("source_item_has_no_parent_report_column")
+    block, output = targets[owner["id"]]
+    if block.get("source_module_id") != owner["module_id"]:
+        raise LookupError("source_module_has_no_proven_native_scope")
+    if output["data_type"] != "NUMBER":
+        raise ValueError("Comparison output must bind a NUMBER column.")
+    trace = _json(members["fox-package/source-to-page.json"])
+    bindings, sizes = {}, {}
+    for parts in local_comparison.validate_expression(expression):
+        same_row = len(parts) == 1 or parts[0] == (block["name"] or "").upper()
+        if same_row:
+            item = _resolve(parts, owner, objects)
+        else:
+            found = [obj for obj in objects.values() if obj["kind"] == "Item"
+                     and obj["module_id"] == owner["module_id"]
+                     and (obj["name"] or "").upper() == parts[-1]
+                     and (objects.get(obj["block_id"], {}).get("name") or "").upper() == parts[0]]
+            if len(found) != 1:
+                raise UnsupportedBehavior("control_reference_is_not_unique")
+            item = found[0]
+        props = metadata[item["id"]]
+        if props.get("DataType", "").strip().upper() not in {"CHAR", "VARCHAR2"}:
+            raise UnsupportedBehavior("direct_source_varchar2_type_required")
+        if (props.get("Formula", "").strip() or props.get("CalculateMode", "").strip().upper() in {"FORMULA", "SUMMARY"}):
+            raise UnsupportedBehavior("input_computation_or_summary_not_implemented")
+        length = props.get("MaximumLength", "")
+        if not re.fullmatch(r"[0-9]{1,4}", length) or not 0 < int(length) <= 4000:
+            raise UnsupportedBehavior("character_argument_length_context_required")
+        # Source/export lengths and target declarations do not establish target
+        # NLS length semantics. Six bytes per declared character also bounds
+        # supplementary characters in Oracle UTF8; never rely on truncation.
+        sizes[tuple(parts)] = int(length) * 6
+        if same_row:
+            if item["id"] not in targets:
+                raise LookupError("source_item_has_no_parent_report_column")
+            input_block, field = targets[item["id"]]
+            if input_block is not block or field["data_type"] != "VARCHAR2":
+                raise ValueError("Comparison row input target mismatch.")
+            declarations = re.findall(r"\b" + re.escape(field["column"]) + r"\s+VARCHAR2\(([0-9]+)\)",
+                                      members["fox-package/supporting-schema.sql"].decode())
+            if declarations != [length]:
+                raise UnsupportedBehavior("character_target_length_context_required")
+            binding = {"source_item_id": item["id"], "column": field["column"]}
+        else:
+            source_block = objects[item["block_id"]]
+            if source_block.get("classification") != "control":
+                raise UnsupportedBehavior("cross_database_block_reference")
+            if (props.get("ItemType", "").strip().upper() != "TEXT ITEM"
+                    or props.get("Visible", "true").strip().lower() != "true"
+                    or props.get("Enabled", "true").strip().lower() != "true"
+                    or props.get("ConcealData", "false").strip().lower() != "false"
+                    or any("AUTH" in key.upper() and val.strip() for key, val in props.items())):
+                raise UnsupportedBehavior("control_input_not_eligible_for_session_adaptation")
+            try:
+                binding = control_binding(members, trace, item["id"])
+            except ValueError:
+                raise LookupError("source_control_has_no_proven_native_page_item") from None
+            traced = [candidate for candidate in trace["blocks"]
+                      if candidate.get("source_block_id") == source_block["id"]]
+            if (len(traced) != 1 or traced[0].get("name") != source_block["name"]
+                    or traced[0].get("source_module_id") != owner["module_id"]
+                    or binding["source_block_id"] != source_block["id"]
+                    or [field.get("source_name") for field in traced[0].get("items", [])
+                        if field.get("source_item_id") == item["id"]] != [item["name"]]):
+                raise ValueError("Source control owner or name does not match native target trace.")
+        bindings[item["id"]] = binding
+    for arg in expression["args"]:
+        length = sum(sizes[tuple(part["parts"])] if part["kind"] == "reference"
+                     else sum(1 if ord(char) < 128 else 6 for char in part["value"])
+                     if part["kind"] == "literal" else 0
+                     for part in arg["parts"])
+        if length > 4000:
+            raise UnsupportedBehavior("character_concatenation_length_exceeds_sql_limit")
+    return {"kind": recognized["kind"], "source_block_id": block["source_block_id"],
+            "source_item_id": owner["id"], "expression": expression,
+            "input_bindings": [bindings[key] for key in sorted(bindings)], "supporting_units": [helper],
+            "target": {"table": block["table_name"], "report_file": block["report_file"],
+                       "report_page_id": block["report_page_id"], "output_column": output["column"]}}
 
 
 def _bind(recognized, owner, objects, metadata, targets):
@@ -468,9 +573,28 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
                 or not set(selected_unit_ids) <= available_ids):
             raise ValueError("Selection must contain unique complete source-unit identities.")
         selected_ids = set(selected_unit_ids)
-    _, targets, parent_selected, manifest_sha, trace_sha = _parent(parent_zip, packet, chunks)
+    members, targets, parent_selected, manifest_sha, trace_sha = _parent(parent_zip, packet, chunks)
     objects, metadata = _source_objects(documents, packet)
     chunk_by_unit = {chunk["code_unit_id"]: chunk for chunk in chunks}
+    code_owners = {unit["owner_id"] for unit in units}
+    helpers = {}
+    for unit in units:
+        owner = objects[unit["owner_id"]]
+        if (owner["kind"] != "ProgramUnit" or unit["source_attribute"] != "ProgramUnitText"
+                or unit["id"] not in selected_ids or chunk_by_unit[unit["id"]]["id"] not in parent_selected):
+            continue
+        try:
+            semantic, receipt = decode_control_entities(chunk_by_unit[unit["id"]]["text"])
+            definition = local_comparison.parse_function(semantic)
+            if definition["function_name"] != (owner["name"] or "").upper():
+                continue
+            helpers[owner["id"]] = {"source_unit_id": unit["id"], "source_unit_sha256": unit["sha256"],
+                                    "source_chunk_id": chunk_by_unit[unit["id"]]["id"],
+                                    "source_owner_id": owner["id"], "module_id": owner["module_id"],
+                                    "function_name": definition["function_name"],
+                                    "semantic_kind": "equality-indicator-v1", "decode_receipt": receipt}
+        except (UnsupportedBehavior, local_comparison.ComparisonError):
+            continue
     operations, coverage, occupied = [], [], set()
     validation_reports = set()
     for unit in units:
@@ -489,12 +613,16 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
                 raise ValueError("Raw unit hash mismatch after source reconstruction.")
             row["decode_receipt"] = receipt
             owner = objects[unit["owner_id"]]
+            if owner["id"] in helpers:
+                raise UnsupportedBehavior("supported_local_function_has_no_supported_caller")
             recognized = _recognize(unit, owner, semantic)
             if chunk["id"] not in parent_selected:
                 raise LookupError("source_unit_not_selected_in_parent")
-            operation = _bind(recognized, owner, objects, metadata, targets)
+            operation = (_bind_comparison(recognized, owner, objects, metadata, targets, members, helpers, code_owners)
+                         if recognized["kind"] == "local_comparison_report_column"
+                         else _bind(recognized, owner, objects, metadata, targets))
             collision = ("report_formula" if operation["kind"] in
-                         {"ceil_report_column", "numeric_expression_report_column"}
+                         {"ceil_report_column", "numeric_expression_report_column", "local_comparison_report_column"}
                          else operation["kind"], operation["source_item_id"])
             if collision in occupied:
                 raise ValueError("Multiple source units would overwrite one native behavior target.")
@@ -519,6 +647,13 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
             row["reason"] = str(exc)
         except LookupError as exc:
             row.update(status="missing_input", reason=str(exc))
+    for row in coverage:
+        callers = sorted(op["operation_id"] for op in operations
+                         if any(support["source_unit_id"] == row["source_unit_id"]
+                                for support in op.get("supporting_units", [])))
+        if callers:
+            row.update(status="planned_wired_adapted", reason="pure_local_function_inlined",
+                       operation_id=callers[0], operation_ids=callers)
     plan = {"schema_version": 1, "scope": SCOPE, "source_binding": packet["source_binding"],
             "parent_zip_sha256": _hash(parent_zip), "source_manifest_sha256": manifest_sha,
             "parent_trace_sha256": trace_sha,
@@ -532,8 +667,13 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
                              "Original item minimum is independent of the NVL-zero trigger predicate."]
                             if any(op["kind"] == "numeric_nonzero_then_focus" for op in operations) else [])
                            + (["Report formulas use persisted synthetic rows, not the unsaved Forms record buffer."]
-                              if any(op["kind"] in {"ceil_report_column", "numeric_expression_report_column"}
+                              if any(op["kind"] in {"ceil_report_column", "numeric_expression_report_column", "local_comparison_report_column"}
                                      for op in operations) else [])
+                           + (["Apply control values submits source-derived controls to persistent per-session state; report formulas read submitted state. Original trigger population is not implemented."]
+                              if any("page_item" in binding for op in operations
+                                     for binding in op.get("input_bindings", [])) else [])
+                           + (["Comparison translation requires compatible USING_NLS_COMP column collation and matching comparison session settings; runtime equivalence remains unverified."]
+                              if any(op["kind"] == "local_comparison_report_column" for op in operations) else [])
                            + ["Parent synthetic tables are not authoritative customer database objects."],
             "remaining_scope": "Untranslated code units, record lifecycle, dependencies and full business workflows remain unresolved."}
     plan["plan_sha256"] = _hash(_canonical(plan))
