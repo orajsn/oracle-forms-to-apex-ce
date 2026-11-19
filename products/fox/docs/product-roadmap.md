@@ -1,9 +1,27 @@
 # FOX product and UI roadmap
 
-Updated 8 November 2026. The execution reset below supersedes the delivery order
-of older increments, not their evidence or the full product requirements.
+Updated 19 November 2026. The current direction below supersedes older delivery
+sequencing, not its evidence or the full product requirements.
 Implementation evidence and deployment status are separate; a started goal is
 not a completed feature, deployed release or availability claim.
+
+## Current direction - 19 November 2026
+
+Prioritize reusable conversion capability from customer Forms evidence. Codex
+helps develop and verify source-to-target mappings; FOX executes the installed
+mapping library for subsequent inputs. Known structures and supported behavior
+should not require a new AI interpretation or a previous generated package.
+Runtime AI remains useful for unfamiliar interpretation under its existing scope;
+it is not automatically invoked for unresolved source.
+
+The current increment is a direct XML-to-APEXlang library/operator route with a
+versioned catalog and generic numeric-expression mapping. Next integrate this
+route into the normal web workflow, expand native property/LOV rules and establish
+shared record context before transactional or cross-block behavior. Keep source
+structure, implemented behavior and missing dependencies separate in the output.
+Target testing remains necessary for runtime claims, but is not a prerequisite
+for researching and implementing more reliable conversion mappings. The older
+OPAF-first sequencing below is historical where it conflicts with this direction.
 
 ## Execution reset: deliver the converter, then broaden the product
 

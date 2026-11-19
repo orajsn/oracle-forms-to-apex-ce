@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="STOCK_SAMPLE">
+  <Block Name="STOCK_POSITION" DatabaseBlock="true">
+    <Item Name="AVAILABLE" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Available"/>
+    <Item Name="RESERVED" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Reserved"/>
+    <Item Name="PACK_SIZE" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Pack size"/>
+    <Item Name="FREE_PACKS" ItemType="Display Item" DataType="Number" DatabaseItem="false" Prompt="Free packs" Formula="FLOOR((:AVAILABLE - NVL(:RESERVED,0)) / :PACK_SIZE)"/>
+    <Item Name="ABSOLUTE_GAP" ItemType="Display Item" DataType="Number" DatabaseItem="false" Prompt="Absolute gap" Formula="ABS(:AVAILABLE - :RESERVED)"/>
+    <Trigger Name="POST-QUERY" TriggerText="BEGIN STOCK_SERVICE.REFRESH_POSITION; END;"/>
+  </Block>
+</FormModule>

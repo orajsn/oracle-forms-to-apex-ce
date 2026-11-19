@@ -1,6 +1,6 @@
 """Closed, source-bound behavior planning; no SQL execution or runtime claims.
 
-Only two whole-source grammars are supported. Original XML/chunks are immutable;
+Only finite whole-source grammars are supported. Original XML/chunks are immutable;
 control-entity decoding has a separate receipt. The parent ZIP is bound by digest,
 not authenticated: its trusted baseline remains the integration caller's gate.
 """
@@ -16,6 +16,8 @@ import zipfile
 
 from . import forms_facts
 from .forms_understanding_packet import _build
+from forms2apex import numeric_expression
+from forms2apex.native_behavior import MAX_OPERATIONS
 
 SCOPE = "fox-forms-behavior-plan-v1"
 _IDENT = re.compile(r"[A-Za-z][A-Za-z0-9_$#]{0,127}\Z")
@@ -175,14 +177,17 @@ class _Parser:
 
 
 def _recognize(unit, owner, text):
-    parser = _Parser(_tokens(text))
     if unit["source_attribute"] == "Formula" and owner["kind"] == "Item":
-        parser.take("CEIL")
-        parser.take("(")
-        reference = parser.reference()
-        parser.take(")")
-        parser.end()
-        return {"kind": "ceil_report_column", "reference": reference}
+        try:
+            expression = numeric_expression.parse_expression(text)
+        except numeric_expression.NumericExpressionError as exc:
+            raise UnsupportedBehavior(str(exc)) from None
+        root = expression["root"]
+        if (root["kind"] == "call" and root["function"] == "CEIL"
+                and root["args"][0]["kind"] == "reference"):
+            return {"kind": "ceil_report_column", "reference": root["args"][0]["parts"]}
+        return {"kind": "numeric_expression_report_column", "expression": expression}
+    parser = _Parser(_tokens(text))
     if (owner["kind"] != "Trigger" or owner["name"] is None
             or owner["name"].upper() != "KEY-NEXT-ITEM"
             or unit["source_attribute"] != "TriggerText"):
@@ -364,6 +369,36 @@ def _resolve(parts, owner, objects):
 
 
 def _bind(recognized, owner, objects, metadata, targets):
+    if recognized["kind"] == "numeric_expression_report_column":
+        if metadata[owner["id"]].get("DataType", "").strip().upper() != "NUMBER":
+            raise UnsupportedBehavior("direct_source_number_type_required")
+        if owner["id"] not in targets:
+            raise LookupError("source_item_has_no_parent_report_column")
+        block, output_field = targets[owner["id"]]
+        if output_field["data_type"] != "NUMBER":
+            raise ValueError("Numeric expression output must bind a NUMBER column.")
+        bindings = {}
+        for parts in numeric_expression.validate_expression(recognized["expression"]):
+            item = _resolve(parts, owner, objects)
+            if item["id"] == owner["id"]:
+                raise UnsupportedBehavior("self_referencing_formula")
+            props = metadata[item["id"]]
+            if props.get("DataType", "").strip().upper() != "NUMBER":
+                raise UnsupportedBehavior("direct_source_number_type_required")
+            if (props.get("Formula", "").strip()
+                    or props.get("CalculateMode", "").strip().upper() in ("FORMULA", "SUMMARY")):
+                raise UnsupportedBehavior("input_computation_or_summary_not_implemented")
+            if item["id"] not in targets:
+                raise LookupError("source_item_has_no_parent_report_column")
+            input_block, field = targets[item["id"]]
+            if input_block is not block or field["data_type"] != "NUMBER":
+                raise ValueError("Source NUMBER or same-block parent target mismatch.")
+            bindings[item["id"]] = {"source_item_id": item["id"], "column": field["column"]}
+        return {"kind": recognized["kind"], "source_block_id": block["source_block_id"],
+                "source_item_id": owner["id"], "expression": recognized["expression"],
+                "input_bindings": [bindings[key] for key in sorted(bindings)],
+                "target": {"table": block["table_name"], "report_file": block["report_file"],
+                           "report_page_id": block["report_page_id"], "output_column": output_field["column"]}}
     if recognized["kind"] == "ceil_report_column":
         output = owner
         value = _resolve(recognized["reference"], owner, objects)
@@ -437,6 +472,7 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
     objects, metadata = _source_objects(documents, packet)
     chunk_by_unit = {chunk["code_unit_id"]: chunk for chunk in chunks}
     operations, coverage, occupied = [], [], set()
+    validation_reports = set()
     for unit in units:
         row = {"source_unit_id": unit["id"], "source_unit_sha256": unit["sha256"],
                "source_chunk_id": chunk_by_unit[unit["id"]]["id"],
@@ -457,9 +493,20 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
             if chunk["id"] not in parent_selected:
                 raise LookupError("source_unit_not_selected_in_parent")
             operation = _bind(recognized, owner, objects, metadata, targets)
-            collision = (operation["kind"], operation["source_item_id"])
+            collision = ("report_formula" if operation["kind"] in
+                         {"ceil_report_column", "numeric_expression_report_column"}
+                         else operation["kind"], operation["source_item_id"])
             if collision in occupied:
                 raise ValueError("Multiple source units would overwrite one native behavior target.")
+            # Capacity is a mapping limitation, not a reason to lose the whole
+            # source set. Preserve every deferred unit with its exact identity.
+            if len(operations) >= MAX_OPERATIONS:
+                raise UnsupportedBehavior("behavior_operation_capacity_exceeded")
+            if operation["kind"] == "numeric_nonzero_then_focus":
+                report = operation["target"]["report_file"]
+                if report in validation_reports:
+                    raise UnsupportedBehavior("report_validation_link_capacity_exceeded")
+                validation_reports.add(report)
             occupied.add(collision)
             operation.update(operation_id="fb1-" + _hash(_canonical([packet["source_binding"], unit["id"]]))[:24],
                              source_unit_id=unit["id"], source_unit_sha256=unit["sha256"],
@@ -479,11 +526,15 @@ def build_behavior_plan(documents, parent_zip, selected_unit_ids=None):
                         for entry in packet["sources"]],
             "code_unit_count": len(units), "operations": operations, "coverage": coverage,
             "native_generated": False, "runtime_verified": False, "business_accepted": False,
-            "adaptations": ["Explicit Continue button replaces Forms keyboard event.",
-                            "One native validation notification replaces repeated Forms MESSAGE calls.",
-                            "Validation-only row view performs no save, DML or commit.",
-                            "Original item minimum is independent of the NVL-zero trigger predicate.",
-                            "Parent synthetic tables are not authoritative customer database objects."],
+            "adaptations": (["Explicit Continue button replaces Forms keyboard event.",
+                             "One native validation notification replaces repeated Forms MESSAGE calls.",
+                             "Validation-only row view performs no save, DML or commit.",
+                             "Original item minimum is independent of the NVL-zero trigger predicate."]
+                            if any(op["kind"] == "numeric_nonzero_then_focus" for op in operations) else [])
+                           + (["Report formulas use persisted synthetic rows, not the unsaved Forms record buffer."]
+                              if any(op["kind"] in {"ceil_report_column", "numeric_expression_report_column"}
+                                     for op in operations) else [])
+                           + ["Parent synthetic tables are not authoritative customer database objects."],
             "remaining_scope": "Untranslated code units, record lifecycle, dependencies and full business workflows remain unresolved."}
     plan["plan_sha256"] = _hash(_canonical(plan))
     return plan

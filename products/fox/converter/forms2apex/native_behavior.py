@@ -16,13 +16,15 @@ from pathlib import Path, PurePosixPath
 import re
 import zipfile
 
-from . import native, native_project
+from . import native, native_project, numeric_expression
 
 SCOPE = "fox-forms-behavior-plan-v1"
 RENDERER = "fox-native-behavior-v1"
+MAX_OPERATIONS = 100
 _IDENT = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _PREFIX = "fox-package/behavior-"
+_CALCULATIONS = {"ceil_report_column", "numeric_expression_report_column"}
 _BASE = {"operation_id", "kind", "source_unit_id", "source_unit_sha256", "source_chunk_id",
          "source_block_id", "source_item_id", "decode_receipt", "target"}
 _ROOT = {"schema_version", "scope", "source_binding", "parent_zip_sha256",
@@ -96,8 +98,48 @@ def _minimum(value):
     return value
 
 
+def _expression_sql(operation, block, field):
+    """Recheck source names, types and the exact reference-to-column relation."""
+    try:
+        refs = numeric_expression.validate_expression(operation["expression"])
+    except numeric_expression.NumericExpressionError:
+        raise BehaviorRenderError("BEHAVIOR_EXPRESSION_INVALID") from None
+    _need(field["data_type"] == "NUMBER" and field["column"] == operation["target"]["output_column"],
+          "EXPRESSION_OUTPUT_MISMATCH")
+    expected, columns = {}, {}
+    for parts in refs:
+        _need(len(parts) == 1 or (type(block.get("name")) is str and parts[0] == block["name"].upper()),
+              "EXPRESSION_CROSS_BLOCK")
+        matches = [item for item in block["items"]
+                   if type(item.get("source_name")) is str and item["source_name"].upper() == parts[-1]]
+        _need(len(matches) == 1, "EXPRESSION_REFERENCE_NOT_UNIQUE")
+        item = matches[0]
+        _need(item["data_type"] == "NUMBER" and item["source_item_id"] != field["source_item_id"]
+              and item["column"] != field["column"], "EXPRESSION_INPUT_MISMATCH")
+        # An item identity must itself identify exactly one target column.
+        _one(block["items"], "source_item_id", item["source_item_id"])
+        _identifier(item["column"])
+        expected[item["source_item_id"]] = {"source_item_id": item["source_item_id"], "column": item["column"]}
+        columns[parts] = item["column"]
+    _need(type(operation["input_bindings"]) is list and operation["input_bindings"] ==
+          [expected[key] for key in sorted(expected)], "EXPRESSION_BINDING_MISMATCH")
+    try:
+        return numeric_expression.render_sql(operation["expression"], columns)
+    except numeric_expression.NumericExpressionError:
+        raise BehaviorRenderError("BEHAVIOR_EXPRESSION_INVALID") from None
+
+
 def _validate(files, raw, value):
     _need(type(value) is dict and set(value) == _ROOT, "PLAN_FIELDS_INVALID")
+    # Bound untrusted expression trees before deepcopy/canonical JSON recursion.
+    _need(type(value["operations"]) is list and 1 <= len(value["operations"]) <= MAX_OPERATIONS,
+          "OPERATION_COUNT_INVALID")
+    for operation in value["operations"]:
+        if type(operation) is dict and operation.get("kind") == "numeric_expression_report_column":
+            try:
+                numeric_expression.validate_expression(operation.get("expression"))
+            except numeric_expression.NumericExpressionError:
+                raise BehaviorRenderError("BEHAVIOR_EXPRESSION_INVALID") from None
     plan = deepcopy(value)
     _need(type(plan["schema_version"]) is int and plan["schema_version"] == 1
           and plan["scope"] == SCOPE, "PLAN_VERSION_INVALID")
@@ -116,7 +158,7 @@ def _validate(files, raw, value):
           "SOURCE_BINDING_MISMATCH")
     _need(plan["sources"] == manifest["files"], "SOURCE_MANIFEST_MISMATCH")
     operations = plan["operations"]
-    _need(type(operations) is list and 1 <= len(operations) <= 100, "OPERATION_COUNT_INVALID")
+    _need(type(operations) is list and 1 <= len(operations) <= MAX_OPERATIONS, "OPERATION_COUNT_INVALID")
     coverage = plan["coverage"]
     _need(type(coverage) is list, "COVERAGE_INVALID")
     _need(type(plan["code_unit_count"]) is int and plan["code_unit_count"] == len(coverage)
@@ -149,6 +191,7 @@ def _validate(files, raw, value):
         _need(type(operation) is dict, "OPERATION_INVALID")
         kind = operation.get("kind")
         extras = ({"input_source_item_id"} if kind == "ceil_report_column" else
+                  {"expression", "input_bindings"} if kind == "numeric_expression_report_column" else
                   {"focus_source_item_id", "message", "message_call_count", "minimum"}
                   if kind == "numeric_nonzero_then_focus" else None)
         _need(extras is not None and set(operation) == _BASE | extras, "OPERATION_FIELDS_INVALID")
@@ -169,6 +212,7 @@ def _validate(files, raw, value):
         target = operation["target"]
         base_fields = {"table", "report_file", "report_page_id"}
         expected = base_fields | ({"input_column", "output_column"} if kind == "ceil_report_column" else
+                                 {"output_column"} if kind == "numeric_expression_report_column" else
                                  {"row_id_column", "value_column", "focus_column", "value_data_type", "focus_data_type"})
         _need(type(target) is dict and set(target) == expected, "TARGET_FIELDS_INVALID")
         _need(target["table"] == block["table_name"] and target["report_file"] == block["report_file"]
@@ -182,6 +226,10 @@ def _validate(files, raw, value):
                   and source["column"] == target["input_column"]
                   and field["column"] == target["output_column"]
                   and source["column"] != field["column"], "CEIL_BINDING_MISMATCH")
+            slot = (target["report_file"], field["column"])
+        elif kind == "numeric_expression_report_column":
+            _expression_sql(operation, block, field)
+            source = None
             slot = (target["report_file"], field["column"])
         else:
             source = _one(block["items"], "source_item_id", operation["focus_source_item_id"])
@@ -205,6 +253,12 @@ def _validate(files, raw, value):
         for key in expected - base_fields - {"value_data_type", "focus_data_type"}:
             _identifier(target[key])
         bound.append((operation, block, field, source))
+    outputs = {op["source_item_id"] for op in operations if op["kind"] in _CALCULATIONS}
+    for op in operations:
+        inputs = ([op["input_source_item_id"]] if op["kind"] == "ceil_report_column" else
+                  [entry["source_item_id"] for entry in op["input_bindings"]]
+                  if op["kind"] == "numeric_expression_report_column" else [])
+        _need(not outputs.intersection(inputs), "COMPUTED_INPUT_UNSUPPORTED")
     _need({unit for unit, row in units.items() if row["status"] == "planned_wired_adapted"} == seen_units,
           "COVERAGE_OPERATION_MISMATCH")
     return plan, bound
@@ -222,14 +276,19 @@ def _report(text, block):
 
 def _ceil(text, operations, block):
     old = _report(text, block)
-    targets = [operation["target"] for operation in operations]
-    replacements = {target["output_column"]: target["input_column"] for target in targets}
+    replacements = {}
+    for operation in operations:
+        target = operation["target"]
+        expression = (f"ceil({target['input_column']})" if operation["kind"] == "ceil_report_column" else
+                      _expression_sql(operation, block,
+                                      _one(block["items"], "source_item_id", operation["source_item_id"])))
+        replacements[target["output_column"]] = expression
     columns = [block["synthetic_key"]["column"]] + [i["column"] for i in block["items"] if i.get("column")]
     _need(len(columns) == len(set(columns)), "REPORT_COLUMN_COLLISION")
     for column in columns:
         _identifier(column)
         _need(text.count(f"        column {column} (\n") == 1, "REPORT_COLUMNS_MISMATCH")
-    projection = [f"ceil({replacements[column]}) as {column}" if column in replacements
+    projection = [f"{replacements[column]} as {column}" if column in replacements
                   else column for column in columns]
     query = ",\n                    ".join(projection)
     _need(len(f"select {query}\nfrom {block['table_name']}") <= 32767, "REPORT_QUERY_TOO_LARGE")
@@ -434,7 +493,7 @@ def render_behavior_package(parent_zip, plan):
     for operation, block, field, focus in sorted(bound, key=lambda v: v[0]["operation_id"]):
         report = operation["target"]["report_file"]
         text = changes.get(report, files[report]).decode("utf-8")
-        if operation["kind"] == "ceil_report_column":
+        if operation["kind"] in _CALCULATIONS:
             result = {"report_file": report, "output_column": operation["target"]["output_column"]}
         else:
             while candidate in occupied and candidate < 9000:
@@ -458,7 +517,7 @@ def render_behavior_package(parent_zip, plan):
     # no unrequested chained computation or evaluation order is inferred.
     calculations = {}
     for operation, block, _, _ in bound:
-        if operation["kind"] == "ceil_report_column":
+        if operation["kind"] in _CALCULATIONS:
             calculations.setdefault(operation["target"]["report_file"], (block, []))[1].append(operation)
     for report, (block, operations) in calculations.items():
         changes[report] = _ceil(changes[report].decode("utf-8"), operations, block).encode("utf-8")
@@ -468,7 +527,7 @@ def render_behavior_package(parent_zip, plan):
             row["status"] = "generated_wired_adapted"
     receipt = {"schema_version": 1, "scope": RENDERER, "parent_zip_sha256": _sha(raw),
                "renderer_sources": {name: _sha(Path(__file__).with_name(name).read_bytes()) for name in
-                                    ("native_behavior.py", "native.py", "native_project.py")},
+                                    ("native_behavior.py", "numeric_expression.py", "native.py", "native_project.py")},
                "plan_sha256": normalized["plan_sha256"],
                "plan_artifact_sha256": _sha(_json(normalized)), "source_binding": normalized["source_binding"],
                "generated_operations": generated, "coverage": coverage, "native_generated": True,

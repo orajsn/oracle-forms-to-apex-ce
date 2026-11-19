@@ -8,6 +8,34 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## [0.31.0] - 2026-11-19
+
+### [feature] Reuse installed mappings to generate APEXlang directly from XML
+Impact: Operators can generate a source-linked synthetic APEXlang application
+from fresh Forms XML without a previous AI job or generated parent package.
+Change: A deterministic structural policy feeds the existing native planner and
+renderer, then applies supported business mappings. The versioned catalog and
+source-to-target ledger distinguish structural objects, implemented code and
+unresolved dependencies. Multiple modules share one application; database blocks
+default to read-only reports. A bounded numeric expression tree adds arithmetic,
+NULL, CEIL/FLOOR/ABS/ROUND/TRUNC/NVL with exact NUMBER bindings and no raw SQL
+insertion, implicit casts or invented error handling. Original XML is preserved.
+Delivery: Source release with a library/operator CLI. Normal web workflow
+integration, hosted deployment and customer-target execution are separate.
+Verification: Formula parser/planner/renderer and existing assembly regressions
+passed 234 checks; the final overlapping XML/capacity/planner/renderer/release set
+passed 182 checks. Independent source/artifact review cleared the final code.
+Actual local CLI runs on two synthetic modules and retained original XML both
+passed SQLcl 26.1.2 /nolog validation without warnings. The synthetic modules
+produced four generated behaviors and one explicit external-call gap; the retained
+source kept two generated behaviors and 51 unsupported units. No prior package or
+AI request was needed. Original source and earlier packages were preserved.
+Remaining: Synthetic structure is not customer-schema equivalence. Relationship,
+record-buffer, transaction, external package and unsupported trigger behavior
+remain explicit. Formula calculations use persisted rows; the Continue page does
+not save. No AI approval, target import/runtime proof or business acceptance is
+inferred. See [mapping architecture and operator guide](docs/xml-mapping-engine.md).
+
 ## [0.30.0] - 2026-11-18
 
 ### [feature] Generate source-linked calculations and native APEX validations

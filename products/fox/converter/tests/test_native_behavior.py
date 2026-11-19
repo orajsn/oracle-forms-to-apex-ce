@@ -11,6 +11,7 @@ import pytest
 
 from forms2apex import native_behavior as renderer
 from forms2apex import native_blueprint
+from forms2apex.numeric_expression import parse_expression
 from test_native_blueprint import spec
 
 
@@ -134,6 +135,145 @@ def test_ceil_replaces_only_output_projection_and_exposes_default_column():
     assert f"            displayColumn {target['output_column']} (" in page
     assert page.count("ceil(") == 1
     assert "insert " not in page.lower()
+
+
+def expression_fixture(formula=None):
+    parent, plan, files = fixture()
+    block = json.loads(files["fox-package/source-to-page.json"])["blocks"][0]
+    source = block["items"][1]
+    op = plan["operations"][0]
+    op["kind"] = "numeric_expression_report_column"
+    op.pop("input_source_item_id")
+    op["target"].pop("input_column")
+    op["expression"] = parse_expression(formula or f"ROUND(NVL(:{source['source_name']}, 0) / 3, 2)")
+    op["input_bindings"] = [{"source_item_id": source["source_item_id"], "column": source["column"]}]
+    return parent, seal(plan), files, block
+
+
+def test_numeric_expression_changes_only_declared_projection_preserves_other_evidence():
+    parent, plan, originals, block = expression_fixture()
+    before = deepcopy(plan)
+    output, receipt = renderer.render_behavior_package(parent, plan)
+    files = unpack(output)
+    op = plan["operations"][0]
+    target = op["target"]
+    source = op["input_bindings"][0]["column"]
+    report = files[target["report_file"]].decode()
+    expected = f"round((nvl({source}, 0) / 3), 2) as {target['output_column']}"
+    assert expected in report
+    query = report.split("```sql\n", 1)[1].split("```", 1)[0]
+    assert query.count(" as ") == 1
+    assert [line.strip().rstrip(",") for line in query.splitlines() if line.strip()] == [
+        "select FOX_ROW_ID", *[expected if item["column"] == target["output_column"] else item["column"]
+                              for item in block["items"]], f"from {block['table_name']}"]
+    assert f"            displayColumn {target['output_column']} (" in report
+    assert plan == before
+    assert "numeric_expression.py" in receipt["renderer_sources"]
+    for name in originals:
+        if name not in receipt["changed_members"]:
+            assert originals[name] == files[name]
+    assert receipt["validation"]["passed"] is False
+    assert receipt["runtime_verified"] is receipt["business_accepted"] is False
+    assert renderer.render_behavior_package(parent, plan) == (output, receipt)
+
+
+@pytest.mark.parametrize("formula,expected", [("NULL", "null"), ("1 / 0", "(1 / 0)"),
+                                              ("NVL(NULL, .5)", "nvl(null, .5)")])
+def test_constant_formula_emits_native_null_and_error_semantics(formula, expected):
+    parent, plan, _, _ = expression_fixture(formula)
+    plan["operations"][0]["input_bindings"] = []
+    output, _ = renderer.render_behavior_package(parent, seal(plan))
+    target = plan["operations"][0]["target"]
+    assert f"{expected} as {target['output_column']}" in unpack(output)[target["report_file"]].decode()
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda op, b: op.update(input_bindings=[]),
+    lambda op, b: op["input_bindings"].append(deepcopy(op["input_bindings"][0])),
+    lambda op, b: op["input_bindings"][0].update(column=b["items"][4]["column"]),
+    lambda op, b: op["input_bindings"][0].update(source_item_id=b["items"][4]["source_item_id"]),
+    lambda op, b: op["input_bindings"][0].update(sql="1"),
+    lambda op, b: op.update(expression=parse_expression(":ITEM_1000")),
+    lambda op, b: op.update(expression=parse_expression(":OTHER.ITEM_1001")),
+    lambda op, b: op.update(expression=parse_expression(":ITEM_1010")),
+    lambda op, b: op.update(expression=parse_expression(":MISSING")),
+    lambda op, b: op["expression"]["root"].update(function="EXECUTE"),
+    lambda op, b: op["expression"].update(sql="select 1"),
+    lambda op, b: op["target"].update(output_column=b["items"][4]["column"]),
+])
+def test_expression_renderer_rejects_resealed_ast_or_exact_binding_tampering(tamper):
+    parent, plan, _, block = expression_fixture()
+    tamper(plan["operations"][0], block)
+    with pytest.raises(renderer.BehaviorRenderError):
+        renderer.render_behavior_package(parent, seal(plan))
+
+
+def test_qualified_and_unqualified_references_bind_exactly_one_source_item():
+    parent, plan, _, block = expression_fixture(":ITEM_1001 + :BLOCK_1.ITEM_1001")
+    output, _ = renderer.render_behavior_package(parent, plan)
+    column = block["items"][1]["column"]
+    assert f"({column} + {column}) as " in unpack(output)[block["report_file"]].decode()
+
+
+@pytest.mark.parametrize("second_kind", ["ceil_report_column", "numeric_expression_report_column"])
+def test_multiple_general_or_mixed_formulas_share_one_report_query_without_chaining(second_kind):
+    parent, plan, files, block = expression_fixture()
+    general = plan["operations"][0]
+    legacy = deepcopy(general)
+    field, source = block["items"][4], block["items"][7]
+    legacy.update(kind="ceil_report_column", operation_id="op-extra", source_unit_id="unit-extra",
+                  source_chunk_id="chunk-extra", source_unit_sha256="f" * 64,
+                  source_item_id=field["source_item_id"], input_source_item_id=source["source_item_id"])
+    legacy.pop("expression")
+    legacy.pop("input_bindings")
+    legacy["target"].update(input_column=source["column"], output_column=field["column"])
+    if second_kind == "numeric_expression_report_column":
+        legacy["kind"] = second_kind
+        legacy.pop("input_source_item_id")
+        legacy["target"].pop("input_column")
+        legacy["expression"] = parse_expression(f"FLOOR(:{source['source_name']})")
+        legacy["input_bindings"] = [{"source_item_id": source["source_item_id"], "column": source["column"]}]
+    manifest = json.loads(files["fox-package/source-manifest.json"])
+    manifest["selected_chunk_hashes"]["chunk-extra"] = "f" * 64
+    files["fox-package/source-manifest.json"] = canonical(manifest)
+    parent = pack(files)
+    plan.update(parent_zip_sha256=sha(parent), source_manifest_sha256=sha(files["fox-package/source-manifest.json"]), code_unit_count=4)
+    plan["operations"].append(legacy)
+    plan["coverage"].append({**plan["coverage"][0], "source_unit_id": "unit-extra", "source_unit_sha256": "f" * 64,
+                             "source_chunk_id": "chunk-extra", "operation_id": "op-extra"})
+    output, _ = renderer.render_behavior_package(parent, seal(plan))
+    report = unpack(output)[block["report_file"]].decode()
+    assert report.count("type: sqlQuery") == 1
+    function = "ceil" if second_kind == "ceil_report_column" else "floor"
+    assert f"{function}({source['column']}) as {field['column']}" in report
+    assert f"round((nvl({general['input_bindings'][0]['column']}, 0) / 3), 2) as {general['target']['output_column']}" in report
+    # A correctly named and rebound dependency on another generated output is
+    # still unsupported; the renderer must not read its stale storage value.
+    general["expression"] = parse_expression(f":{field['source_name']} + 1")
+    general["input_bindings"] = [{"source_item_id": field["source_item_id"], "column": field["column"]}]
+    with pytest.raises(renderer.BehaviorRenderError, match="COMPUTED_INPUT_UNSUPPORTED"):
+        renderer.render_behavior_package(parent, seal(plan))
+
+
+def test_expression_renderer_rejects_ambiguous_source_names_even_with_new_parent_hash():
+    _, plan, files, _ = expression_fixture()
+    trace = json.loads(files["fox-package/source-to-page.json"])
+    trace["blocks"][0]["items"][4]["source_name"] = trace["blocks"][0]["items"][1]["source_name"].lower()
+    files["fox-package/source-to-page.json"] = canonical(trace)
+    parent = pack(files)
+    plan.update(parent_zip_sha256=sha(parent), parent_trace_sha256=sha(files["fox-package/source-to-page.json"]))
+    with pytest.raises(renderer.BehaviorRenderError, match="EXPRESSION_REFERENCE_NOT_UNIQUE"):
+        renderer.render_behavior_package(parent, seal(plan))
+
+
+def test_expression_renderer_bounds_malicious_tree_before_copy_or_hash():
+    parent, plan, _, _ = expression_fixture()
+    node = {"kind": "number", "value": "1"}
+    for _ in range(1500):
+        node = {"kind": "unary", "operator": "-", "operand": node}
+    plan["operations"][0]["expression"]["root"] = node
+    with pytest.raises(renderer.BehaviorRenderError, match="EXPRESSION_INVALID"):
+        renderer.render_behavior_package(parent, plan)
 
 
 def test_linked_validation_page_initializes_actual_bound_items_without_dml():

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="INVOICE_SAMPLE">
+  <Block Name="INVOICE_LINE" DatabaseBlock="true">
+    <Item Name="QUANTITY" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Quantity" LowestAllowedValue="1">
+      <Trigger Name="KEY-NEXT-ITEM" TriggerText="BEGIN IF NVL(:QUANTITY,0)=0 THEN MESSAGE('Enter a quantity'); RAISE FORM_TRIGGER_FAILURE; END IF; GO_ITEM('STATE'); END;"/>
+    </Item>
+    <Item Name="UNIT_PRICE" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Unit price"/>
+    <Item Name="DISCOUNT" ItemType="Text Item" DataType="Number" DatabaseItem="true" Prompt="Discount"/>
+    <Item Name="STATE" ItemType="Text Item" DataType="Char" MaximumLength="30" DatabaseItem="true" Prompt="State"/>
+    <Item Name="TOTAL" ItemType="Display Item" DataType="Number" DatabaseItem="false" Prompt="Total" Formula="ROUND(NVL(:QUANTITY,0) * :UNIT_PRICE - NVL(:DISCOUNT,0), 2)"/>
+  </Block>
+  <Block Name="SEARCH_OPTIONS" DatabaseBlock="false">
+    <Item Name="SEARCH_TEXT" ItemType="Text Item" DataType="Char" MaximumLength="100" DatabaseItem="false" Prompt="Search text"/>
+  </Block>
+</FormModule>

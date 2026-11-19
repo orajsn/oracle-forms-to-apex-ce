@@ -244,3 +244,94 @@ def test_reserved_declaration_name_is_not_a_complete_supported_program():
     docs = documents(trigger=TRIGGER.replace("unused_value NUMBER", "BEGIN NUMBER"))
     result = build_behavior_plan(docs, package(docs))
     assert not any(op["kind"] == "numeric_nonzero_then_focus" for op in result["operations"])
+
+
+@pytest.mark.parametrize("formula", [
+    "ROUND(:MASS / 3, 2)", "TRUNC(ABS(-:PARCEL.MASS), 1) + FLOOR(:MASS)",
+    "CEIL(:MASS) + 1", "NVL(:MASS, NULL) * (1 + .25)", "NULL", "1 / 0",
+])
+def test_bounded_numeric_family_is_source_bound_and_keeps_all_unit_coverage(formula):
+    docs = documents(formula=formula)
+    parent = package(docs)
+    plan = build_behavior_plan(docs, parent)
+    operation = next(op for op in plan["operations"] if op["kind"] == "numeric_expression_report_column")
+    assert operation["expression"]["schema_version"] == 1
+    assert operation["target"]["output_column"] == "C_ROUNDED"
+    assert operation["input_bindings"] == ([] if formula in {"NULL", "1 / 0"} else
+                                         [{"source_item_id": next(item["id"] for item in _build(docs)[0]["sources"][0]["facts"]["items"]
+                                                                  if item["name"] == "MASS"), "column": "C_MASS"}])
+    assert len(plan["coverage"]) == plan["code_unit_count"] == 3
+    assert next(row for row in plan["coverage"] if row["source_unit_id"] == operation["source_unit_id"])["status"] == "planned_wired_adapted"
+    assert build_behavior_plan(docs, parent, [operation["source_unit_id"]])["operations"] == [operation]
+    excluded = build_behavior_plan(docs, parent, [])
+    assert not excluded["operations"] and len(excluded["coverage"]) == 3
+    assert build_behavior_plan(docs, parent) == plan
+
+
+@pytest.mark.parametrize("formula", [
+    "ABS(:STATE)", "ROUND(:OTHER.MASS, 1)", "NVL(:ROUNDED, 0)", "FLOOR(:UNKNOWN)",
+    "ROUND(:MASS, 2); COMMIT;", "MY_FUNCTION(:MASS)", "ROUND('1', 2)",
+    "NVL((SELECT 1 FROM DUAL), 0)", "1e3", "(" * 40 + "1" + ")" * 40,
+])
+def test_numeric_formula_never_partially_converts_unsupported_source(formula):
+    docs = documents(formula=formula)
+    plan = build_behavior_plan(docs, package(docs))
+    assert not any(op["kind"] in {"numeric_expression_report_column", "ceil_report_column"} for op in plan["operations"])
+    assert len(plan["coverage"]) == 3
+    assert any(row["status"] == "unsupported" and row["reason"] != "not_selected" for row in plan["coverage"])
+
+
+@pytest.mark.parametrize("property_text", ['CalculateMode="Summary"', 'CalculateMode="Formula"', 'Formula="1"'])
+def test_general_formula_rejects_computed_or_summary_inputs(property_text):
+    docs = documents(formula="ROUND(:MASS / 2, 1)")
+    docs = [(docs[0][0], docs[0][1].replace(b'Name="MASS"', ('Name="MASS" ' + property_text).encode()))]
+    plan = build_behavior_plan(docs, package(docs))
+    assert not any(op["kind"] == "numeric_expression_report_column" and op["target"]["output_column"] == "C_ROUNDED"
+                   for op in plan["operations"])
+
+
+def test_numeric_formula_requires_explicit_number_output_and_input_source_metadata():
+    for old, new in [(b'Name="ROUNDED" DataType="Number"', b'Name="ROUNDED" DataType="Char"'),
+                     (b'Name="MASS" DataType="Number"', b'Name="MASS"')]:
+        docs = documents(formula="FLOOR(:MASS) + 2")
+        docs = [(docs[0][0], docs[0][1].replace(old, new))]
+        plan = build_behavior_plan(docs, package(docs))
+        assert not any(op["kind"] == "numeric_expression_report_column" for op in plan["operations"])
+
+
+def test_multiple_numeric_references_have_exact_unique_source_bindings():
+    docs = documents(formula="ROUND((NVL(:MASS, 0) - :TARE) / :PARCEL.MASS, 2)")
+    docs = [(docs[0][0], docs[0][1].replace(b'</Block>', b'<Item Name="TARE" DataType="Number"/></Block>'))]
+
+    def add_target(members):
+        members["fox-package/supporting-schema.sql"] = members["fox-package/supporting-schema.sql"].replace(
+            "C_ROUNDED NUMBER", "C_ROUNDED NUMBER,\n C_TARE NUMBER")
+        members["pages/p00003-parcel.apx"] += " column C_TARE ( )"
+    plan = build_behavior_plan(docs, package(docs, add_target))
+    operation = next(op for op in plan["operations"] if op["kind"] == "numeric_expression_report_column")
+    assert {binding["column"] for binding in operation["input_bindings"]} == {"C_MASS", "C_TARE"}
+    assert len(operation["input_bindings"]) == 2
+    assert operation["input_bindings"] == sorted(operation["input_bindings"], key=lambda entry: entry["source_item_id"])
+
+
+def test_formula_cycle_is_unresolved_without_reading_stale_storage_inputs():
+    docs = documents(formula="ROUND(:MASS, 1)")
+    docs = [(docs[0][0], docs[0][1].replace(b'Name="MASS"', b'Name="MASS" Formula="FLOOR(:ROUNDED)"'))]
+    plan = build_behavior_plan(docs, package(docs))
+    assert not plan["operations"]
+    assert plan["code_unit_count"] == 4
+    assert sum(row["reason"] == "input_computation_or_summary_not_implemented" for row in plan["coverage"]) == 3
+
+
+def test_formula_ambiguous_case_insensitive_source_names_fail_closed():
+    docs = documents(formula="ROUND(:MASS, 2)")
+    docs = [(docs[0][0], docs[0][1].replace(b'</Block>', b'<Item Name="mass" DataType="Number"/></Block>'))]
+
+    def add_target(members):
+        members["fox-package/source-to-page.json"]["blocks"][0]["items"][-1]["column"] = "C_DUPLICATE"
+        members["fox-package/supporting-schema.sql"] = members["fox-package/supporting-schema.sql"].replace(
+            "C_ROUNDED NUMBER", "C_ROUNDED NUMBER,\n C_DUPLICATE NUMBER")
+        members["pages/p00003-parcel.apx"] += " column C_DUPLICATE ( )"
+    plan = build_behavior_plan(docs, package(docs, add_target))
+    assert not plan["operations"]
+    assert sum(row["reason"] == "item_reference_is_not_unique" for row in plan["coverage"]) == 2

@@ -1,5 +1,10 @@
 # Source-linked business-rule generation
 
+As of FOX 0.31.0, the [XML mapping engine](xml-mapping-engine.md) can build a fresh
+structural package directly from XML. Numeric formula mapping also supports
+bounded arithmetic and CEIL/FLOOR/ABS/ROUND/TRUNC/NVL expressions. The parent-package
+operator described below remains available and retains its original provenance.
+
 FOX 0.30.0 includes an operator CLI and Python library for a first, finite set of
 Forms business rules. Start with the original preserved Forms XML and its matching
 FOX native APEX package. The normal web generation action does not yet invoke

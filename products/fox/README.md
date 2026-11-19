@@ -9,6 +9,21 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+## Reusable XML mapping engine - 19 November 2026
+
+Version 0.31.0 adds a [direct XML-to-APEXlang engine](docs/xml-mapping-engine.md).
+It uses installed, versioned mappings to produce native synthetic reports/control
+pages and supported business behavior from fresh XML, without a prior AI job or
+package. Multiple XML modules can share one generated application. A bounded
+numeric expression parser expands formulas beyond the original CEIL pattern.
+
+The operator CLI exposes the mapping catalog and produces complete source/object
+and code-unit coverage. Unknown relationships, actions and dependencies remain
+explicit. Database blocks default to read-only reports; no customer schema or
+transaction behavior is inferred. Normal hosted web integration, deployment and
+APEX runtime/business acceptance remain separate. Two public synthetic example
+modules demonstrate reuse across different names and formulas.
+
 ## Source-linked business-rule generation - 18 November 2026
 
 Version 0.30.0 adds an [operator CLI and library](docs/source-behavior-generation.md)

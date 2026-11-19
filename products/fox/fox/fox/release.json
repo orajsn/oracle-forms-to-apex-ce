@@ -1,16 +1,16 @@
 {
-  "version": "0.30.0",
-  "released_on": "2026-11-18",
-  "title": "Generate source-linked calculations and validations",
+  "version": "0.31.0",
+  "released_on": "2026-11-19",
+  "title": "Generate APEXlang directly from Forms XML",
   "changes": [
-    "Add an operator CLI that derives supported calculations and validations from original Forms XML and an exact matching parent APEX package.",
-    "Generate a CEIL report calculation or a linked numeric-validation page with explicit button, minimum-value and focus behavior; retain source references and web adaptations.",
-    "Keep an individual status for every source code unit and require fresh SQLcl format validation for the derivative package without reusing parent validation claims."
+    "Generate a source-linked synthetic APEXlang prototype directly from preserved XML using installed deterministic mappings, without a prior AI job or package.",
+    "Reuse a versioned mapping catalog and retain separate source-object, business-code and dependency coverage across multiple XML modules.",
+    "Translate bounded numeric formulas with arithmetic, NULL, CEIL, FLOOR, ABS, ROUND, TRUNC and NVL through a parsed expression tree and exact target bindings."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
-    "The first behavior generator is an operator CLI/library, not part of the normal web generation action. It supports two complete source patterns; other business code remains explicitly unsupported. The validation page does not save changes.",
-    "Development-source processing requires explicit approval for the selected code and configured provider. Existing masked-source approvals and retained jobs keep their original meaning.",
+    "The XML mapping engine is a library/operator CLI; normal web generation integration and hosted deployment remain separate. Database blocks are read-only synthetic reports. Unsupported relationships, transactions and external routines remain explicit.",
+    "The deterministic XML path makes no provider calls. Existing AI-backed source processing retains its separate source/destination approvals and does not automatically receive unresolved code.",
     "Format validation is not customer-target import testing, runtime verification or business acceptance; no universal import or behavior guarantee is made.",
     "Supported Oracle Forms tooling, Java and SQLcl remain external prerequisites. Export-only jobs reuse configured provider and compatibility metadata without a live target connection.",
     "The primary new output is an APEXlang ZIP with synthetic supporting SQL and explicit omissions, not a conventional database-derived SQL export.",
