@@ -30,7 +30,7 @@ SEMANTICS = {
     "source_key": False, "row_identity": "synthetic_FOX_ROW_ID_adapter",
     "target_prerequisite": "Verify binary VARCHAR2 equality and character encoding on Oracle target.",
     "source_default_length_semantics": "Unspecified or NULL remains unresolved; adapter bounds characters and 4000 bytes without coercion.",
-    "typed_input_case": "Apply declared UPPER/LOWER only to edited fields before required checks and the trigger; retain queried/internal values. Oracle Unicode case equivalence requires target verification.",
+    "typed_input_case": "Apply declared UPPER/LOWER only to edited noninherited fields before required checks and the trigger; retain queried/internal and copied parent values. Oracle Unicode case equivalence requires target verification.",
     "business_save": False,
 }
 
@@ -450,6 +450,30 @@ def derive_buffer_operations(catalog, trace, source_binding, relation_plan, rela
             if definition["function_name"] != call["function"]:
                 _unsupported("helper_identity_mismatch")
             relation = _relation_context(block, objects, trace, relation_plan, relation_receipt, source_binding)
+            for item, binding in zip(key_items, key_bindings):
+                copy_from = item["metadata"].get("CopyValueFromItem", "").strip()
+                if not copy_from:
+                    continue
+                match = re.fullmatch(rf"({_IDENT})\.({_IDENT})", copy_from, re.I)
+                if not match:
+                    _unsupported("parent_copy_direct_reference_required")
+                parent_item = resolve([part.upper() for part in match.groups()], item)
+                pair = _one([pair for pair in relation["join_pairs"]
+                             if pair["child_item_id"] == item["id"]
+                             and pair["parent_item_id"] == parent_item["id"]],
+                            "parent_copy_direct_join_pair_required")
+                parent_binding = bind(parent_item, "key")
+                if (parent_item["block_id"] != relation["parent_block_id"]
+                        or parent_item["module_id"] != item["module_id"]
+                        or parent_binding["data_type"] != binding["data_type"]
+                        or pair["parent_column"] != parent_binding["column"]
+                        or pair["child_column"] != binding["column"]
+                        or not re.fullmatch(_TARGET, pair["parent_column"])):
+                    _unsupported("parent_copy_native_binding_mismatch")
+                # Parent values are checked against the child's declared bounds at
+                # draft creation. A wider parent is never silently truncated.
+                binding["parent_copy"] = {"parent_column": pair["parent_column"],
+                                          "parent_item_id": parent_item["id"]}
             if len(operations) >= MAX_OPERATIONS:
                 _unsupported("operation_capacity")
             operation = {"operation_id": operation_id(source_binding, unit["id"]), "source_binding": source_binding,
@@ -524,17 +548,28 @@ class BufferState:
     """Pure draft model, with explicit context/revision and no customer-table save.
 
     Rows are closed records {row_id, values}; values use exact native columns.
+    Inherited join keys require separate authoritative nonnull parent_values,
+    keyed by parent columns, and must fit the child's declared value bounds.
     Failed validation retains the candidate overlay and other fields, increments
     revision, and keeps current_row_id. Unsupported/stale requests change nothing.
     """
 
-    def __init__(self, plan, operation, *, parent_id, rows, current_row_id=None, collation=None):
+    def __init__(self, plan, operation, *, parent_id, rows, current_row_id=None, collation=None,
+                 parent_values=None):
         self.plan = validate_buffer_plan(plan)
         matches = [op for op in self.plan["operations"] if op["operation_id"] == operation]
         _need(len(matches) == 1, "MODEL_OPERATION")
         _need(collation == "BINARY", "MODEL_COLLATION_PREREQUISITE")
         _need(type(parent_id) is int and parent_id > 0, "MODEL_PARENT_ID")
         self.op, self.parent_id, self.revision = matches[0], parent_id, 0
+        inherited = [binding for binding in self.op["key_bindings"] if "parent_copy" in binding]
+        columns = {binding["parent_copy"]["parent_column"] for binding in inherited}
+        if parent_values is None and not inherited:
+            parent_values = {}
+        _need(type(parent_values) is dict and set(parent_values) == columns, "MODEL_PARENT_VALUES")
+        self._parent_values = self._values({binding["column"]: parent_values[binding["parent_copy"]["parent_column"]]
+                                            for binding in inherited}, partial=True)
+        _need(all(value is not None for value in self._parent_values.values()), "MODEL_PARENT_COPY_NULL")
         self.rows = {}
         _need(type(rows) is list and len(rows) <= MAX_ROWS, "MODEL_ROWS")
         for row in rows:
@@ -542,8 +577,9 @@ class BufferState:
                   and type(row["row_id"]) is int and row["row_id"] > 0 and row["row_id"] not in self.rows,
                   "MODEL_ROW_ID")
             self.rows[row["row_id"]] = self._values(row["values"])
+            self._check_parent_copy(self.rows[row["row_id"]])
         if not self.rows:
-            self.rows[1] = {binding["column"]: None for binding in self.op["key_bindings"]}
+            self.rows[1] = self._new_values()
         self.current_row_id = next(iter(self.rows), None) if current_row_id is None else current_row_id
         _need(self.current_row_id is None and not self.rows or type(self.current_row_id) is int
               and self.current_row_id in self.rows, "MODEL_CURRENT_ROW")
@@ -556,7 +592,8 @@ class BufferState:
         for column, value in values.items():
             binding = bindings[column]
             _need(value is None or type(value) is str, "MODEL_VALUE_TYPE")
-            if value is not None and typed_input and binding["case_restriction"] != "NONE":
+            if (value is not None and typed_input and "parent_copy" not in binding
+                    and binding["case_restriction"] != "NONE"):
                 # Python Unicode casing is not proof of Oracle NLS behavior.
                 # Only ASCII is normalized; uncased non-ASCII is unchanged.
                 _need(not any(ord(c) > 127 and c.upper() != c.lower() for c in value),
@@ -570,6 +607,14 @@ class BufferState:
                     _need(len(value.encode()) <= binding["max_length"], "MODEL_VALUE_BYTE_LENGTH")
             result[column] = None if value == "" else value
         return result
+
+    def _new_values(self):
+        return {binding["column"]: self._parent_values.get(binding["column"])
+                for binding in self.op["key_bindings"]}
+
+    def _check_parent_copy(self, values):
+        _need(all(values[column] == value for column, value in self._parent_values.items()),
+              "MODEL_PARENT_COPY_MISMATCH")
 
     def snapshot(self):
         return {"source_binding": self.plan["source_binding"], "operation_id": self.op["operation_id"],
@@ -598,6 +643,9 @@ class BufferState:
             _need(len(self.rows) < MAX_ROWS, "MODEL_ROW_CAPACITY")
         overlay = self._values(changes, partial=True, typed_input=True)
         candidate = {**self.rows[self.current_row_id], **overlay}
+        self._check_parent_copy(candidate)
+        for values in self.rows.values():
+            self._check_parent_copy(values)
         _need(all(not binding["required"] or candidate[binding["column"]] is not None
                   for binding in self.op["key_bindings"]), "MODEL_REQUIRED_INPUT")
         candidate_key = self._key(candidate, assigned_control=True)
@@ -619,7 +667,7 @@ class BufferState:
                 self.current_row_id = row_ids[index + 1]
             elif action == "new":
                 self.current_row_id = max(self.rows, default=0) + 1
-                self.rows[self.current_row_id] = {binding["column"]: None for binding in self.op["key_bindings"]}
+                self.rows[self.current_row_id] = self._new_values()
         return {"accepted": accepted, "advanced": self.current_row_id != previous_row_id,
                 "warnings": [] if accepted else deepcopy(self.op["warnings"]), "summary": count,
                 "indicators": indicators, "control_key": candidate_key, "state": self.snapshot(),

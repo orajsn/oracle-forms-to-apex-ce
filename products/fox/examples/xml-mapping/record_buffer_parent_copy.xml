@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FormModule Name="DISPATCH_DRAFT">
+  <Block Name="LOADS" DatabaseBlock="true">
+    <Item Name="LOAD_REFERENCE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16"/>
+    <Relation Name="LOAD_PIECES" RelationType="Join" DetailBlock="PIECES" JoinCondition="PIECES.LOAD_REFERENCE = LOADS.LOAD_REFERENCE" AutoQuery="false" Deferred="false" DeleteRecord="Cascading" PreventMasterlessOperations="false"/>
+  </Block>
+  <Block Name="PIECES" DatabaseBlock="true">
+    <Item CopyValueFromItem="LOADS.LOAD_REFERENCE" Required="true" Name="LOAD_REFERENCE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16"/>
+    <Item Name="PIECE_CODE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16"/>
+    <Item Name="SAME_KEY" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Formula" Formula="COMPARE_KEY(:CHECKS.CURRENT_KEY, :PIECES.LOAD_REFERENCE || :PIECES.PIECE_CODE)"/>
+    <Trigger Name="WHEN-VALIDATE-RECORD" TriggerText="BEGIN :CHECKS.CURRENT_KEY := :PIECES.LOAD_REFERENCE || :PIECES.PIECE_CODE; IF :CHECKS.DUPLICATE_COUNT &gt; 1 THEN MESSAGE('This record already exists'); MESSAGE('This record already exists'); RAISE FORM_TRIGGER_FAILURE; END IF; END;"/>
+  </Block>
+  <Block Name="CHECKS" DatabaseBlock="false">
+    <Item Name="CURRENT_KEY" ItemType="Text Item" DatabaseItem="false" DataType="Char" MaximumLength="50" DataLengthSemantics="BYTE"/>
+    <Item Name="DUPLICATE_COUNT" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Summary" SummaryFunction="Sum" SummaryBlockName="PIECES" SummaryItemName="SAME_KEY"/>
+  </Block>
+  <ProgramUnit Name="COMPARE_KEY" ProgramUnitType="Function" ProgramUnitText="FUNCTION COMPARE_KEY(val1 VARCHAR2, val2 VARCHAR2) RETURN NUMBER IS answer NUMBER := 0; BEGIN IF val1 = val2 THEN answer := 1; END IF; RETURN(answer); END;"/>
+</FormModule>

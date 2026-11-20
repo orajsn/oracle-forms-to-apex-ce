@@ -119,6 +119,17 @@ def _source_body(op,page):
             '\nexception when '+op['exception_kind']+' then\n'+'\n'.join(resets)+'\nend;\nend;')
 
 
+def _new_input_eligible(op):
+    # Only the event item has an editable provider on this standalone page.
+    # Other inputs are authoritative only after loading an existing row; source
+    # InsertAllowed alone does not supply their values on a new lookup draft.
+    return (op['source_event']=='POST-CHANGE'
+            and op['target']['source_insert_allowed'] is not False
+            and bool(op['input_bindings'])
+            and all(b['source_item_id']==op['event_item_id']
+                    and b['source_insert_allowed'] is not False for b in op['input_bindings']))
+
+
 def _guard(op,page):
     table=op['target']['table']
     code=f"if nvl(v('{gate_name(op)}'),'N')<>'Y' then raise_application_error(-20001,'This source lookup interface has not been verified and enabled.'); end if;"
@@ -128,20 +139,20 @@ def _guard(op,page):
     # exception handler, so WHEN OTHERS cannot hide a binding/policy failure.
     code+=f"\nif :P{page}_FOX_ROW_ID is not null then\n  declare n number; begin select count(*) into n from {table} where FOX_ROW_ID=:P{page}_FOX_ROW_ID; if n<>1 then raise_application_error(-20002,'Lookup record is unavailable.'); end if; end;\nend if;"
     if op['source_event']=='POST-CHANGE':
+        if not _new_input_eligible(op):
+            code+=f"\nif :P{page}_FOX_ROW_ID is null then raise_application_error(-20004,'This source lookup requires an existing record to supply its input values.'); end if;"
         for b in op['input_bindings']:
             editable=b['source_item_id']==op['event_item_id']
             can_update=editable and b['source_update_allowed'] is not False and op['target']['source_update_allowed'] is not False
-            can_insert=editable and b['source_insert_allowed'] is not False and op['target']['source_insert_allowed'] is not False
             if not can_update:
                 code+=f"\nif :P{page}_FOX_ROW_ID is not null then SELECT {b['column']} INTO :{_item(page,b)} FROM {table} WHERE FOX_ROW_ID=:P{page}_FOX_ROW_ID; end if;"
-            if not can_insert:
-                code+=f"\nif :P{page}_FOX_ROW_ID is null then raise_application_error(-20004,'This source field cannot be entered on a new lookup draft.'); end if;"
     return code
 
 
 def _condition(op,page,*,render=False):
     guard=f"nvl(v('{gate_name(op)}'),'N') = 'Y'"
     if op['source_event']=='POST-QUERY':return guard+f" and :P{page}_FOX_ROW_ID is not null and :REQUEST is null"
+    if not _new_input_eligible(op):guard+=f" and :P{page}_FOX_ROW_ID is not null"
     return guard if render else guard+f" and :REQUEST = '{_request(op)}'"
 
 
@@ -197,7 +208,7 @@ def _items(op,page):
             else:
                 conditions=[f"nvl(v('{gate_name(op)}'),'N')<>'Y'"]
                 if b['source_update_allowed'] is False or op['target']['source_update_allowed'] is False:conditions.append(f':P{page}_FOX_ROW_ID is not null')
-                if b['source_insert_allowed'] is False or op['target']['source_insert_allowed'] is False:conditions.append(f':P{page}_FOX_ROW_ID is null')
+                if not _new_input_eligible(op):conditions.append(f':P{page}_FOX_ROW_ID is null')
                 readonly=' or '.join(conditions)
             text=text[:-5]+f'''        readOnly {{ type: expression
             language: plsql
@@ -330,7 +341,7 @@ def _menu(block_ops,menu,pages):
     for i,op in enumerate(block_ops,1):
         page=pages[op['operation_id']]
         label=', '.join(b['source_item_name'] for b in op['output_bindings'])
-        cond='' if op['source_event']=='POST-CHANGE' else f'''        serverSideCondition {{ type: itemIsNotNull
+        cond='' if _new_input_eligible(op) else f'''        serverSideCondition {{ type: itemIsNotNull
             item: P{menu}_ROW_ID
         }}
 '''
@@ -480,8 +491,7 @@ def render_lookup_package(parent_zip,plan):
         files[f'pages/p{menu:05d}-fox_lookups_{menu}.apx']=_menu(ops,menu,pages).encode()
         for path in paths:
             text=_link(files[path].decode('utf8'),menu)
-            if any(op['source_event']=='POST-CHANGE' and op['target']['source_insert_allowed'] is not False
-                   and all(b['source_insert_allowed'] is not False for b in op['input_bindings']) for op in ops):
+            if any(_new_input_eligible(op) for op in ops):
                 _need(text.endswith(')\n') and 'button new-lookup-input (' not in text,'REPORT_END')
                 text=text[:-2]+_new_input_link(menu)+')\n'
             files[path]=text.encode()

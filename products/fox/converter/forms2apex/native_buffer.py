@@ -55,6 +55,39 @@ def _requests():
     return ', '.join(_literal(r) for r in REQUESTS)
 
 
+def _parent_copies(op):
+    return [(slot, field['parent_copy']['parent_column'])
+            for slot, field in enumerate(op['key_bindings'], 1) if field.get('parent_copy')]
+
+
+def _read_parent(op, identity_variable, *, lock=False):
+    columns = ['FOX_ROW_ID']
+    targets = [identity_variable]
+    for slot, column in _parent_copies(op):
+        columns.append(column)
+        targets.append(f'l_value{slot}')
+    # Scope the collection to the selected row and its inherited business values.
+    # Reopening a renamed parent starts a fresh draft set for its current key.
+    name_parts = [f"'{_name(op)}' || to_char(l_parent,'TM9')"]
+    for _, column in _parent_copies(op):
+        name_parts.append(f"substr(rawtohex(standard_hash({column},'SHA256')),1,32)")
+    columns.append(" || '_' || ".join(name_parts))
+    targets.append('l_name')
+    table = op['relation']['parent']['table']
+    suffix = ' for update nowait' if lock else ''
+    return (f"select {', '.join(columns)} into {', '.join(targets)} from {table} "
+            f"where FOX_ROW_ID=l_parent{suffix};")
+
+
+def _new_member_args(op):
+    return ''.join(f'p_c{slot:03d}=>l_value{slot},' for slot, _ in _parent_copies(op))
+
+
+def _parent_match(column, variable):
+    # DECODE treats two nulls as equal. RAW comparison preserves source case and whitespace.
+    return f'decode(utl_raw.cast_to_raw({column}),utl_raw.cast_to_raw({variable}),1,0)=1'
+
+
 def _value_declarations(op):
     return chr(10).join(f'l_value{i} varchar2(4000); l_original{i} varchar2(4000);' for i in range(1,len(op['key_bindings'])+1))
 
@@ -62,8 +95,15 @@ def _value_declarations(op):
 def _load_values(op, page):
     cols=','.join(f'c{i:03d}' for i in range(1,len(op['key_bindings'])+1))
     targets=','.join(f'l_original{i}' for i in range(1,len(op['key_bindings'])+1))
-    lines=[f"select {cols} into {targets} from apex_collections where collection_name=l_name and seq_id=l_seq and c050='ROW';"]
+    checks = []
+    for slot, _ in _parent_copies(op):
+        checks.extend((_parent_match(f'c{slot:03d}', f'l_value{slot}'),
+                       _parent_match(f':P{page}_K{slot}', f'l_value{slot}')))
+    predicates = ''.join(' and ' + check for check in checks)
+    lines=[f"select {cols} into {targets} from apex_collections where collection_name=l_name and seq_id=l_seq and c050='ROW'{predicates};"]
     for i,f in enumerate(op['key_bindings'],1):
+        if f.get('parent_copy'):
+            continue
         key=f':P{page}_K{i}';case=f['case_restriction']
         if case=='NONE':lines.append(f'l_value{i} := {key};')
         else:
@@ -77,7 +117,7 @@ def _load_values(op, page):
 def _case_tracking(op, page):
     statements=[]
     for i,f in enumerate(op['key_bindings'],1):
-        if f['case_restriction']=='NONE':continue
+        if f.get('parent_copy') or f['case_restriction']=='NONE':continue
         style='uppercase' if f['case_restriction']=='UPPER' else 'lowercase'
         statements.append(f'''(function() {{ const field=document.getElementById("P{page}_K{i}");
 if(field) {{ field.style.textTransform="{style}"; field.addEventListener("input",function() {{ apex.item("P{page}_D{i}").setValue("Y",null,true); }}); }} }})();''')
@@ -121,7 +161,6 @@ def _query(op, page):
 
 
 def _declarations(op, page):
-    parent = op['relation']['parent']['table']
     fingerprint = _sha(_json(op))
     return f'''{_value_declarations(op)}
 l_parent number;
@@ -141,9 +180,7 @@ begin
      or not regexp_like(:P{page}_SEQ, '^[1-9][0-9]{{0,9}}$')
      or not regexp_like(:P{page}_REV, '^[0-9]{{1,15}}$') then return false; end if;
   l_parent := to_number(:P{page}_PARENT_ID);
-  l_name := '{_name(op)}' || to_char(l_parent,'TM9');
-  if not apex_collection.collection_exists(l_name) then return false; end if;
-  select FOX_ROW_ID into l_exists from {parent} where FOX_ROW_ID=l_parent for update nowait;
+  {_read_parent(op,'l_exists',lock=True)}
   select n002,n003 into l_seq,l_revision from apex_collections
     where collection_name=l_name and seq_id=1 and n001=l_parent
       and c049='{fingerprint}' and c050='META';
@@ -215,9 +252,19 @@ def _initialize(op, page):
     into_items = ','.join(f':P{page}_K{i}' for i in range(1,len(fields)+1))
     add_args = ','.join(f'p_c{i:03d}=>r.{f["column"]}' for i,f in enumerate(fields,1))
     row_checks = ' or '.join(f"nvl(lengthb(r.{f['column']}),0)>4000 or nvl({'lengthb' if f['source_length_semantics']=='BYTE' else 'length'}(r.{f['column']}),0)>{f['max_length']}" for f in fields)
-    parent = op['relation']['parent']['table']
-    reset_flags=chr(10).join(f":P{page}_D{i} := 'N';" for i,f in enumerate(fields,1) if f['case_restriction']!='NONE')
+    copy_declarations = chr(10).join(f'l_value{slot} varchar2(4000);' for slot, _ in _parent_copies(op))
+    invalid_values = []
+    for slot, _ in _parent_copies(op):
+        field = fields[slot-1]
+        fn = 'lengthb' if field['source_length_semantics']=='BYTE' else 'length'
+        invalid_values.append(f'{fn}(l_value{slot})>{field["max_length"]}')
+        invalid_values.append(f'l_value{slot} is null')
+    check_parent = ("if " + " or ".join(invalid_values) +
+                    " then raise_application_error(-20010,'The selected parent has no usable draft key.'); end if;"
+                    if invalid_values else '')
+    reset_flags=chr(10).join(f":P{page}_D{i} := 'N';" for i,f in enumerate(fields,1) if not f.get('parent_copy') and f['case_restriction']!='NONE')
     return f'''declare
+{copy_declarations}
 l_parent number;
 l_name varchar2(255);
 l_seq number;
@@ -232,8 +279,8 @@ begin
     raise_application_error(-20001,'Open draft records from their parent record.');
   end if;
   l_parent := to_number(:P{page}_PARENT_ID);
-  select FOX_ROW_ID into l_stored_parent from {parent} where FOX_ROW_ID=l_parent;
-  l_name := '{_name(op)}' || to_char(l_parent,'TM9');
+  {_read_parent(op,'l_stored_parent',lock=bool(_parent_copies(op)))}
+  {check_parent}
   if not apex_collection.collection_exists(l_name) then
     apex_collection.create_collection(l_name);
     l_created := true;
@@ -244,7 +291,7 @@ begin
       if {row_checks} then raise_application_error(-20003,'A loaded value exceeds the source field limit.'); end if;
       apex_collection.add_member(p_collection_name=>l_name,{add_args},p_c050=>'ROW',p_n001=>r.FOX_ROW_ID);
     end loop;
-    if l_count=0 then apex_collection.add_member(p_collection_name=>l_name,p_c050=>'ROW'); end if;
+    if l_count=0 then apex_collection.add_member(p_collection_name=>l_name,{_new_member_args(op)}p_c050=>'ROW'); end if;
   end if;
   select n001,n002,n003,c049,c050 into l_stored_parent,l_seq,l_revision,l_hash,l_kind
     from apex_collections where collection_name=l_name and seq_id=1;
@@ -263,7 +310,7 @@ end;'''
 
 
 def _retain_failure(op, page):
-    updates = chr(10).join(f"apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>l_seq,p_attr_number=>{i},p_attr_value=>l_value{i});" for i in range(1,len(op['key_bindings'])+1))
+    updates = chr(10).join(f"apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>l_seq,p_attr_number=>{i},p_attr_value=>l_value{i});" for i, field in enumerate(op['key_bindings'],1) if not field.get('parent_copy'))
     return f"""if l_matches>1 then
   {updates}
   apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>1,p_attr_number=>1,p_attr_value=>l_key);
@@ -275,7 +322,7 @@ end if;"""
 
 
 def _mutate(op, page):
-    updates = '\n'.join(f"apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>l_seq,p_attr_number=>{i},p_attr_value=>l_value{i});" for i in range(1,len(op['key_bindings'])+1))
+    updates = '\n'.join(f"apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>l_seq,p_attr_number=>{i},p_attr_value=>l_value{i});" for i, field in enumerate(op['key_bindings'],1) if not field.get('parent_copy'))
     return f'''declare
 l_next number;
 {_declarations(op,page)}
@@ -297,7 +344,7 @@ begin
   elsif :REQUEST='FOX_DRAFT_PREVIOUS' then
     select nvl(max(seq_id),l_seq) into l_next from apex_collections where collection_name=l_name and c050='ROW' and seq_id<l_seq;
   elsif :REQUEST='FOX_DRAFT_NEW' then
-    l_next := apex_collection.add_member(p_collection_name=>l_name,p_c050=>'ROW');
+    l_next := apex_collection.add_member(p_collection_name=>l_name,{_new_member_args(op)}p_c050=>'ROW');
   end if;
   apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>1,p_attr_number=>2,p_number_value=>l_next);
   apex_collection.update_member_attribute(p_collection_name=>l_name,p_seq=>1,p_attr_number=>3,p_number_value=>l_revision+1);
@@ -341,6 +388,9 @@ def _button(slug, request, label, sequence):
 def _raw_page(op, page):
     items = ''.join(_hidden(page,name,i*10) for i,name in enumerate(('PARENT_ID','SEQ','REV'),1))
     for i, field in enumerate(op['key_bindings'],1):
+        if field.get('parent_copy'):
+            items += _hidden(page, f'K{i}', 100+i*10)
+            continue
         spec={'name':f'K{i}','source_item_id':field['source_item_id'], 'source_name':field['source_item_name'],
               'data_type':'VARCHAR2','label':field['source_item_name'],'widget':'text','length':field['max_length'],
               'nullable':not field['required'],'in_edit_form':False}
@@ -349,7 +399,7 @@ def _raw_page(op, page):
         item=item.replace('        type: textField\n','        type: textField\n        settings { trimSpaces: none }\n        sessionState { storage: request\n            dataType: varchar2\n        }\n',1)
         items+=item+'\n'
     for i,field in enumerate(op['key_bindings'],1):
-        if field['case_restriction']!='NONE':
+        if not field.get('parent_copy') and field['case_restriction']!='NONE':
             items+=_hidden(page,f'D{i}',40+i,protected=False)
     items+=f'''    pageItem P{page}_POSITION (
         type: displayOnly

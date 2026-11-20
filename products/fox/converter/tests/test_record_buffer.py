@@ -6,7 +6,7 @@ import pytest
 from forms2apex import record_buffer as rb
 
 
-def closed_plan(*, case_restriction=None, required=None):
+def closed_plan(*, case_restriction=None, required=None, copy_from=None):
     """Synthetic source facts, never claimed as an XML or target runtime test."""
     def identity(value):
         return "ff1-" + rb._sha(value.encode())[:24]
@@ -36,6 +36,8 @@ def closed_plan(*, case_restriction=None, required=None):
                 "parent_id": block, "classification": None, "database_item": True,
                 "metadata": {"Name": name, "DataType": "Char", "MaximumLength": "16", "DataLengthSemantics": "Null"}}
         if block == child and name == "ORDER_NO":
+            if copy_from is not None:
+                item["metadata"]["CopyValueFromItem"] = copy_from
             if case_restriction is not None:
                 item["metadata"]["CaseRestriction"] = case_restriction
             if required is not None:
@@ -317,3 +319,65 @@ def test_closed_plan_rejects_self_rehashed_semantic_and_proof_mutations(mutation
     elif mutation == "claim": plan["runtime_verified"] = True
     with pytest.raises(ValueError):
         rb.validate_buffer_plan(resign(plan))
+
+
+def inherited_state(rows=(), *, parent_values=None, parent_id=1, **kwargs):
+    plan = closed_plan(copy_from="HEADERS.ORDER_NO", **kwargs)
+    return rb.BufferState(plan, plan["operations"][0]["operation_id"], parent_id=parent_id,
+                          parent_values=parent_values, rows=[{"row_id": i + 1,
+                          "values": {"ORDER_NO": a, "LINE_NO": b}} for i, (a, b) in enumerate(rows)],
+                          collation="BINARY")
+
+
+def test_inherited_first_and_new_drafts_use_authoritative_parent_without_case_coercion():
+    authoritative = {"ORDER_NO": "mixedCase"}
+    buffer = inherited_state(parent_values=authoritative, case_restriction="Upper", required=True)
+    authoritative["ORDER_NO"] = "changed"
+    assert buffer.rows[1] == {"ORDER_NO": "mixedCase", "LINE_NO": None}
+    assert submit(buffer, {"ORDER_NO": "mixedCase", "LINE_NO": "1"}, action="new")["accepted"]
+    assert buffer.rows[2] == {"ORDER_NO": "mixedCase", "LINE_NO": None}
+
+
+@pytest.mark.parametrize("parent_values,code", [
+    (None, "PARENT_VALUES"), ({}, "PARENT_VALUES"), ({"ORDER_NO": "A", "OTHER": "B"}, "PARENT_VALUES"),
+    ({"ORDER_NO": None}, "PARENT_COPY_NULL"), ({"ORDER_NO": ""}, "PARENT_COPY_NULL"),
+    ({"ORDER_NO": "X" * 17}, "VALUE_LENGTH"), ({"ORDER_NO": 1}, "VALUE_TYPE"),
+])
+def test_authoritative_parent_values_must_be_explicit_nonnull_and_fit_child(parent_values, code):
+    with pytest.raises(rb.BufferPlanError, match=code):
+        inherited_state(parent_values=parent_values)
+
+
+@pytest.mark.parametrize("value", [None, "", "other", "MIXEDCASE"])
+def test_inherited_submit_mismatch_rejected_without_mutation(value):
+    buffer = inherited_state(parent_values={"ORDER_NO": "mixedCase"}, case_restriction="Upper")
+    before = buffer.snapshot()
+    with pytest.raises(rb.BufferPlanError, match="PARENT_COPY_MISMATCH"):
+        submit(buffer, {"ORDER_NO": value, "LINE_NO": "1"}, action="new")
+    assert buffer.snapshot() == before
+
+
+@pytest.mark.parametrize("value", [None, "", "other"])
+def test_loaded_inherited_mismatch_rejected(value):
+    with pytest.raises(rb.BufferPlanError, match="PARENT_COPY_MISMATCH"):
+        inherited_state([(value, "1")], parent_values={"ORDER_NO": "A"})
+
+
+def test_inherited_duplicate_failure_correction_and_sibling_parent_isolation():
+    buffer = inherited_state([("A", "1"), ("A", "2")], parent_values={"ORDER_NO": "A"})
+    failed = submit(buffer, {"LINE_NO": "2"}, action="next")
+    assert not failed["accepted"] and failed["summary"] == 2
+    assert buffer.current_row_id == 1 and buffer.rows[1] == {"ORDER_NO": "A", "LINE_NO": "2"}
+    assert submit(buffer, {"LINE_NO": "3"}, action="new")["accepted"]
+    assert buffer.rows[3] == {"ORDER_NO": "A", "LINE_NO": None}
+    sibling = inherited_state(parent_values={"ORDER_NO": "B"}, parent_id=2)
+    assert submit(sibling, {"LINE_NO": "2"})["summary"] == 1
+    assert buffer.rows[1]["ORDER_NO"] == "A" and sibling.rows[1]["ORDER_NO"] == "B"
+
+
+def test_parent_copy_receipt_cannot_be_self_rehashed_to_another_column_or_item():
+    for key in ("parent_column", "parent_item_id"):
+        plan = closed_plan(copy_from="HEADERS.ORDER_NO")
+        plan["operations"][0]["key_bindings"][0]["parent_copy"][key] = "OTHER"
+        with pytest.raises(rb.BufferPlanError, match="SOURCE_IR_MISMATCH"):
+            rb.validate_buffer_plan(resign(plan))

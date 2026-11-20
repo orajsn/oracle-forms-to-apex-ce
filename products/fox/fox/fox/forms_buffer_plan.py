@@ -91,16 +91,24 @@ def build_buffer_plan(documents, parent_zip):
                 "chunk_id": chunk_by_unit[unit["id"]]["id"], "text": chunk_by_unit[unit["id"]]["text"]})
     operations, coverage = derive_buffer_operations(catalog, trace, packet["source_binding"], relation_plan, relation_receipt)
     schema = files["fox-package/supporting-schema.sql"].decode()
+
+    def check_length(block_id, column, maximum):
+        block = blocks[block_id]
+        declaration = re.findall(r"\bCREATE TABLE " + re.escape(block["table_name"]) + r" \(\s*(.*?)\n\);", schema, re.S)
+        lengths = re.findall(r"\b" + re.escape(column) + r"\s+VARCHAR2\(([0-9]+)\)", declaration[0])
+        if lengths != [str(maximum)]:
+            raise ValueError("BUFFER_NATIVE_KEY_LENGTH_BINDING")
+
     for operation in operations:
         proofs = [operation, operation["formula"], operation["helper"]]
         if any(proof["source_chunk_id"] not in selected for proof in proofs):
             raise ValueError("BUFFER_PIPELINE_SOURCE_NOT_SELECTED")
         for binding in operation["key_bindings"]:
-            block = blocks[binding["source_block_id"]]
-            declaration = re.findall(r"\bCREATE TABLE " + re.escape(block["table_name"]) + r" \(\s*(.*?)\n\);", schema, re.S)
-            lengths = re.findall(r"\b" + re.escape(binding["column"]) + r"\s+VARCHAR2\(([0-9]+)\)", declaration[0])
-            if lengths != [str(binding["max_length"])]:
-                raise ValueError("BUFFER_NATIVE_KEY_LENGTH_BINDING")
+            check_length(binding["source_block_id"], binding["column"], binding["max_length"])
+            if "parent_copy" in binding:
+                parent = binding["parent_copy"]
+                check_length(operation["relation"]["parent_block_id"], parent["parent_column"],
+                             int(metadata[parent["parent_item_id"]]["MaximumLength"]))
         relation = operation["relation"]
         page = files.get(relation["page_file"], b"").decode()
         if (not page.startswith(f"page {relation['page_id']} (\n")

@@ -27,6 +27,12 @@ validated, installed, runtime verified and business accepted remain separate.
 - A named APEX collection holds loaded drafts for one operation and parent within
   the current application/session. Initial loading uses the source relation and
   synthetic row identities; it does not query every record as a uniqueness test.
+- When a key field declares CopyValueFromItem from the selected parent, FOX
+  verifies the exact incoming join and parent column. Both the first draft and
+  each new draft receive that server value. The draft page protects the copied
+  field and checks its value against the locked parent before changing records.
+  This enforces the selected relationship throughout the session draft. A parent
+  with a missing or oversized key needs a valid value before drafting can begin.
 - Browser-rendered parent, sequence and revision values use protected request-only
   items. The server checks them against collection state, takes a NOWAIT lock on
   the synthetic parent and rechecks before mutation. Unknown actions and stale

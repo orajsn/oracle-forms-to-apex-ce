@@ -134,3 +134,28 @@ def test_coordinated_rehashed_catalog_cannot_replace_original_parent(monkeypatch
     with pytest.raises(ValueError,match='SOURCE_CATALOG_DIFFERS_FROM_REBUILT_PARENT'):
         generated()
     assert seen==[True]
+
+
+def test_generated_inherited_field_is_parent_bound_for_every_draft_action():
+    fixture = Path(__file__).resolve().parents[2] / 'examples/xml-mapping/record_buffer_parent_copy.xml'
+    candidate, report = generate_xml_package([(fixture.name, fixture.read_bytes())],
+                                             'dispatch', 'Dispatch', POLICY_ID)
+    op, = report['buffer_plan']['operations']
+    target, = report['buffer_receipt']['generated_operations']
+    page = _members(candidate)[target['page_file']].decode()
+    page_id = target['page_id']
+    copied = op['key_bindings'][0]['parent_copy']['parent_column']
+    assert f"select FOX_ROW_ID, {copied}," in page
+    assert f"pageItem P{page_id}_K1 (\n        type: hidden" in page
+    assert page.count('sessionStateProtection: checksumRequiredSessionLevel') == 4
+    assert f"pageItem P{page_id}_K2 (\n        type: textField" in page
+
+    seed = "apex_collection.add_member(p_collection_name=>l_name,p_c001=>l_value1,p_c050=>'ROW')"
+    assert f'if l_count=0 then {seed}' in page
+    assert f"l_next := {seed}" in page
+    # Verify stored and submitted keys against the locked parent's current value.
+    assert native_buffer._parent_match('c001', 'l_value1') in page
+    assert native_buffer._parent_match(f':P{page_id}_K1', 'l_value1') in page
+    assert 'p_seq=>l_seq,p_attr_number=>1,p_attr_value=>' not in page
+    assert f"standard_hash({copied},'SHA256')" in page
+    assert 'customer_table_writes' in target and not target['customer_table_writes']

@@ -97,3 +97,82 @@ def test_editable_fetched_cased_input_remains_a_gap_without_changed_value_contex
     assert len(report['lookup_receipt']['generated_operations'])==2
     assert report['lookup_receipt']['unrendered_operations'][0]['reason']=='source_lookup_edited_case_context_required'
     assert report['metadata']['behavior_coverage']['counts']=={'generated_wired_adapted':2,'unsupported':1}
+
+
+def _lookup_button(menu, index):
+    return menu.split(f'    button lookup-{index} (',1)[1].split('\n    )',1)[0]
+
+
+@pytest.mark.parametrize('restriction', ['none','two_inputs','two_inputs_editable_existing','item_insert','block_insert'])
+def test_new_lookup_entry_points_and_submit_require_every_input_provider(restriction):
+    path=Path(__file__).resolve().parents[2]/'examples/xml-mapping/source_lookups.xml'
+    raw=path.read_bytes()
+    if restriction.startswith('two_inputs'):
+        raw=raw.replace(b'AND CITY_CODE = DEST_CODE',b'AND CITY_CODE = :THRU')
+        if restriction=='two_inputs_editable_existing':
+            raw=raw.replace(b'UpdateAllowed="false"',b'UpdateAllowed="true"')
+    elif restriction=='item_insert':
+        raw=raw.replace(b'InsertAllowed="true"',b'InsertAllowed="false"')
+    elif restriction=='block_insert':
+        raw=raw.replace(b'<Block Name="HEADER" DatabaseBlock="true">',
+                        b'<Block Name="HEADER" DatabaseBlock="true" InsertAllowed="false">')
+    candidate,report=generate(raw);files=_members(candidate)
+    op=next(o for o in report['lookup_plan']['operations'] if o['source_event']=='POST-CHANGE')
+    receipt=next(r for r in report['lookup_receipt']['generated_operations'] if r['operation_id']==op['operation_id'])
+    eligible=restriction=='none'
+    if restriction.startswith('two_inputs'):
+        assert len(op['input_bindings'])==2
+        assert all(b['source_insert_allowed'] is not False for b in op['input_bindings'])
+    for report_file in receipt['report_files']:
+        assert ('button new-lookup-input (' in files[report_file].decode()) is eligible
+    menu_id=receipt['menu_page_id'];page_id=receipt['page_id']
+    menu=files[f'pages/p{menu_id:05d}-fox_lookups_{menu_id}.apx'].decode()
+    block_ops=[o for o in report['lookup_plan']['operations'] if o['source_block_id']==op['source_block_id']]
+    button=_lookup_button(menu,block_ops.index(op)+1)
+    assert (f'item: P{menu_id}_ROW_ID' in button) is not eligible
+    page=files[receipt['page_file']].decode()
+    # Both the visible Apply action and its process condition require the same context.
+    row_condition=f' and :P{page_id}_FOX_ROW_ID is not null'
+    assert (row_condition in native_lookups._condition(op,page_id,render=True)) is not eligible
+    assert (row_condition in native_lookups._condition(op,page_id)) is not eligible
+    assert json.dumps(native_lookups._condition(op,page_id,render=True)) in page
+    assert json.dumps(native_lookups._condition(op,page_id)) in page
+    assert native_lookups._request(op) in page
+    code=native_lookups._source_body(op,page_id)
+    draft_rejection='raise_application_error(-20004,'
+    assert (draft_rejection in code) is not eligible
+    if not eligible:
+        assert code.index(draft_rejection)<code.index('SELECT DEST_CODE')<code.index('exception when')
+        assert f'if :P{page_id}_FOX_ROW_ID is null then '+draft_rejection in code
+    # Existing rows remain usable and immutable inputs are loaded from the selected row.
+    assert f'where FOX_ROW_ID=:P{page_id}_FOX_ROW_ID' in code
+    for binding in op['input_bindings']:
+        editable=binding['source_item_id']==op['event_item_id'] and binding['source_update_allowed'] is not False
+        assert (f"SELECT {binding['column']} INTO :P{page_id}_{binding['column']}" in code) is not editable
+    assert 'formAutoRowProcessing' not in page
+    assert not receipt['original_interface_enabled'] and not receipt['runtime_verified']
+
+
+def test_mixed_lookup_menu_keeps_eligible_draft_action_and_existing_row_operations():
+    path=Path(__file__).resolve().parents[2]/'examples/xml-mapping/source_lookups.xml'
+    raw=path.read_bytes().replace(b'AND CITY_CODE = DEST_CODE',b'AND CITY_CODE = :THRU')
+    raw=raw.replace(b'<Item Name="THRU" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="10"/>',
+        b'<Item Name="THRU" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="10">'
+        b'<Trigger Name="POST-CHANGE" TriggerText="BEGIN SELECT CITY_LABEL INTO :TO_CITY FROM SOURCE_CITIES WHERE CITY_CODE = :THRU; EXCEPTION WHEN NO_DATA_FOUND THEN :TO_CITY := NULL; END;"/>'
+        b'</Item>')
+    candidate,report=generate(raw);files=_members(candidate)
+    change_ops=[o for o in report['lookup_plan']['operations'] if o['source_event']=='POST-CHANGE']
+    assert len(change_ops)==2
+    block_ops=[o for o in report['lookup_plan']['operations'] if o['source_block_id']==change_ops[0]['source_block_id']]
+    for op in block_ops:
+        receipt=next(r for r in report['lookup_receipt']['generated_operations'] if r['operation_id']==op['operation_id'])
+        menu_id=receipt['menu_page_id']
+        menu=files[f'pages/p{menu_id:05d}-fox_lookups_{menu_id}.apx'].decode()
+        button=_lookup_button(menu,block_ops.index(op)+1)
+        eligible=op['source_event']=='POST-CHANGE' and len(op['input_bindings'])==1
+        assert (f'item: P{menu_id}_ROW_ID' in button) is not eligible
+        assert f"page: {receipt['page_id']}" in button
+        for report_file in receipt['report_files']:
+            text=files[report_file].decode()
+            assert text.count('button new-lookup-input (')==1
+            assert '#FOX_ROW_ID#' in text

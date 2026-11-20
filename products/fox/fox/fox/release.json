@@ -1,9 +1,10 @@
 {
-  "version": "0.39.1",
+  "version": "0.39.2",
   "released_on": "2026-11-20",
-  "title": "Simplify one-file upload and confirmation",
+  "title": "Inherit the selected parent when creating detail drafts",
   "changes": [
-    "Prepare one FMB, review the result and choose Next. Confirm local partial generation once and download the APEXlang package."
+    "New detail drafts inherit the parent field declared in the source form. The draft checks the selected parent before accepting changes.",
+    "Lookup menus offer new input when all required lookup values are available for a new draft."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

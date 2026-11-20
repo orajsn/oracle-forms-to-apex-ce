@@ -17,6 +17,7 @@ from forms2apex import native_blueprint, native_behavior, native_relations
 from forms2apex.record_buffer import validate_buffer_plan, _canonical, _sha
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "xml-mapping" / "record_buffer.xml"
+PARENT_COPY_EXAMPLE = EXAMPLE.with_name("record_buffer_parent_copy.xml")
 
 
 def documents(*, changes=(), module="SHIPMENT_DRAFT"):
@@ -199,3 +200,80 @@ def test_four_direct_character_key_fields_supported_and_fifth_rejected():
     docs = [(name, raw.replace(b"|| :PACKS.FOURTH", b"|| :PACKS.FOURTH || :PACKS.CODE"))]
     plan = build_buffer_plan(docs, parent_package(docs))
     assert not plan["operations"] and any(row["reason"] == "key_field_capacity" for row in plan["coverage"])
+
+
+def inherited_documents(*, changes=(), module="DISPATCH_DRAFT"):
+    raw = PARENT_COPY_EXAMPLE.read_bytes().replace(b"DISPATCH_DRAFT", module.encode())
+    for old, new in changes:
+        assert old.encode() in raw
+        raw = raw.replace(old.encode(), new.encode())
+    return [(module.lower() + ".xml", raw)]
+
+
+def test_renamed_second_form_explicitly_binds_inheritance_and_preserves_ordinary_fixture():
+    docs = documents(module="OUTGOING") + inherited_documents(module="INCOMING")
+    plan = build_buffer_plan(docs, parent_package(docs))
+    assert plan == validate_buffer_plan(plan) and len(plan["operations"]) == 2
+    ordinary = next(op for op in plan["operations"] if op["key_bindings"][0]["source_item_name"] == "PREFIX")
+    copied = next(op for op in plan["operations"] if op["key_bindings"][0]["source_item_name"] == "LOAD_REFERENCE")
+    assert all("parent_copy" not in binding for binding in ordinary["key_bindings"])
+    key, editable = copied["key_bindings"]
+    pair, = copied["relation"]["join_pairs"]
+    assert key["parent_copy"] == {"parent_column": pair["parent_column"], "parent_item_id": pair["parent_item_id"]}
+    assert key["source_item_id"] == pair["child_item_id"] and key["required"] is True
+    assert "parent_copy" not in editable
+    assert ordinary["source_module_id"] != copied["source_module_id"]
+    assert ordinary["relation"]["page_id"] != copied["relation"]["page_id"]
+
+
+@pytest.mark.parametrize("old,new", [
+    ("LOADS.LOAD_REFERENCE\" Required", "LOADS.UNKNOWN\" Required"),
+    ("LOADS.LOAD_REFERENCE\" Required", "PIECES.LOAD_REFERENCE\" Required"),
+    ("LOADS.LOAD_REFERENCE\" Required", ":LOADS.LOAD_REFERENCE\" Required"),
+    ("LOADS.LOAD_REFERENCE\" Required", "LOADS.LOAD_REFERENCE || 'X'\" Required"),
+    ('Name="PIECE_CODE" ItemType', 'Name="PIECE_CODE" CopyValueFromItem="LOADS.LOAD_REFERENCE" ItemType'),
+])
+def test_unproven_key_copy_is_visible_unsupported_whole_pipeline(old, new):
+    docs = inherited_documents(changes=[(old, new)])
+    plan = build_buffer_plan(docs, parent_package(docs))
+    assert not plan["operations"] and len(plan["coverage"]) == 3
+    assert any(row["status"] == "unsupported" for row in plan["coverage"])
+
+
+def test_parent_copy_uses_exact_source_size_and_safe_child_bounds_with_wider_parent():
+    name, raw = inherited_documents()[0]
+    docs = [(name, raw.replace(b'MaximumLength="16"', b'MaximumLength="20"', 1))]
+    plan = build_buffer_plan(docs, parent_package(docs))
+    key = plan["operations"][0]["key_bindings"][0]
+    assert key["max_length"] == 16 and key["data_type"] == "VARCHAR2" and "parent_copy" in key
+    from forms2apex.record_buffer import BufferPlanError, BufferState
+    with pytest.raises(BufferPlanError, match="MODEL_VALUE_LENGTH"):
+        BufferState(plan, plan["operations"][0]["operation_id"], parent_id=1, rows=[], collation="BINARY",
+                    parent_values={key["parent_copy"]["parent_column"]: "X" * 17})
+
+
+def test_copied_parent_source_size_must_match_actual_parent_schema():
+    docs = inherited_documents()
+    parent = parent_package(docs)
+    plan = build_buffer_plan(docs, parent)
+    op, = plan["operations"]
+    table = op["relation"]["parent"]["table"]
+    column = op["key_bindings"][0]["parent_copy"]["parent_column"]
+    files = members(parent)
+    schema = files["fox-package/supporting-schema.sql"]
+    start = schema.index(("CREATE TABLE " + table + " (").encode())
+    end = schema.index(b"\n);", start)
+    changed = schema[start:end].replace((column + " VARCHAR2(16)").encode(), (column + " VARCHAR2(17)").encode())
+    assert changed != schema[start:end]
+    files["fox-package/supporting-schema.sql"] = schema[:start] + changed + schema[end:]
+    with pytest.raises(ValueError, match="NATIVE_KEY_LENGTH_BINDING"):
+        build_buffer_plan(docs, pack(files))
+
+
+def test_parent_copy_cannot_resolve_a_parent_only_present_in_another_module():
+    docs = inherited_documents(changes=[('CopyValueFromItem="LOADS.LOAD_REFERENCE"',
+                                         'CopyValueFromItem="ORDERS.ORDER_ID"')]) + documents()
+    plan = build_buffer_plan(docs, parent_package(docs))
+    assert len(plan["operations"]) == 1
+    assert all("parent_copy" not in key for key in plan["operations"][0]["key_bindings"])
+    assert any(row["reason"] == "source_item_reference_not_unique" for row in plan["coverage"])

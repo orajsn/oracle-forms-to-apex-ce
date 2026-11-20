@@ -133,6 +133,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.39.2] - 2026-11-20
+
+### [fix] Inherit the selected parent for new detail drafts
+Impact: Entering the first detail or adding another detail now carries forward the parent's business key. Users enter the detail code once. Duplicate entries stay on the current draft for correction.
+Change: A source CopyValueFromItem on a duplicate-key field must resolve to a matching master/detail join. The generated page loads the value from the selected synthetic parent, protects it from editing and checks the stored and submitted values before changing the draft. A new lookup action requires a provider for every input. Lookups with additional row-dependent inputs are available on existing records.
+Delivery: Source patch for the single-FMB workflow.
+Verification: The original form and a renamed dispatch form were generated and format validated with SQLcl. Model checks exercised initial and subsequent details, duplicate correction, conflicting parent values and the same code under a different parent.
+Remaining: The changes cover session drafts. Execution inside an installed APEX target and customer-table saves require separate verification.
+
 ## [0.39.1] - 2026-11-20
 
 ### [improvement] One Next step and one confirmation for a hosted form
