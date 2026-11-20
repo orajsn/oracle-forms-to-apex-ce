@@ -47,6 +47,9 @@ _PAREN_CALL = re.compile(rf"(?<![\w:$#.@])({_DOTTED})\s*\(", re.I)
 # Only registered same-module names, known Forms APIs or qualified references
 # qualify. A lone identifier in a SQL expression is insufficient.
 _BARE_CALL = re.compile(rf"(?:\A|;|\b(?:BEGIN|THEN|ELSE|LOOP)\b)\s*({_DOTTED})\s*(?=;)", re.I)
+_LOCAL_BODY_TOKEN = re.compile(
+    rf"\b(?:FUNCTION|PROCEDURE)\s+(?P<declaration>{_NAME})(?![\w$#])|"
+    rf"\bEND\s+(?P<ending>{_NAME})\s*;|\b(?P<keyword>IS|AS|BEGIN)\b|;", re.I)
 
 
 def _canonical(value):
@@ -71,6 +74,33 @@ def _semantic_mask(semantic):
     # copy so Oracle CR, LF and CRLF line endings terminate comments alike.
     # semantic_sha256 continues to identify the exact unnormalized decoder text.
     return _mask_code(semantic.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _named_nested_bodies(masked, owner):
+    """Lexical body-presence evidence within this unit, never call resolution."""
+    outer = (owner["name"] or "").upper() if owner["kind"] == "ProgramUnit" else None
+    header = None
+    body_starts = {}
+    found = set()
+    last_begin = -1
+    for token in _LOCAL_BODY_TOKEN.finditer(masked):
+        if token["declaration"]:
+            header = token["declaration"].upper()
+        elif token["ending"]:
+            name = token["ending"].upper()
+            if name in body_starts and last_begin > body_starts.pop(name) and name != outer:
+                found.add(name)
+            header = None
+        elif token["keyword"]:
+            if token["keyword"].upper() == "BEGIN":
+                last_begin = token.start()
+            elif header:
+                body_starts[header] = token.start()
+            header = None
+        else:
+            # A declaration ending in a semicolon can be a forward declaration.
+            header = None
+    return found
 
 
 def _comma_from_candidates(masked, database_matches):
@@ -156,10 +186,12 @@ def build_dependency_evidence(packet, chunks, ledger):
                         and match.start(1) not in database_positions and not declaration):
                     candidates.append(("routine", candidate))
             if unit["source_attribute"] in {"TriggerText", "ProgramUnitText"}:
-                module = objects[unit["owner_id"]]["module_id"]
+                owner = objects[unit["owner_id"]]
+                nested = _named_nested_bodies(masked, owner)
                 for match in _BARE_CALL.finditer(masked):
                     name = re.sub(r"\s*\.\s*", ".", match[1])
-                    if "." in name or name.upper() in local_names[module] or name.upper() in FORMS_APIS:
+                    if ("." in name or name.upper() in local_names[owner["module_id"]]
+                            or name.upper() in nested or name.upper() in FORMS_APIS):
                         candidates.append(("routine", name))
             seen = set()
             for kind, candidate in candidates:
@@ -168,7 +200,9 @@ def build_dependency_evidence(packet, chunks, ledger):
                     continue
                 evidence = {"source_id": unit["owner_id"], "kind": kind, "name": name,
                     "evidence": "code:" + unit["source_attribute"], "confidence": "candidate", "location": deepcopy(unit["location"])}
-                identity = _canonical(evidence)
+                # This list records an unquoted name once per kind and source
+                # unit. Repeated statements and casing variants share a fact.
+                identity = (kind, name.upper())
                 if identity in seen:
                     continue
                 seen.add(identity)
@@ -280,6 +314,12 @@ def _reference_description(kind, name, status):
         return ("A report is registered in the Forms source; registration does not supply its query or layout definition.",
                 "Verify the report definition and target reporting interface separately; keep supported conversion progressing.")
     if kind == "routine_reference":
+        if name.upper() in {"CEIL", "LPAD"}:
+            return (f"Oracle SQL provides the built-in function {name.upper()}. This source reference uses that unqualified name.",
+                    "Check the expression types and any local declaration that could change name resolution.")
+        if "." in name:
+            return (f"The source names the qualified routine {name}. Its target binding and runtime behavior need verification.",
+                    "Verify the routine or package specification, argument types and execute privilege for the listed actions.")
         return ("Lexical routine candidate only; local/external ownership, executable meaning and reachability are unverified.",
                 "Review its source context and authoritative interface before mapping the call; do not infer a missing file.")
     if status == "source_definition_present":
@@ -353,6 +393,7 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
                 "message": message, "next_action": action})
         local = defaultdict(list)
         body_owners = set()
+        nested_names = {}
         if chunks is not None:
             text_chunks = _unique(chunks, "code_unit_id")
             _require(set(text_chunks) == set(units))
@@ -360,7 +401,7 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
                 chunk = text_chunks[uid]
                 _require(type(chunk["text"]) is str and hashlib.sha256(chunk["text"].encode("utf-8")).hexdigest() == unit["sha256"])
                 owner = objects[unit["owner_id"]][0]
-                if owner["kind"] != "ProgramUnit" or not owner["name"]:
+                if unit["source_attribute"] not in {"TriggerText", "ProgramUnitText"}:
                     continue
                 # Conservative body-presence evidence only, not a PL/SQL parser,
                 # compiler, side-effect analysis or executable behavior proof.
@@ -368,7 +409,11 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
                     body_semantic, _ = decode_control_entities(chunk["text"])
                 except UnsupportedBehavior:
                     continue
-                tokens = re.findall(r"[A-Za-z][A-Za-z0-9_$#]*|;", _semantic_mask(body_semantic).upper())
+                masked = _semantic_mask(body_semantic)
+                nested_names[uid] = _named_nested_bodies(masked, owner)
+                if owner["kind"] != "ProgramUnit" or not owner["name"]:
+                    continue
+                tokens = re.findall(r"[A-Za-z][A-Za-z0-9_$#]*|;", masked.upper())
                 name = owner["name"].upper()
                 if (len(tokens) >= 7 and tokens[0] in {"PROCEDURE", "FUNCTION"} and tokens[1] == name
                         and ("IS" in tokens or "AS" in tokens) and "BEGIN" in tokens
@@ -384,10 +429,15 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
         for collection, ref in references:
             owner, source = objects[ref["source_id"]]
             name = ref["target_name"] if collection == "links" else ref["name"]
+            referring = sorted(u["id"] for u in by_owner[owner["id"]] if u["location"] == ref["location"]
+                               and (ref.get("evidence") == "code:" + u["source_attribute"] or
+                                    (collection == "links" and ref["relation"] in {"references_item", "calls_form"})))
             kind, status = "source_link", "unverified"
             if collection == "dependencies" and ref["kind"] == "routine":
                 definitions = local.get((owner["module_id"], name.upper()), [])
-                if len(definitions) == 1:
+                if any(name.upper() in nested_names.get(uid, ()) for uid in referring):
+                    kind = "routine_reference"
+                elif len(definitions) == 1:
                     kind = "local_routine"
                     if definitions[0] in body_owners:
                         status = "source_definition_present"
@@ -405,14 +455,22 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
             # One occurrence per original candidate/link fact, including two
             # facts at the same XML coordinate. This preserves reference totals.
             group["occurrences"].append({"source_object_id": owner["id"], "source_file": source["name"],
-                "source_line": ref["location"]["line"], "source_unit_ids": sorted(
-                    u["id"] for u in by_owner[owner["id"]] if u["location"] == ref["location"]
-                    and (ref.get("evidence") == "code:" + u["source_attribute"] or
-                         (collection == "links" and ref["relation"] in {"references_item", "calls_form"})))})
+                "source_line": ref["location"]["line"], "source_unit_ids": referring})
             if group["status"] != status:
                 # A group with any unresolved relationship remains unverified.
                 group["status"] = "unverified"
                 group["message"], group["next_action"] = _reference_description(kind, name, "unverified")
+        for group in grouped.values():
+            if group["kind"] != "routine_reference":
+                continue
+            referring = {uid for occurrence in group["occurrences"] for uid in occurrence["source_unit_ids"]}
+            matches = [uid for uid in referring if group["name"].upper() in nested_names.get(uid, ())]
+            if matches:
+                places = sorted(f"{units[uid][1]['name']} (line {units[uid][0]['location']['line']})" for uid in matches)
+                suffix = f" and {len(places) - 3} more" if len(places) > 3 else ""
+                group["message"] = ("A nested routine with this name has a declaration and a named body in "
+                                    + ", ".join(places[:3]) + suffix + ".")
+                group["next_action"] = "Review the nested declaration and its parameters at each calling location to establish which body executes."
         counts = Counter(row["status"] for row in output_units)
         return {"schema_version": 1, "scope": SCOPE, "source_binding": packet["source_binding"],
             "summary": {"total_units": len(output_units), "generated_units": counts["generated"],

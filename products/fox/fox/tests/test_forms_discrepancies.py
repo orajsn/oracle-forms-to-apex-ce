@@ -191,6 +191,44 @@ def semantic_context(text):
     return context([("encoded.xml", ET.tostring(root))])
 
 
+def test_nested_body_and_platform_names_do_not_imply_a_missing_interface():
+    packet, chunks, ledger, gaps, catalog, _ = semantic_context(
+        "DECLARE PROCEDURE persist$ IS BEGIN NULL; END persist$; "
+        "FUNCTION nested_calc(n NUMBER) RETURN NUMBER AS BEGIN RETURN n; END nested_calc; "
+        "BEGIN persist$; x := nested_calc(2); v := LPAD(x,8,'0'); REMOTE_API.SAVE(x); END;")
+    evidence = build_dependency_evidence(packet, chunks, ledger)
+    report = build_discrepancies(packet, ledger, gaps, catalog, chunks=chunks, dependency_evidence=evidence)
+    groups = {g['name'].upper(): g for g in report['dependencies']}
+    for name in ('PERSIST$', 'NESTED_CALC'):
+        assert groups[name]['status'] == 'unverified'
+        assert 'nested routine' in groups[name]['message'] and 'encoded.xml (line' in groups[name]['message']
+    assert 'built-in function LPAD' in groups['LPAD']['message']
+    assert 'built-in function CEIL' in groups['CEIL']['message']
+    assert 'qualified routine REMOTE_API.SAVE' in groups['REMOTE_API.SAVE']['message']
+    validate_discrepancies(report, ledger, gaps, catalog, packet=packet, chunks=chunks, dependency_evidence=evidence)
+
+
+def test_forward_declaration_and_quoted_body_are_not_named_body_evidence():
+    packet, chunks, ledger, gaps, catalog, _ = semantic_context(
+        "DECLARE FUNCTION helper(n NUMBER) RETURN NUMBER; BEGIN "
+        "message('FUNCTION ghosts(n NUMBER) RETURN NUMBER IS BEGIN RETURN 1; END ghosts;'); "
+        "x := helper(1) + ghosts(1); END;")
+    evidence = build_dependency_evidence(packet, chunks, ledger)
+    report = build_discrepancies(packet, ledger, gaps, catalog, chunks=chunks, dependency_evidence=evidence)
+    assert all('nested routine' not in g['message'] for g in report['dependencies'])
+
+
+def test_unquoted_reference_case_does_not_change_affected_unit_count():
+    packet, chunks, ledger, gaps, catalog, _ = semantic_context(
+        "BEGIN pkg.run(1); PKG.RUN(2); SELECT 1 INTO x FROM my_rows; SELECT 2 INTO x FROM MY_ROWS; END;")
+    evidence = build_dependency_evidence(packet, chunks, ledger)
+    report = build_discrepancies(packet, ledger, gaps, catalog, chunks=chunks, dependency_evidence=evidence)
+    for name in ('MY_ROWS', 'PKG.RUN'):
+        group, = [g for g in report['dependencies'] if g['name'].upper() == name]
+        assert len(group['occurrences']) == 1
+    validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
+
+
 @pytest.mark.parametrize("newline", ["&#10;", "&#13;", "&#13;&#10;", "\n", "\r", "\r\n"])
 def test_additive_semantic_inventory_unhides_calls_after_encoded_or_native_newlines(newline):
     packet, chunks, ledger, gaps, catalog, old_report = semantic_context(

@@ -1,11 +1,11 @@
 {
-  "version": "0.43.0",
+  "version": "0.43.1",
   "released_on": "2026-11-20",
-  "title": "Return a list choice to the calling form fields",
+  "title": "Identify routine definitions within their referring source",
   "changes": [
-    "On eligible existing records, select a reference row and return its declared values into the calling field and companion fields in the same session draft.",
-    "Check the caller's current permission and query inputs before applying a choice. Reopening a changed source record starts from fresh stored values.",
-    "The discrepancy view identifies connected fields and explains when a registered list still lacks an editable caller."
+    "Show where a referring code unit contains a named nested routine body and where a qualified package interface needs verification.",
+    "Identify unqualified CEIL and LPAD as Oracle SQL function names while preserving the need to check source name resolution.",
+    "Count a case-insensitive code reference once per kind and source unit."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

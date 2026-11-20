@@ -150,6 +150,24 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.43.1] - 2026-11-20
+
+### [fix] Identify nested routine bodies and count unquoted references consistently
+The dependency report identifies a named nested subprogram body inside its
+referring source unit. Forward declarations, comments and quoted business text
+do not establish a body. The report points out known Oracle SQL function names
+and the target checks for qualified routine references. Runtime resolution
+still depends on scope, arguments and the actual database interface.
+
+Capitalization used to change reference totals when the same source unit
+spelled an unquoted identifier two ways. The original and a renamed 53-unit
+module now each report 86 groups and 183 reference facts. Their source-unit
+coverage remains 19 generated or adapted, six awaiting full connection and
+28 unimplemented. Historical packages keep their original classifications.
+All 728 local integration checks passed. SQLcl 26.1.2 validated both 53-unit
+packages without warnings. The original native APEX members matched 0.43.0
+byte-for-byte, and the new notes rendered on desktop and mobile.
+
 ## [0.43.0] - 2026-11-20
 
 ### [feature] Return the selected list row to its source fields
