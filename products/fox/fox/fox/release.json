@@ -1,11 +1,11 @@
 {
-  "version": "0.43.1",
+  "version": "0.44.0",
   "released_on": "2026-11-20",
-  "title": "Identify routine definitions within their referring source",
+  "title": "Refresh related records when the selected master changes",
   "changes": [
-    "Show where a referring code unit contains a named nested routine body and where a qualified package interface needs verification.",
-    "Identify unqualified CEIL and LPAD as Oracle SQL function names while preserving the need to check source name resolution.",
-    "Count a case-insensitive code reference once per kind and source unit."
+    "Show the selected master and matching child records together, using the source relation and its key checks.",
+    "Recognize retained child drafts before switching masters. Cancel keeps the selected master, and an explicit Discard clears only the supported session drafts.",
+    "The source discrepancy view distinguishes rules with connected effects from rules that still need their first connection."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -501,6 +501,33 @@ def test_partial_source_discrepancies_visible_after_generation(client):
     assert c.get(result['download_url']).status_code==200
 
 
+def test_partial_coordination_effects_are_bound_to_downloadable_pages_and_unit_notes(client):
+    from test_forms_detail_clear import source as clear_source
+    c, root, pid = client
+    upload(c, pid, clear_source(renamed=True))
+    scope = c.get(f'/api/projects/{pid}/xml-mapping').json()
+    body = {key: scope[key] for key in ('source_hash', 'selected_source_set_id', 'source_binding', 'catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()), approved_synthetic_scope=True, approved_local_source_processing=True)
+    queued = c.post(f'/api/projects/{pid}/xml-mapping/runs', json=body)
+    assert queued.status_code == 202
+    process_one(connection(root), root)
+    run = c.get(f"/api/projects/{pid}/xml-mapping/runs/{queued.json()['id']}").json()
+    assert run['state'] == 'GENERATED'
+    files = _members(c.get(run['download_url']).content)
+    ledger = json.loads(files['fox-package/mapping-ledger.json'])
+    partial = {u['source_unit_id']: u for u in ledger['coordination_partial_units']}
+    gaps = {g['source_unit_id']: g for g in run['gaps']}
+    notes = {u['source_unit_id']: u for u in run['discrepancies']['units']}
+    assert len(partial) == 6
+    for uid,record in partial.items():
+        assert notes[uid]['status'] != 'generated'
+        assert gaps[uid]['reason'] == record['reason']
+        assert record['effects'] and all(effect['page_file'] in files for effect in record['effects'])
+    assert sum(g['reason']=='master_population_partly_connected' for g in gaps.values()) == 2
+    assert sum(g['reason']=='master_clear_partly_connected' for g in gaps.values()) == 2
+    assert not run['runtime_verified'] and not run['business_behavior_accepted']
+
+
 def test_source_lookup_handlers_are_generated_but_original_reads_stay_disabled(client):
     from pathlib import Path
     c,root,pid=client

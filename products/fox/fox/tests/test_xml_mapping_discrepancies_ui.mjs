@@ -14,6 +14,20 @@ test('discrepancy report is validated and readable on desktop and mobile',{timeo
  await page.getByText('UNIT 1 \u00b7 sample.xml, line 2',{exact:true}).waitFor();
  await page.getByLabel('Search units').fill('');for(const value of ['generated','encoded_unwired','unimplemented']){await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption(value);await page.getByText('Showing 1 of 3 units.').waitFor();}await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('all');await page.getByText('Showing 3 of 3 units.').waitFor();
  const refresh=()=>page.getByRole('button',{name:'Refresh mapping status'}).click();
+ // Partly wired behavior is a disjoint display status, backed by the same recorded gap.
+ await page.evaluate(()=>{
+  window.run.gaps_available=true;window.run.gap_summary={engine_mapping:0,engine_context:2,missing_source:0,review_required:0};
+  window.run.gaps=window.report.units.slice(1).map((u,i)=>({
+   source_unit_id:u.source_unit_id,source_name:u.source_name,source_file:u.source_file,source_line:u.source_line,
+   category:'engine_context',owner:'FOX_ENGINE',message:'Source context.',next_action:'Connect remaining effects.',
+   reason:i===0?'master_query_helper_partly_connected':'source_context_pending'}));
+ });await refresh();
+ await page.getByText(/Partly connected: 1 · Encoded, awaiting connection: 0/).waitFor();
+ await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('partial');
+ await page.getByText('Showing 1 of 3 units.').waitFor();
+ await page.getByText('Partly connected: Behavior note').waitFor();
+ await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('all');
+ await page.evaluate(()=>{delete window.run.gaps_available;delete window.run.gap_summary;delete window.run.gaps;});await refresh();
  // A parser change may prevent new generation without invalidating the saved report.
  await page.evaluate(()=>{window.originalFetch=window.fetch;window.run.saved_source_binding=window.report.source_binding;window.fetch=async()=>{const v=await (await window.originalFetch()).json();return new Response(JSON.stringify({...v,available:false,source_binding:null,reason:'New generation unavailable for this source.'}));};});
  await refresh();await page.getByText('New generation unavailable for this source.').waitFor();

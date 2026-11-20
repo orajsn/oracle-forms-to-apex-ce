@@ -30,6 +30,8 @@ from .forms_record_entry import apply_record_entries
 from .forms_draft_policy import apply_draft_policies
 from .forms_synthetic_save import apply_synthetic_saves
 from .forms_lov_return import apply_lov_returns
+from .forms_master_detail import apply_master_details
+from .forms_detail_clear import apply_detail_clear
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -100,7 +102,7 @@ def mapping_catalog():
         ("fox.query.initial-report-order", "Complete ORDER BY of 1..6 direct mapped database columns, direction and NULL placement.",
          "Initial native saved-report sort, also retained by related report pages.", "Persisted synthetic rows; users may change report sorting. Equal-key order is unspecified; compatible database collation is required."),
         ("fox.policy.finite-review", "Complete finite IF/scalar/property/warning/failure rules, with proven same-module local calls.",
-         "Typed PL/SQL review procedures and ordered effects with exact source/context bindings.", "Generated but not installed, Oracle-compiled or event-wired. No permissions or writes are activated."),
+         "Typed PL/SQL review procedures and ordered effects with exact source/context bindings.", "The complete rule is available as review code. The source-unit note identifies any connected APEX effects and remaining event bindings."),
         ("fox.policy.parent-draft-guard", "A source record-entry policy sets edit permissions for a related draft block using fields on the selected parent.",
          "The draft editor rechecks the selected parent's current policy on the server.", "This connects the rule to session drafts. The full rule still needs its other item, block and event bindings."),
         ("fox.buffer.duplicate-record-validation", "Complete source duplicate trigger, local helper/formula and control SUM with proven parent relation and bounded direct character fields.",
@@ -119,14 +121,20 @@ def mapping_catalog():
          "A dedicated original-source query page applies the declared filter to its verified database source.", "Source reads require a trusted session context and an enabled interface. The other prototype screens continue to use synthetic tables. This read adapter covers the source query only."),
         ("fox.policy.selected-record-entry", "Complete conditional scalar assignment on record entry with an explicitly selected record and proven parent chain.",
          "Native page applies the assignment to session state for the selected synthetic record.", "Inputs come from the selected synthetic rows. False and NULL conditions preserve the previous flag. Other lookup pages and drafts have independent state. This adapter applies when the selected record-entry page is opened."),
+        ("fox.relation.selected-master-population", "Source population trigger and local helpers match a proven relation, key guard and selected record.",
+         "Show selected master context and refresh the related records for supported states.", "Other Forms buffer, message-level and cursor effects are tracked separately."),
+        ("fox.relation.selected-master-clear", "The source clear caller and recursive helper have a bound descendant session provider on a master selection.",
+         "Check related drafts when the selected master changes.", "The native clear gate covers its recorded session buffers. Other blocks and the original form-wide commit remain open."),
+        ("fox.relation.partial-unit", "An incomplete source unit has exact native effect bindings in its coordination receipt.",
+         "Source-linked records identify the generated pages and the effect of this unit on each page.", "Whole-unit coverage remains unfinished until the remaining event and state behavior is connected."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 11,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 12,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -142,6 +150,35 @@ def mapping_catalog():
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
     return {**catalog, "catalog_sha256": _sha(_bytes(catalog))}
+
+
+def _coordination_effects(population, clearing, chunks, files):
+    """Attribute only emitted effects to source units, without whole-unit promotion."""
+    hashes = {c["code_unit_id"]: c["sha256"] for c in chunks}
+    result = {}
+
+    def record(uid, digest, reason, operation, rule, owner):
+        if hashes.get(uid) != digest or operation["page_file"] not in files:
+            raise ValueError("Coordination effect differs from its source or generated page.")
+        row = result.setdefault(uid, {"source_unit_id": uid, "source_unit_sha256": digest,
+                                     "reason": reason, "effects": []})
+        row["effects"].append({"rule_id": rule, "operation_id": owner,
+                               "page_id": operation["page_id"], "page_file": operation["page_file"]})
+
+    for op in population["adapted_operations"]:
+        if op["generation_status"] != "partial_effects_wired":
+            raise ValueError("Missing selected-master effect status.")
+        rule = "fox.relation.selected-master-population"
+        record(op["source_unit_id"], op["source_unit_sha256"], "master_population_partly_connected", op, rule, op["operation_id"])
+        for helper in op["source_helper_units"]:
+            record(helper["source_unit_id"], helper["source_unit_sha256"], "master_query_helper_partly_connected", op, rule, op["operation_id"])
+    for op in clearing["adapted_operations"]:
+        if op["generation_status"] != "partial_effects_wired" or not op["native_event_wired"]:
+            raise ValueError("Missing master-switch clear effect status.")
+        for uid, digest in ((op["source_unit_id"], op["source_unit_sha256"]),
+                            (op["caller_source_unit_id"], op["caller_source_unit_sha256"])):
+            record(uid, digest, "master_clear_partly_connected", op, "fox.relation.selected-master-clear", op["population_operation_id"])
+    return result
 
 
 def _final_record_groups(groups, returns):
@@ -342,6 +379,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files, lov_receipt = apply_lov_returns(documents, packet, chunks, trace, files)
     files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
     final_groups = _final_record_groups(group_receipt, lov_receipt)
+    files, population = apply_master_details(documents, packet, chunks, trace, files)
+    files["fox-package/master-detail-receipt.json"] = _bytes(population)
+    files, clearing = apply_detail_clear(documents, packet, chunks, trace, files)
+    files["fox-package/detail-clear-receipt.json"] = _bytes(clearing)
+    coordination = _coordination_effects(population, clearing, chunks, files)
     for save in save_receipt["generated_operations"]:
         uid = save["source_unit_id"]
         review = encoded.pop(uid, None)
@@ -432,6 +474,10 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
                 reason="parent_value_copy_encoded_write_lifecycle_unimplemented",
                 assignment_operation_id=encoded[row["source_unit_id"]]["operation_id"])
     relation_coverage = relation_receipt["coverage"] if relation_receipt else relation_plan["coverage"]
+    for row in coverage:
+        effect = coordination.get(row["source_unit_id"])
+        if effect and row["status"] != "generated_wired_adapted":
+            row["reason"] = effect["reason"]
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -461,6 +507,12 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
                 row.update(reason="The selected parent controls edits in the related session draft.",
                            next_action="Connect the remaining field, block and record-entry effects.")
     trace_blocks = {block["source_block_id"]: block for block in trace["blocks"]}
+    for row in remediation:
+        partial = coordination.get(row.get("code_unit_id"))
+        if partial and row.get("code") in {"code_unit_not_translated", "policy_generated_unwired"}:
+            row.update(code="partial_coordination_effects", generation_status="partial_effects_wired",
+                       reason="The generated master-detail flow implements the recorded effects of this source unit.",
+                       next_action="Review the remaining lifecycle gaps for this unit in the discrepancy report.")
     source_files = {obj["id"]: {key: entry["source"][key] for key in ("name", "sha256", "bytes")}
                     for entry in packet["sources"] for obj in entry["facts"]["objects"]}
     trace_items = {item["source_item_id"]: {"source_block_id": block["source_block_id"], **item}
@@ -498,6 +550,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         if row["source_unit_id"] in policy_encoded:
             rule = "fox.policy.parent-draft-guard" if row["source_unit_id"] in partial_policies else "fox.policy.finite-review"
             row.update(rule_id=rule, target=deepcopy(policy_encoded[row["source_unit_id"]]))
+        elif row["source_unit_id"] in coordination and row["status"] != "generated_wired_adapted":
+            row.update(rule_id="fox.relation.partial-unit", target=deepcopy(coordination[row["source_unit_id"]]))
     gap_report = classify_gaps(packet, chunks, coverage)
     catalog = mapping_catalog()
     catalog_rules = {row["id"]: row for row in catalog["rules"]}
@@ -515,6 +569,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "record_group_reports": final_groups,
         "lov_returns": lov_receipt["generated_operations"],
         "lov_return_gaps": lov_receipt["gaps"],
+        "coordination_partial_units": list(coordination.values()),
         "source_block_filters": filter_receipt["generated_operations"],
         "session_defaults": defaults_receipt["generated_operations"],
         "guarded_queries": query_receipt["generated_operations"],
@@ -531,6 +586,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})
     if context_summary["relations_generated"]:
         applied = sorted(set(applied) | {"fox.relation.read-context"})
+    applied = sorted(set(applied) | {e["rule_id"] for r in coordination.values() for e in r["effects"]})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:

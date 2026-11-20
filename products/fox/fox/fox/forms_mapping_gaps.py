@@ -79,6 +79,18 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = "The draft editor checks the selected parent's edit permissions before changing draft records."
             action = 'Connect the remaining field and block permissions to their target actions and verify the original record-entry timing.'
+        elif reason == 'master_population_partly_connected':
+            category = 'engine_context'
+            message = 'The selected master now controls its related rows using the source relation and key guard.'
+            action = 'Verify the remaining record states, clear behavior and cursor restoration against the original form.'
+        elif reason == 'master_query_helper_partly_connected':
+            category = 'engine_context'
+            message = 'The selected-master flow uses this helper at its recorded call sites.'
+            action = 'Connect the remaining callers and verify how failures, cursor movement and Forms message levels are handled.'
+        elif reason == 'master_clear_partly_connected':
+            category = 'engine_context'
+            message = 'Changing the selected master checks its connected child session drafts and offers a way to keep or discard their changes.'
+            action = 'Connect the other descendant buffers and complete the form-wide commit and clear lifecycle.'
         elif reason == 'policy_rule_encoded_event_context_unimplemented':
             category = 'engine_context'
             message = 'The complete rule is encoded as review PL/SQL, but its Forms event and required state providers are not wired.'

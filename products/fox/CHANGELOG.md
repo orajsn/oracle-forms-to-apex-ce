@@ -150,6 +150,29 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.44.0] - 2026-11-20
+
+### [feature] Coordinate selected masters and their related session drafts
+Selecting a saved master now displays its current context and automatically
+loads children matching the source relation. The generator preserves the
+source's single-key and alternative-key guards. A deferred relation remains
+pending. The related draft editor can also show children for its current stored
+row while keeping new, dirty or stale input separate.
+
+The master-switch screen checks all retained rows in its supported child draft
+buffer. Cancel restores the prior selection. Discard clears only the identified
+session buffer after rechecking its revision. Save opens the existing draft
+editor. Source-wide commit, other descendant buffers and the full Forms cursor
+lifecycle remain open. The discrepancy view identifies these partial effects
+without counting the whole source units as converted.
+
+The integrated local suite passed 784 checks. Both 53-unit packages passed
+SQLcl 26.1.2 format validation without warnings, and independent review
+reconstructed their exact bytes. The original discrepancy view shows 19
+generated or adapted, eight partly connected, three encoded with no connected
+action, and 23 with no implementation. The same partition was checked using
+renamed identifiers and the original desktop/mobile report.
+
 ## [0.43.1] - 2026-11-20
 
 ### [fix] Identify nested routine bodies and count unquoted references consistently
