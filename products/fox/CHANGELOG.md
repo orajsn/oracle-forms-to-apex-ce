@@ -10,6 +10,11 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-20
 
+### [testing] Check when a record-entry rule is ready to generate
+The discrepancy regression covers both outcomes for the same synthetic rule.
+With an explicit target field size, FOX generates the record-entry action.
+With the size omitted, FOX lists the rule as encoded and awaiting connection.
+
 ### [docs] Record private lookup-engine acceptance
 Impact: Private0.38.0 now generates the three additional source lookup handlers
 through the ordinary package workflow. Public0.37.0 remains unchanged.

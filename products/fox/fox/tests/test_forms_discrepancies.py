@@ -44,8 +44,10 @@ def example():
 def test_exact_partition_catalog_adaptations_and_defensive_result(example):
     packet, chunks, ledger, gaps, catalog, report = deepcopy(example)
     original = deepcopy((packet, chunks, ledger, gaps, catalog))
-    assert report["summary"] == {"total_units": 6, "generated_units": 1, "encoded_unwired_units": 1,
+    assert report["summary"] == {"total_units": 6, "generated_units": 2, "encoded_unwired_units": 0,
         "unimplemented_units": 4, "dependency_groups": 7, "dependency_references": 8}
+    entry = next(unit for unit in report["units"] if unit["source_name"] == "WHEN-NEW-RECORD-INSTANCE")
+    assert entry["status"] == "generated"
     assert len({u["source_unit_id"] for u in report["units"]}) == 6
     rules = {r["id"]: r for r in catalog["rules"]}
     coverage = {r["source_unit_id"]: r for r in ledger["code_units"]}
@@ -59,6 +61,16 @@ def test_exact_partition_catalog_adaptations_and_defensive_result(example):
     assert checked != report
     assert original == (packet, chunks, ledger, gaps, catalog)
     assert report["runtime_verified"] is report["business_behavior_accepted"] is False
+
+
+def test_record_entry_with_unknown_field_size_remains_encoded_unwired():
+    form = ET.fromstring(source())
+    del form.find(".//Item[@Name='FLAG']").attrib["MaximumLength"]
+    *_, report = context([("example.xml", ET.tostring(form))])
+    entry = next(unit for unit in report["units"] if unit["source_name"] == "WHEN-NEW-RECORD-INSTANCE")
+    assert entry["status"] == "encoded_unwired"
+    assert report["summary"]["encoded_unwired_units"] == 1
+    assert report["summary"]["generated_units"] == 1
 
 
 def test_candidates_are_grouped_and_known_source_apis_are_not_external_missing_files(example):
