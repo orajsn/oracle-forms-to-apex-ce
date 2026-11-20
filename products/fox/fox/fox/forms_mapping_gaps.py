@@ -71,6 +71,14 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The parent-value copy procedure is generated, but its insert/update event is not wired.'
             action = 'Wire the original write event and required validation/permission guards before activating the generated review code.'
+        elif reason == 'draft_policy_context_unresolved':
+            category = 'engine_context'
+            message = 'FOX could not establish edit permissions for this draft. The generated screen is read-only.'
+            action = 'Resolve the source record-entry policy and its field bindings before enabling draft edits and validation.'
+        elif reason == 'policy_rule_partial_draft_guard':
+            category = 'engine_context'
+            message = "The draft editor checks the selected parent's edit permissions before changing draft records."
+            action = 'Connect the remaining field and block permissions to their target actions and verify the original record-entry timing.'
         elif reason == 'policy_rule_encoded_event_context_unimplemented':
             category = 'engine_context'
             message = 'The complete rule is encoded as review PL/SQL, but its Forms event and required state providers are not wired.'

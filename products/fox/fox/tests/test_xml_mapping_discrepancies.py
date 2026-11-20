@@ -51,6 +51,35 @@ def test_legacy_report_absence_does_not_block_old_download():
     assert xml_mapping_job._discrepancy_fields({}, {'code_units':[]}, None, {}) is None
 
 
+def test_saved_partial_draft_guard_identifies_its_page_and_keeps_the_source_unit_unfinished():
+    from test_forms_draft_policy import source
+    _, result = xml_mapping.generate_xml_package(source(renamed=True), 'warehouse', 'Warehouse', POLICY_ID)
+    ledger, metadata = result['mapping_ledger'], result['metadata']
+    guard, = ledger['draft_policy_guards']
+    unit = next(u for u in result['discrepancies']['units'] if u['source_unit_id'] == guard['source_unit_id'])
+    assert unit['status'] == 'encoded_unwired'
+    assert "draft editor checks the selected parent's edit permissions" in unit['message']
+    helper, = guard['supporting_units']
+    helper_row = next(u for u in ledger['code_units'] if u['source_unit_id'] == helper['source_unit_id'])
+    assert helper_row['rule_id'] == 'fox.policy.parent-draft-guard'
+    assert xml_mapping_job._policy_fields(metadata, ledger) == metadata['policy_summary']
+    for key, value in (('page_id', guard['page_id'] + 1), ('customer_table_writes', True), ('status', 'read_only_unresolved')):
+        changed = deepcopy(ledger)
+        changed['draft_policy_guards'][0][key] = value
+        with pytest.raises(ValueError, match='partial draft policy'):
+            xml_mapping_job._policy_fields(metadata, changed)
+
+
+def test_unresolved_parent_permissions_do_not_count_an_unreachable_draft_validator():
+    from test_forms_draft_policy import source
+    _, result = xml_mapping.generate_xml_package(source(trigger='UNKNOWN_RULE;'), 'warehouse', 'Warehouse', POLICY_ID)
+    ledger = result['mapping_ledger']
+    assert ledger['draft_policy_gaps'] and not ledger['buffer_flows']
+    assert result['metadata']['buffer_summary'] == {'record_validation_flows': 0}
+    unit = next(u for u in result['discrepancies']['units'] if u['source_name'] == 'WHEN-VALIDATE-RECORD')
+    assert unit['status'] == 'unimplemented' and 'read-only' in unit['message']
+
+
 @pytest.mark.parametrize('mutation',['changed_bytes','wrong_path','missing_member','promoted_unit'])
 def test_report_integrity_and_unit_promotion_are_rejected(mutation):
     candidate,report=generated();files=_members(candidate);metadata=deepcopy(report['metadata']);path=metadata['discrepancy_report_path']

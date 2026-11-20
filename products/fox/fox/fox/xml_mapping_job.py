@@ -229,6 +229,32 @@ def _policy_fields(metadata, ledger):
         raise ValueError('Saved policy summary is invalid.')
     rows = ledger.get('policy_review')
     units = {r['source_unit_id']: r for r in ledger['code_units']}
+    guards = ledger.get('draft_policy_guards', [])
+    if type(guards) is not list:
+        raise ValueError('Invalid draft policy evidence.')
+    guarded_units = set()
+    guarded_buffers = set()
+    buffers = {b['operation_id']: b for b in ledger.get('buffer_flows', [])}
+    for guard in guards:
+        unit = units.get(guard['source_unit_id'])
+        buffer = buffers.get(guard['buffer_operation_id'])
+        if (unit is None or unit['source_unit_sha256'] != guard['source_unit_sha256']
+                or unit.get('encoding_status') != 'generated_unwired'
+                or unit.get('rule_id') != 'fox.policy.parent-draft-guard'
+                or buffer is None or guard['buffer_operation_id'] in guarded_buffers
+                or guard['page_file'] != buffer['page_file'] or guard['page_id'] != buffer['page_id']
+                or guard['status'] != 'adapted' or not guard['enforced_effects']
+                or guard['generation_status'] != 'generated_wired_adapted_partial'
+                or any(guard.get(key) is not False for key in ('customer_table_writes', 'oracle_compiled', 'runtime_verified', 'business_accepted'))):
+            raise ValueError('A partial draft policy differs from its source.')
+        guarded_units.add(guard['source_unit_id'])
+        guarded_buffers.add(guard['buffer_operation_id'])
+        for helper in guard['supporting_units']:
+            target = units.get(helper['source_unit_id'])
+            if target is None or target['source_unit_sha256'] != helper['source_unit_sha256']:
+                raise ValueError('A draft policy helper differs from its source.')
+            if target.get('encoding_status') == 'generated_unwired':
+                guarded_units.add(helper['source_unit_id'])
     if (type(rows) is not list or len(rows) != summary['rules_generated_unwired']
             or len({r['source_unit_id'] for r in rows}) != len(rows)):
         raise ValueError('Saved policy counts differ from their evidence.')
@@ -236,7 +262,8 @@ def _policy_fields(metadata, ledger):
         unit = units.get(row['source_unit_id'])
         if (unit is None or unit['status'] == 'generated_wired_adapted'
                 or unit.get('encoding_status') != 'generated_unwired'
-                or unit.get('rule_id') != 'fox.policy.finite-review'
+                or unit.get('rule_id') != ('fox.policy.parent-draft-guard' if row['source_unit_id'] in guarded_units
+                                           else 'fox.policy.finite-review')
                 or unit.get('target') != row
                 or row.get('generation_status') != 'generated_unwired'
                 or any(row.get(k) is not False for k in ('event_activated', 'oracle_compiled', 'runtime_verified', 'business_accepted'))):

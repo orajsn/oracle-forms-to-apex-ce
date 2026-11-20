@@ -40,6 +40,14 @@ FORMS_APIS = frozenset({
     "SYNCHRONIZE", "VALIDATE", "WEB.SHOW_DOCUMENT",
 })
 
+_NAME = r"[A-Za-z][A-Za-z0-9_$#]*"
+_DOTTED = rf"{_NAME}(?:\s*\.\s*{_NAME})*"
+_PAREN_CALL = re.compile(rf"(?<![\w:$#.@])({_DOTTED})\s*\(", re.I)
+# A zero-argument procedure can be a whole statement without parentheses.
+# Only registered same-module names, known Forms APIs or qualified references
+# qualify. A lone identifier in a SQL expression is insufficient.
+_BARE_CALL = re.compile(rf"(?:\A|;|\b(?:BEGIN|THEN|ELSE|LOOP)\b)\s*({_DOTTED})\s*(?=;)", re.I)
+
 
 def _canonical(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False,
@@ -111,6 +119,11 @@ def build_dependency_evidence(packet, chunks, ledger):
                     for row in entry["facts"][collection]]
         _require(Counter(_canonical([r["kind"], r["evidence"]]) for r in ledger["dependencies_and_links"]) ==
                  Counter(_canonical([collection, row]) for collection, row in original))
+        objects = {o["id"]: o for entry in packet["sources"] for o in entry["facts"]["objects"]}
+        local_names = defaultdict(set)
+        for obj in objects.values():
+            if obj["kind"] == "ProgramUnit" and obj["name"]:
+                local_names[obj["module_id"]].add(obj["name"].upper())
         manifest_units, replacements, scanned = [], set(), []
         for uid, unit in units.items():
             chunk = text_chunks[uid]
@@ -136,12 +149,18 @@ def build_dependency_evidence(packet, chunks, ledger):
             database_positions = {match.start(1) for match in database_matches}
             candidates = [("database_object", match[1]) for match in database_matches]
             candidates.extend(("database_object", name) for name in _comma_from_candidates(masked, database_matches))
-            for match in forms_facts._ROUTINE_REFERENCE.finditer(masked):
+            for match in _PAREN_CALL.finditer(masked):
                 candidate = re.sub(r"\s*\.\s*", ".", match[1])
                 declaration = re.search(r"\b(?:PROCEDURE|FUNCTION)\s*$", masked[max(0, match.start() - 64):match.start()], re.I)
                 if (candidate.upper() not in forms_facts._BUILTIN | _PLSQL_SYNTAX
                         and match.start(1) not in database_positions and not declaration):
                     candidates.append(("routine", candidate))
+            if unit["source_attribute"] in {"TriggerText", "ProgramUnitText"}:
+                module = objects[unit["owner_id"]]["module_id"]
+                for match in _BARE_CALL.finditer(masked):
+                    name = re.sub(r"\s*\.\s*", ".", match[1])
+                    if "." in name or name.upper() in local_names[module] or name.upper() in FORMS_APIS:
+                        candidates.append(("routine", name))
             seen = set()
             for kind, candidate in candidates:
                 name = re.sub(r"\s*\.\s*", ".", candidate)

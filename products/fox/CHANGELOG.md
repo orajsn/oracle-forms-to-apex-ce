@@ -138,6 +138,27 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.41.0] - 2026-11-20
+
+### [feature] Apply selected parent permissions to related drafts
+The generated draft editor checks the current stored parent before creating a draft,
+retaining a duplicate for correction, or keeping edits while moving between records.
+When the source rule makes a draft read-only, the related report remains available.
+The mapping ledger records which effects reach the draft. Other field and block
+permissions, the approval transaction and customer saves remain separate work.
+
+The discrepancy view shows the source units that directly reference each routine,
+database object or Forms command. Users can search by reference name to find those
+units. The inventory recognizes standalone calls to same-module routines and known
+Forms commands, and preserves the schema in three-part routine names.
+
+All 600 integration checks passed locally. The discrepancy browser check passed
+on desktop and mobile layouts. SQLcl 26.1.2 validated both the original and
+renamed packages without warnings. The original still has 17 generated or
+adapted units, eight encoded units awaiting complete connections and 28
+unimplemented units. Two of the eight contribute to the new draft guard.
+Installed APEX testing of this version is pending.
+
 ## [0.40.0] - 2026-11-20
 
 ### [feature] Generate source query, navigation and record-entry actions

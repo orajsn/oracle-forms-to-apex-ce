@@ -234,6 +234,25 @@ def test_semantic_inventory_captures_simple_comma_from_lists_and_excludes_dataty
     assert names.isdisjoint({"VARCHAR2", "NUMBER", "NOT", "FAKE_ROWS", "OTHER_FAKE", "COMMENTED", "ALSO_COMMENTED"})
 
 
+def test_full_qualified_calls_and_zero_argument_statements_keep_their_source_action():
+    packet, chunks, ledger, gaps, catalog, _ = semantic_context(
+        "BEGIN HELPER; IF :FLAG='Y' THEN APP . SHIPPING . CLOSE_BATCH; ELSE EXECUTE_QUERY; END IF; "
+        "APP.SHIPPING.LOG_EVENT(1); x := APP.CONSTANT; -- GHOST.FAKE;\n"
+        "MESSAGE('BEGIN GHOST.LITERAL;'); /* BEGIN GHOST.COMMENT; */ END;")
+    evidence = build_dependency_evidence(packet, chunks, ledger)
+    report = build_discrepancies(packet, ledger, gaps, catalog, chunks=chunks, dependency_evidence=evidence)
+    groups = {g["name"].upper(): g for g in report["dependencies"]}
+    uid = next(u["source_unit_id"] for u in report["units"] if u["source_name"] == "CHECK")
+    for name, kind in (("HELPER", "local_routine"), ("EXECUTE_QUERY", "forms_api"),
+                       ("APP.SHIPPING.LOG_EVENT", "routine_reference"),
+                       ("APP.SHIPPING.CLOSE_BATCH", "routine_reference")):
+        assert groups[name]["kind"] == kind
+        assert groups[name]["occurrences"][0]["source_unit_ids"] == [uid]
+    assert groups.keys().isdisjoint({"SHIPPING.LOG_EVENT", "APP.CONSTANT", "GHOST.FAKE",
+                                    "GHOST.LITERAL", "GHOST.COMMENT", "END"})
+    assert validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence) == report
+
+
 @pytest.mark.parametrize("mutation", ["binding", "unit_sha", "semantic_sha", "unit_drop", "reference_drop",
     "reference_duplicate", "reference_name", "reference_line", "extra_field", "chunk_text"])
 def test_additive_evidence_is_closed_and_exactly_rebuilt_from_fresh_source(mutation):

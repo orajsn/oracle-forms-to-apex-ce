@@ -27,6 +27,7 @@ from .forms_guarded_query import apply_guarded_queries
 from .forms_manifest_filter import apply_manifest_filters
 from .forms_session_defaults import apply_session_defaults
 from .forms_record_entry import apply_record_entries
+from .forms_draft_policy import apply_draft_policies
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -94,6 +95,8 @@ def mapping_catalog():
          "Initial native saved-report sort, also retained by related report pages.", "Persisted synthetic rows; users may change report sorting. Equal-key order is unspecified; compatible database collation is required."),
         ("fox.policy.finite-review", "Complete finite IF/scalar/property/warning/failure rules, with proven same-module local calls.",
          "Typed PL/SQL review procedures and ordered effects with exact source/context bindings.", "Generated but not installed, Oracle-compiled or event-wired. No permissions or writes are activated."),
+        ("fox.policy.parent-draft-guard", "A source record-entry policy sets edit permissions for a related draft block using fields on the selected parent.",
+         "The draft editor rechecks the selected parent's current policy on the server.", "This connects the rule to session drafts. The full rule still needs its other item, block and event bindings."),
         ("fox.buffer.duplicate-record-validation", "Complete source duplicate trigger, local helper/formula and control SUM with proven parent relation and bounded direct character fields.",
          "Native session-draft editor validates the current record against loaded same-parent drafts before keeping or moving records.", "No customer-table save. Explicit draft lifecycle, 1000-row cap, source size limits and matching binary comparison/encoding prerequisites; target runtime remains unverified."),
         ("fox.lookup.source-read-event", "Complete same-block SELECT INTO lookup with exact source exception/null-reset behavior and typed native fields.",
@@ -111,11 +114,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 8,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 9,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -285,6 +288,28 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files["fox-package/session-defaults.json"] = _bytes(defaults_receipt)
     files, entry_receipt = apply_record_entries(documents, packet, chunks, trace, files)
     files["fox-package/record-entry-receipt.json"] = _bytes(entry_receipt)
+    files, draft_policy = apply_draft_policies(documents, packet, chunks, trace, files)
+    files["fox-package/draft-policy-receipt.json"] = _bytes(draft_policy)
+    # A permanently read-only fallback has no reachable draft validator.
+    # The earlier buffer-renderer receipt records what that stage produced.
+    buffer_ids = {op["operation_id"]: uid for uid, op in buffered.items()}
+    for gap in draft_policy["gaps"]:
+        uid = buffer_ids[gap["buffer_operation_id"]]
+        buffered.pop(uid)
+        buffer_gaps[uid] = "draft_policy_context_unresolved"
+    partial_policies = set()
+    for guard in draft_policy["adapted_operations"]:
+        uid = guard["source_unit_id"]
+        if (uid not in policy_encoded or policy_encoded[uid]["source_unit_sha256"] != guard["source_unit_sha256"]
+                or guard["generation_status"] != "generated_wired_adapted_partial"):
+            raise ValueError("Draft policy does not match its source review rule.")
+        partial_policies.add(uid)
+        for helper in guard["supporting_units"]:
+            hid = helper["source_unit_id"]
+            if hid in policy_encoded:
+                if policy_encoded[hid]["source_unit_sha256"] != helper["source_unit_sha256"]:
+                    raise ValueError("Draft policy helper differs from its source.")
+                partial_policies.add(hid)
     for operation in entry_receipt["generated_operations"]:
         uid = operation["source_unit_id"]
         review = policy_encoded.pop(uid, None)
@@ -333,6 +358,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
                 raise ValueError("Policy review code cannot replace wired behavior.")
             row.update(encoding_status="generated_unwired", reason="policy_rule_encoded_event_context_unimplemented",
                        policy_operation_id=policy_encoded[uid]["operation_id"])
+            if uid in partial_policies:
+                row["reason"] = "policy_rule_partial_draft_guard"
         if uid in ordered:
             row.update(status="generated_wired_adapted", reason="initial_report_order_generated",
                        operation_id=ordered[uid]["operation_id"])
@@ -369,6 +396,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             row.update(code="policy_generated_unwired", encoding_status="generated_unwired",
                 reason="Complete policy review code generated; original event and state providers remain unwired.",
                 next_action="Review policy-review.sql and its ordered effects; implement event/context adapters and server-side enforcement before activation.")
+            if row["code_unit_id"] in partial_policies:
+                row.update(reason="The selected parent controls edits in the related session draft.",
+                           next_action="Connect the remaining field, block and record-entry effects.")
     trace_blocks = {block["source_block_id"]: block for block in trace["blocks"]}
     source_files = {obj["id"]: {key: entry["source"][key] for key in ("name", "sha256", "bytes")}
                     for entry in packet["sources"] for obj in entry["facts"]["objects"]}
@@ -405,7 +435,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         if row["source_unit_id"] in encoded:
             row.update(rule_id="fox.assignment.parent-copy-review", target=deepcopy(encoded[row["source_unit_id"]]))
         if row["source_unit_id"] in policy_encoded:
-            row.update(rule_id="fox.policy.finite-review", target=deepcopy(policy_encoded[row["source_unit_id"]]))
+            rule = "fox.policy.parent-draft-guard" if row["source_unit_id"] in partial_policies else "fox.policy.finite-review"
+            row.update(rule_id=rule, target=deepcopy(policy_encoded[row["source_unit_id"]]))
     gap_report = classify_gaps(packet, chunks, coverage)
     catalog = mapping_catalog()
     catalog_rules = {row["id"]: row for row in catalog["rules"]}
@@ -414,6 +445,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "objects": ledger_objects, "code_units": ledger_units,
         "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
         "policy_review": list(policy_encoded.values()),
+        "draft_policy_guards": draft_policy["adapted_operations"],
+        "draft_policy_gaps": draft_policy["gaps"],
         "selected_record_entries": entry_receipt["generated_operations"],
         "buffer_flows": list(buffered.values()),
         "source_lookups": list(looked.values()),
