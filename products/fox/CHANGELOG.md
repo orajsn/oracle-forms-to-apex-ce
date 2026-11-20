@@ -150,6 +150,31 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.45.0] - 2026-11-20
+
+### [feature] Validate a changed field and trace its required interfaces
+Eligible item validation runs on the current draft field when a submitted
+value changes. A source warning sets its marker. A duplicate lookup against
+all mapped synthetic rows can clear the field and reject the action. The
+session retains source-derived assignments and keeps the loaded baseline
+separate from current values. The before-write assignment still reads the
+current parent at the actual write. Later navigation and the original Forms
+commit are separate source events.
+
+Saved mapping runs can provide an authenticated interface CSV. It identifies
+the referring action, source location, supplied argument forms, known field
+types and static paths through local routines. The package also contains a
+structured JSON register when it fits. Formal parameter direction, target
+availability and execution require separate verification.
+
+The integrated local suite passed 848 checks, and SQLcl 26.1.2 validated the
+original and renamed 53-unit packages without warnings. Both sealed packages
+reconstruct exactly. The original now has 20 generated/adapted units, eight
+partly connected, three encoded without a connected action and 22 unimplemented.
+Its detailed register contains 303 source records and 739 CSV rows, including
+15 distinct qualified routine references. Execution of the changed-item event
+inside an installed Oracle APEX app remains unverified.
+
 ## [0.44.0] - 2026-11-20
 
 ### [feature] Coordinate selected masters and their related session drafts

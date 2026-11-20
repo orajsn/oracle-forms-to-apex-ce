@@ -29,13 +29,15 @@ from .forms_session_defaults import apply_session_defaults
 from .forms_record_entry import apply_record_entries
 from .forms_draft_policy import apply_draft_policies
 from .forms_synthetic_save import apply_synthetic_saves
+from .forms_item_validation import apply_item_validations
+from .forms_interface_inventory import build_interface_inventory, interface_inventory_csv
 from .forms_lov_return import apply_lov_returns
 from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
-from .prototype_export_only import (_compatibility, _members, _validated_log,
+from .prototype_export_only import (MAX_ZIP, _compatibility, _members, _validated_log,
                                     _zip, validate_offline)
 
 SCOPE = "fox-xml-mapping-package-v1"
@@ -44,6 +46,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "cross_block_item_lookup_validation": "fox.validation.draft-item-lookup",
     "record_group_with_caller_returns": "fox.query.record-group-caller-returns",
     "synthetic_parent_copy_write": "fox.assignment.synthetic-record-save",
     "selected_record_entry_assignment": "fox.policy.selected-record-entry",
@@ -121,6 +124,10 @@ def mapping_catalog():
          "A dedicated original-source query page applies the declared filter to its verified database source.", "Source reads require a trusted session context and an enabled interface. The other prototype screens continue to use synthetic tables. This read adapter covers the source query only."),
         ("fox.policy.selected-record-entry", "Complete conditional scalar assignment on record entry with an explicitly selected record and proven parent chain.",
          "Native page applies the assignment to session state for the selected synthetic record.", "Inputs come from the selected synthetic rows. False and NULL conditions preserve the previous flag. Other lookup pages and drafts have independent state. This adapter applies when the selected record-entry page is opened."),
+        ("fox.validation.draft-item-lookup", "A complete changed-item rule binds its parent fields, row state, single-row lookup and ordered effects to the current guarded draft.",
+         "Validate a changed draft item against the mapped test table and retain the source field effects in the current record.", "The lookup uses synthetic rows across all parents. The subsequent Forms navigation and transaction have their own source-unit status."),
+        ("fox.validation.item-lookup-review", "Complete item-validation logic is parsed, but one or more required state or data bindings are unavailable.",
+         "Review the ordered field effects and query in the item-validation receipt.", "The event remains disconnected until the missing bindings are established."),
         ("fox.relation.selected-master-population", "Source population trigger and local helpers match a proven relation, key guard and selected record.",
          "Show selected master context and refresh the related records for supported states.", "Other Forms buffer, message-level and cursor effects are tracked separately."),
         ("fox.relation.selected-master-clear", "The source clear caller and recursive helper have a bound descendant session provider on a master selection.",
@@ -130,11 +137,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 12,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 13,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -150,6 +157,37 @@ def mapping_catalog():
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
     return {**catalog, "catalog_sha256": _sha(_bytes(catalog))}
+
+
+def _attach_interface_inventory(files, metadata, inventory):
+    """Fit supplementary review files alongside the mandatory source and compiler proof."""
+    artifacts = {
+        'json': ('fox-package/interface-register.json', _bytes(inventory)),
+        'csv': ('fox-package/interface-register.csv', interface_inventory_csv(inventory).encode('utf-8-sig')),
+    }
+    meta_path = 'fox-package/metadata.json'
+    base_size = len(_zip(files)) - len(files[meta_path])
+    # Sealing adds the APEX member map, compiler descriptors and their archive
+    # header. Keep room for those mandatory fields before choosing any extras.
+    reserve = len(_bytes(metadata['apex_members'])) + 2048
+    for choice in (('json','csv'), ('csv',), ('json',), ()):
+        names = {kind: {'path': artifacts[kind][0], 'sha256': _sha(artifacts[kind][1])} for kind in choice}
+        descriptor = {'scope': inventory['scope'], 'source_binding': inventory['source_binding'],
+                      'record_count': len(inventory['records']), 'artifacts': names,
+                      'core_reference_path': 'fox-package/discrepancy-evidence.json',
+                      'detail_limited': not inventory['detail_coverage']['complete'],
+                      'size_limited': len(choice) < len(artifacts)}
+        updated = _bytes({**metadata, 'interface_register': descriptor})
+        extra = sum(len(artifacts[k][1]) + 76 + 2*len(artifacts[k][0].encode()) for k in choice)
+        if len(files) + len(choice) + 1 <= 4096 and base_size + len(updated) + extra + reserve <= MAX_ZIP:
+            metadata['interface_register'] = descriptor
+            files[meta_path] = updated
+            for kind in choice:
+                path, data = artifacts[kind]
+                files[path] = data
+            return
+    # Even the supplementary descriptor must not displace an otherwise valid
+    # package. The stable README points to the mandatory reference evidence.
 
 
 def _coordination_effects(population, clearing, chunks, files):
@@ -376,6 +414,16 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files["fox-package/draft-policy-receipt.json"] = _bytes(draft_policy)
     files, save_receipt = apply_synthetic_saves(documents, packet, chunks, trace, files)
     files["fox-package/synthetic-save-receipt.json"] = _bytes(save_receipt)
+    files, item_validation = apply_item_validations(documents, packet, chunks, trace, files)
+    files["fox-package/item-validation-receipt.json"] = _bytes(item_validation)
+    item_review = {u["source_unit_id"]: u for u in item_validation["encoded_operations"]}
+    partial_item_events = {u["source_unit_id"] for u in item_validation.get("adapted_operations", [])}
+    for op in item_validation["generated_operations"]:
+        raw = item_review.pop(op["source_unit_id"], None)
+        if (raw is None or raw["source_unit_sha256"] != op["source_unit_sha256"]
+                or op["source_event"] != "WHEN-VALIDATE-ITEM" or op["native_event_wired"] is not True
+                or op["page_file"] not in files):
+            raise ValueError("Generated item validation lacks its source-bound field event.")
     files, lov_receipt = apply_lov_returns(documents, packet, chunks, trace, files)
     files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
     final_groups = _final_record_groups(group_receipt, lov_receipt)
@@ -419,6 +467,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             raise ValueError("Record entry requires the exact encoded source policy.")
     source_adapters = {}
     for receipt, reason in (
+        (item_validation, "item_lookup_validation_wired_to_draft"),
         (save_receipt, "parent_copy_wired_to_synthetic_write"),
         (entry_receipt, "selected_record_entry_generated"),
         (query_receipt, "related_query_action_generated"),
@@ -473,6 +522,12 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             row.update(encoding_status="generated_unwired",
                 reason="parent_value_copy_encoded_write_lifecycle_unimplemented",
                 assignment_operation_id=encoded[row["source_unit_id"]]["operation_id"])
+        if row["source_unit_id"] in item_review:
+            if row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired":
+                raise ValueError("Two adapters claim the same parsed item rule.")
+            row.update(encoding_status="generated_unwired", reason=(
+                "item_lookup_partly_connected" if row["source_unit_id"] in partial_item_events
+                else "item_lookup_validation_binding_pending"))
     relation_coverage = relation_receipt["coverage"] if relation_receipt else relation_plan["coverage"]
     for row in coverage:
         effect = coordination.get(row["source_unit_id"])
@@ -545,6 +600,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             "source_file": source_files[row["source_owner_id"]],
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
+        if row["source_unit_id"] in item_review:
+            row.update(rule_id="fox.validation.item-lookup-review", target=deepcopy(item_review[row["source_unit_id"]]))
         if row["source_unit_id"] in encoded:
             row.update(rule_id="fox.assignment.parent-copy-review", target=deepcopy(encoded[row["source_unit_id"]]))
         if row["source_unit_id"] in policy_encoded:
@@ -560,6 +617,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "objects": ledger_objects, "code_units": ledger_units,
         "relations": relation_coverage, "assignment_review": list(encoded.values()),
         "synthetic_write_events": save_receipt["generated_operations"],
+        "item_validations": item_validation["generated_operations"],
+        "partial_item_validations": item_validation.get("adapted_operations", []),
+        "item_validation_review": list(item_review.values()),
         "policy_review": list(policy_encoded.values()),
         "draft_policy_guards": draft_policy["adapted_operations"],
         "draft_policy_gaps": draft_policy["gaps"],
@@ -581,6 +641,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         dependency_evidence=dependency_evidence)
     validate_discrepancies(discrepancies, ledger, gap_report, catalog, packet=packet, chunks=chunks,
         dependency_evidence=dependency_evidence)
+    interface_register = build_interface_inventory(packet, chunks, ledger, dependency_evidence=dependency_evidence,
+                                                   discrepancies=discrepancies, documents=documents)
     files["fox-package/discrepancy-evidence.json"] = _bytes(dependency_evidence)
     files["fox-package/discrepancies.json"] = _bytes(discrepancies)
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})
@@ -610,6 +672,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "synthetic_save_summary": {"screens": len({op["page_file"] for op in save_receipt["generated_operations"]}),
                                    "before_write_events": len(save_receipt["generated_operations"])},
         "buffer_summary": {"record_validation_flows": len(buffered)},
+        "item_validation_summary": {"wired": len(item_validation["generated_operations"]),
+                                    "partial": len(partial_item_events),
+                                    "encoded_only": len(item_review) - len(partial_item_events)},
         "lookup_summary": {"generated_lookup_handlers": len(looked), "original_reads_enabled": False},
         "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
             "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": original_reads},
@@ -652,6 +717,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "verified and business accepted are separate states. This package has no target import or runtime proof.\n\n"
         "Read discrepancies.json for all source-unit statuses, generated adaptations and reference candidates to verify. Findings do not imply missing files or prevent generation of supported parts. "
         "Read mapping-ledger.json, behavior-coverage.json, remediation.json and supporting-schema.sql. "
+        "The interface register lists source call sites, supplied argument forms and affected actions. "
+        "See metadata.json for included JSON or CSV exports. The mandatory reference inventory is in discrepancy-evidence.json. "
         "Database blocks default to read-only reports; control values use APEX session state, not customer-table writes. "
         "Supported report formulas use persisted synthetic rows, not the unsaved Forms buffer. "
         "Referenced control values can be submitted explicitly; original Forms events that populate them remain separate. "
@@ -664,6 +731,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "policy-review.sql preserves complete supported scalar, permission, warning and failure rules as ordered effects; it is not installed, Oracle-compiled or event-wired. "
         "Initial source report ordering is generated when every sort column is directly mapped; users may change the saved-report sort. "
         "Draft edits use a source-bound parent context and current-record validation before navigation; no customer-table save, source transaction or full Forms lifecycle is implied. "
+        "item-validation-receipt.json identifies changed-field events, the selected parent inputs and any additional synthetic write fields they bind. "
+        "The current row's validation state is maintained separately from its loaded baseline. Later navigation and whole-form commits remain separate events. "
         "lookup-activation.md lists native source SELECT-INTO handlers and restricted readiness items. Original reads are disabled by default and require verified target interfaces and separate activation authority. POST-CHANGE is adapted to Apply lookup; POST-QUERY runs after selecting a record. These pages do not save records. "
         "Other dependencies, relationship lifecycle, source transactions and behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
@@ -671,6 +740,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     ).encode("utf-8")
     metadata["apex_members"] = _apex_members(files)
     files["fox-package/metadata.json"] = _bytes(metadata)
+    _attach_interface_inventory(files, metadata, interface_register)
     candidate = _zip(files)
     _members(candidate)  # Retain existing package size and safe-member limits.
     return candidate, {"schema_version": 1, "scope": SCOPE,

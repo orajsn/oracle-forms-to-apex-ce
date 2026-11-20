@@ -3,7 +3,7 @@ import type {Discrepancies, MappingGap} from './xmlMappingPresentation';
 import './xmlMappingDiscrepancies.css';
 
 const statuses={generated:'Generated or adapted',partial:'Partly connected',encoded_unwired:'Encoded, awaiting connection',unimplemented:'Not yet implemented'} as const;
-const partialReasons=new Set(['policy_rule_partial_draft_guard','master_population_partly_connected',
+const partialReasons=new Set(['policy_rule_partial_draft_guard','item_lookup_partly_connected','master_population_partly_connected',
  'master_query_helper_partly_connected','master_clear_partly_connected']);
 const kinds={database_object:'Database object',routine_reference:'Routine reference',forms_api:'Forms behavior',local_routine:'Local routine',report:'Report',source_link:'Source link'} as const;
 export default function XmlMappingDiscrepancies({report,gaps}:{report:Discrepancies;gaps?:MappingGap[]}){

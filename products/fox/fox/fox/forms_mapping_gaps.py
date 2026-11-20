@@ -71,6 +71,14 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The parent-value copy procedure is generated, but its insert/update event is not wired.'
             action = 'Wire the original write event and required validation/permission guards before activating the generated review code.'
+        elif reason == 'item_lookup_partly_connected':
+            category = 'engine_context'
+            message = 'The draft applies the source field effects it can bind and stops when the required lookup is unavailable.'
+            action = 'Verify the lookup table, return field and current-record inputs identified in the item-validation receipt.'
+        elif reason == 'item_lookup_validation_binding_pending':
+            category = 'engine_context'
+            message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
+            action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
         elif reason == 'draft_policy_context_unresolved':
             category = 'engine_context'
             message = 'FOX could not establish edit permissions for this draft. The generated screen is read-only.'

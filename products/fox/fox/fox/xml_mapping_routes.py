@@ -132,16 +132,26 @@ def attach_xml_mapping_routes(app, *, root, db, project, fresh=False):
             current_hash, current_sid = selected(c, pid)
             return jobs.public_run(c, root, run, current_hash, current_sid)
 
-    @app.get('/api/projects/{pid}/xml-mapping/runs/{rid}/download')
-    def mapping_download(pid: str, rid: str, request: Request):
+    def verified_download(pid, rid, request, *, interface_csv=False):
         project(request, pid)
         with db() as c:
             c.execute('BEGIN')
             run = get_run(c, pid, rid)
             try:
-                package, _ = jobs.checked_output(c, root, run)
+                payload, _ = jobs.checked_output(c, root, run, interface_csv=interface_csv)
             except (ValueError, OSError, KeyError, TypeError, RuntimeError):
                 raise HTTPException(409, 'Source-bound mapping package or compiler proof is unavailable or changed. Download is blocked.') from None
-        return Response(package, media_type='application/zip', headers={
+        if payload is None:
+            raise HTTPException(404, 'This saved run has no interface CSV.')
+        return payload
+
+    @app.get('/api/projects/{pid}/xml-mapping/runs/{rid}/download')
+    def mapping_download(pid: str, rid: str, request: Request):
+        return Response(verified_download(pid, rid, request), media_type='application/zip', headers={
             'Content-Disposition': f'attachment; filename="{rid}-APEXlang.zip"',
             'X-FOX-Runtime-Verified': 'false', 'X-FOX-Business-Acceptance': 'not-asserted'})
+
+    @app.get('/api/projects/{pid}/xml-mapping/runs/{rid}/interfaces.csv')
+    def mapping_interfaces(pid: str, rid: str, request: Request):
+        return Response(verified_download(pid, rid, request, interface_csv=True), media_type='text/csv', headers={
+            'Content-Disposition': f'attachment; filename="{rid}-interfaces.csv"'})

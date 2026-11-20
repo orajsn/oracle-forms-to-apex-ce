@@ -38,6 +38,18 @@ test('mapping and whole workbench protect uncertain requests and source-bound re
  await page.getByRole('alert').waitFor();
  assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),0);
  // Generated source lookups retain a disabled datasource prerequisite.
+ await page.evaluate(()=>{
+  window.f.runs=[{...window.run('123e4567-e89b-42d3-a456-426614174000'),
+    item_validation_summary:{wired:1,partial:0,encoded_only:0},
+    interface_summary:{records:8,csv_available:true,json_available:true,size_limited:false,detail_limited:false}}];
+ });await page.getByRole('button',{name:'Refresh mapping status'}).click();
+ await page.getByText(/Connected field validations: 1/).waitFor();
+ assert.equal(await page.getByRole('link',{name:'Download interface register (CSV)'}).getAttribute('href'),
+   '/api/projects/'+pid+'/xml-mapping/runs/'+rid+'/interfaces.csv');
+ await page.evaluate(()=>{window.f.runs[0].interface_summary={records:8,csv_available:false,json_available:true,size_limited:true,detail_limited:true};});
+ await page.getByRole('button',{name:'Refresh mapping status'}).click();
+ await page.getByText(/Some call sites or helper paths exceed/).waitFor();
+ assert.equal(await page.getByRole('link',{name:'Download interface register (CSV)'}).count(),0);
  await page.evaluate(()=>{window.f.runs=[{...window.run('123e4567-e89b-42d3-a456-426614174000'),lookup_summary:{generated_lookup_handlers:1,original_reads_enabled:false}}];});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByText(/Source lookup handlers generated: 1/).waitFor();await page.getByText(/Original database reads are disabled until/).waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),1);
  await page.evaluate(()=>{window.f.runs[0].lookup_summary.original_reads_enabled=true;});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByRole('alert').waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),0);
  // Malformed history cannot display a download or unlock a retained request.

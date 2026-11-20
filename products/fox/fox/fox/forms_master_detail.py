@@ -402,29 +402,24 @@ def _entry_button(page):
 
 def _draft_provider(bound, documents, packet, chunks, trace, files):
     """Reprove the existing Save adapter before reading its collection slots."""
-    from .forms_draft_policy import _render as policy_page, _MESSAGE
-    from .forms_synthetic_save import apply_synthetic_saves, SCOPE as save_scope
+    from .forms_draft_providers import rebuild_draft_providers
+    from .forms_synthetic_save import SCOPE as save_scope
     plan = json.loads(files.get('fox-package/buffer-plan.json', b'{"operations":[]}'))
     rows = [b for b in plan['operations'] if b['relation']['child_block_id'] == bound['parent']['source_block_id']]
     if not rows:
         return None
     buffer = _one(rows, 'DRAFT_PROVIDER_NOT_UNIQUE')
-    targets = json.loads(files['fox-package/buffer-receipt.json'])['generated_operations']
+    _, targets, proved, save, item_layouts = rebuild_draft_providers(documents, packet, chunks, trace, files)
     target = _one([t for t in targets if t['operation_id'] == buffer['operation_id']], 'DRAFT_TARGET')
-    guards = json.loads(files['fox-package/draft-policy-receipt.json'])['adapted_operations']
-    base = dict(files)
-    for t in targets:
-        op = _one([b for b in plan['operations'] if b['operation_id'] == t['operation_id']], 'DRAFT_OPERATION')
-        guard = _one([g for g in guards if g['buffer_operation_id'] == op['operation_id']], 'DRAFT_POLICY')
-        base[t['page_file']] = policy_page(op, t['page_id'], guard['policy_expression_sql'], _MESSAGE)
-    proved, save = apply_synthetic_saves(documents, packet, chunks, trace, base)
-    _need(json.loads(files['fox-package/synthetic-save-receipt.json']) == save, 'DRAFT_SAVE_PROOF')
+    item = item_layouts.get(buffer['operation_id'])
     _need(proved[target['page_file']] == files[target['page_file']], 'DRAFT_PAGE_CHANGED')
     contract = _one([c for c in save['write_contracts'] if c['buffer_operation_id'] == buffer['operation_id']], 'SAVED_BASELINE_REQUIRED')
     fields = buffer['key_bindings']
     _need({f['source_item_id'] for f in bound['snapshot_fields']} <= {f['source_item_id'] for f in fields}, 'DRAFT_PARENT_FIELDS_UNAVAILABLE')
     page = target['page_id']
     namespace = 'FOX_S_' + _sha(_json({'buffer': buffer, 'contract': contract, 'scope': save_scope}))[:20].upper() + '_'
+    if item:
+        namespace = item['collection_namespace']
     name = "'" + namespace + "' || to_char(gp.FOX_ROW_ID,'TM9')"
     for _, column in native_buffer._parent_copies(buffer):
         name += " || '_' || substr(rawtohex(standard_hash(gp." + column + ",'SHA256')),1,32)"
@@ -440,6 +435,12 @@ def _draft_provider(bound, documents, packet, chunks, trace, files):
         clean += [native_buffer._parent_match(f'd.c{i:03}', f'd.c{20+i:03}'),
                   native_buffer._parent_match('p.' + field['column'], f'd.c{20+i:03}')]
     clean += [native_buffer._parent_match('p.' + contract['route']['column'], 'd.c040'), "d.c041='SYNTHETIC_SAVE_BASELINE_V1'"]
+    changed_checks = [native_buffer._parent_match(f'd.c{i:03}', f'd.c{20+i:03}') for i in range(1, len(fields)+1)]
+    if item:
+        changed_checks.extend([native_buffer._parent_match('d.c044','d.c040'), 'decode(d.n002,d.n003,1,0)=1',
+                               'd.c043 is null'])
+        clean.extend(changed_checks[-3:])
+        clean.append('decode(p.' + item['fields']['weight']['column'] + ',d.n003,1,0)=1')
     draft_where = (f"(:REQUEST is null) and exists (select 1 from {source} and d.n001=p.FOX_ROW_ID and {joins} and "
                    + ' and '.join(clean) + ')')
     # Every original guard is evaluated on the same persisted current-row proof.
@@ -455,7 +456,7 @@ def _draft_provider(bound, documents, packet, chunks, trace, files):
                + ' and '.join(clean) + ')')
     status = ("select d.seq_id as FOX_ROW_ID,case when :REQUEST is not null then 'SUBMITTED_INPUT_PENDING' "
               "when d.n001 is null then 'NEW_OR_INSERT_SKIPPED' "
-              + "when not (" + ' and '.join(native_buffer._parent_match(f'd.c{i:03}', f'd.c{20+i:03}') for i in range(1, len(fields)+1))
+              + "when not (" + ' and '.join(changed_checks)
               + ") then 'CHANGED_DRAFT_PENDING' when not (" + recheck + ") then 'STALE_OR_MISSING_RECORD' else "
               + ("'NON_COORDINATED'" if bound['deferred'] else "'PERSISTED_IDENTITY_RECHECKED'") + ' end as FOX_DRAFT_STATE from ' + source)
     return {'buffer_operation_id': buffer['operation_id'], 'page_id': page, 'page_file': target['page_file'],

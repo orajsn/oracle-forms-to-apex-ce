@@ -110,7 +110,7 @@ def is_mapping_run(c, run):
                      (run['id'], APPROVAL + '%')).fetchone() is not None
 
 
-def checked_output(c, root, run):
+def checked_output(c, root, run, *, interface_csv=False):
     """Read-only reconstruction of source, candidate, compiler log and final ZIP."""
     if run['state'] != 'GENERATED' or run['artifact'] is not None:
         raise ValueError('XML mapping output is unavailable.')
@@ -140,12 +140,40 @@ def checked_output(c, root, run):
     details['context_summary'] = _context_fields(metadata, ledger)
     details['policy_summary'] = _policy_fields(metadata, ledger)
     details['buffer_summary'] = _buffer_fields(metadata, ledger)
+    details['item_validation_summary'] = _item_validation_fields(metadata, ledger)
     details['synthetic_save_summary'] = _synthetic_save_fields(metadata, ledger)
     details['lookup_summary'] = _lookup_fields(metadata, ledger)
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
-    return package, {'saved_source_binding': snapshot['source_binding'],
+    details['interface_summary'] = _interface_fields(metadata, files)
+    payload = files.get('fox-package/interface-register.csv') if interface_csv else package
+    if interface_csv and not (details['interface_summary'] and details['interface_summary']['csv_available']):
+        payload = None
+    return payload, {'saved_source_binding': snapshot['source_binding'],
                      'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _interface_fields(metadata, files):
+    descriptor = metadata.get('interface_register')
+    if descriptor is None:
+        return None
+    if (descriptor['scope'] != 'fox-source-interface-register-v1'
+            or descriptor['source_binding'] != metadata['source_binding']
+            or type(descriptor['record_count']) is not int or descriptor['record_count'] < 0
+            or type(descriptor['detail_limited']) is not bool
+            or type(descriptor['size_limited']) is not bool):
+        raise ValueError('Interface register differs from the saved source.')
+    artifacts = descriptor['artifacts']
+    if (type(artifacts) is not dict or not set(artifacts) <= {'csv','json'}
+            or descriptor['size_limited'] != (len(artifacts) < 2)):
+        raise ValueError('Invalid interface register formats.')
+    for kind, entry in artifacts.items():
+        path = 'fox-package/interface-register.' + kind
+        if entry['path'] != path or path not in files or sha(files[path]) != entry['sha256']:
+            raise ValueError('Saved interface register evidence changed.')
+    return {'records': descriptor['record_count'], 'csv_available': 'csv' in artifacts,
+            'detail_limited': descriptor['detail_limited'],
+            'json_available': 'json' in artifacts, 'size_limited': descriptor['size_limited']}
 
 
 def _discrepancy_fields(metadata, ledger, gaps, files):
@@ -248,6 +276,44 @@ def _synthetic_save_fields(metadata, ledger):
     expected = {'screens': len(phases), 'before_write_events': len(events)}
     if type(summary) is not dict or any(type(v) is not int for v in summary.values()) or summary != expected:
         raise ValueError('Synthetic save summary differs from the generated events.')
+    return summary
+
+
+def _item_validation_fields(metadata, ledger):
+    summary = metadata.get('item_validation_summary')
+    if summary is None:
+        return None
+    units = {u['source_unit_id']:u for u in ledger['code_units']}
+    full = ledger['item_validations']
+    partial = ledger['partial_item_validations']
+    reviews = ledger['item_validation_review']
+    review_by_id = {r['source_unit_id']:r for r in reviews}
+    full_ids = {r['source_unit_id'] for r in full}
+    partial_ids = {r['source_unit_id'] for r in partial}
+    if (len(review_by_id) != len(reviews) or len(full_ids) != len(full) or len(partial_ids) != len(partial)
+            or full_ids & set(review_by_id) or not partial_ids <= set(review_by_id)):
+        raise ValueError('Item-validation source units overlap or are missing.')
+    buffers = {r['operation_id']:r for r in ledger['buffer_flows']}
+    for op in [*full, *partial]:
+        uid = op['source_unit_id']
+        unit = units[uid]
+        target = buffers.get(op['contract']['buffer_operation_id'])
+        if (target is None or op['page_file'] != target['page_file'] or op['page_id'] != target['page_id']
+                or op['source_unit_sha256'] != unit['source_unit_sha256']
+                or op['source_event'] != 'WHEN-VALIDATE-ITEM' or not op['native_event_wired']
+                or any(op.get(k) is not False for k in ('event_activated','oracle_compiled','runtime_verified','business_accepted'))):
+            raise ValueError('Item validation differs from its source event or editor.')
+        if uid in full_ids and (unit['target'] != op or unit['status'] != 'generated_wired_adapted'
+                or unit['rule_id'] != 'fox.validation.draft-item-lookup'):
+            raise ValueError('A complete item validation differs from its saved coverage.')
+    for uid, review in review_by_id.items():
+        unit = units[uid]
+        if (unit['target'] != review or unit['rule_id'] != 'fox.validation.item-lookup-review'
+                or unit.get('encoding_status') != 'generated_unwired' or unit['status'] == 'generated_wired_adapted'):
+            raise ValueError('An incomplete item rule was incorrectly promoted.')
+    expected = {'wired':len(full),'partial':len(partial),'encoded_only':len(reviews)-len(partial)}
+    if type(summary) is not dict or any(type(v) is not int for v in summary.values()) or summary != expected:
+        raise ValueError('Invalid item-validation summary.')
     return summary
 
 
@@ -363,7 +429,8 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
         gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None,
-        buffer_summary=None, synthetic_save_summary=None, lookup_summary=None, discrepancies=None)
+        buffer_summary=None, item_validation_summary=None, synthetic_save_summary=None,
+        lookup_summary=None, interface_summary=None, discrepancies=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

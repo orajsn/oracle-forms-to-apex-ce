@@ -528,6 +528,54 @@ def test_partial_coordination_effects_are_bound_to_downloadable_pages_and_unit_n
     assert not run['runtime_verified'] and not run['business_behavior_accepted']
 
 
+def test_interface_csv_download_uses_exact_saved_register(client):
+    c, _, pid, _, completed = finish(client)
+    url = f"/api/projects/{pid}/xml-mapping/runs/{completed['id']}/interfaces.csv"
+    summary = completed['interface_summary']
+    assert summary['csv_available'] and summary['json_available'] and not summary['size_limited']
+    files = _members(c.get(completed['download_url']).content)
+    response = c.get(url)
+    assert response.status_code == 200 and response.headers['content-type'].startswith('text/csv')
+    assert response.content == files['fox-package/interface-register.csv']
+    register = json.loads(files['fox-package/interface-register.json'])
+    assert len(register['records']) == summary['records']
+    assert response.content.decode('utf-8-sig').startswith('record_id,name,role')
+    c.cookies.clear()
+    assert c.get(url).status_code == 401
+
+
+def test_retained_interface_csv_requires_its_declared_digest():
+    metadata = {'source_binding':'source', 'interface_register':{
+        'scope':'fox-source-interface-register-v1','source_binding':'source','record_count':1,
+        'size_limited':True,'detail_limited':False,'artifacts':{'csv':{'path':'fox-package/interface-register.csv','sha256':'0'*64}}}}
+    with pytest.raises(ValueError,match='interface register evidence changed'):
+        jobs._interface_fields(metadata,{'fox-package/interface-register.csv':b'different'})
+    assert jobs._interface_fields({}, {}) is None
+
+
+@pytest.mark.parametrize('incomplete',[False,True])
+def test_source_item_validation_reaches_saved_run_with_honest_coverage(client,incomplete):
+    from test_forms_item_validation import source as item_source
+    c, root, pid = client
+    upload(c, pid, item_source(renamed=True, missing_provider=incomplete))
+    url = f'/api/projects/{pid}/xml-mapping'
+    scope = c.get(url).json()
+    body = {key:scope[key] for key in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    queued = c.post(url+'/runs',json=body)
+    assert queued.status_code == 202
+    process_one(connection(root),root)
+    run = c.get(url+'/runs/'+queued.json()['id']).json()
+    assert run['state'] == 'GENERATED'
+    assert run['item_validation_summary'] == {'wired':int(not incomplete),'partial':int(incomplete),'encoded_only':0}
+    wvi, = [u for u in run['discrepancies']['units'] if u['source_name']=='WHEN-VALIDATE-ITEM']
+    assert wvi['status'] == ('encoded_unwired' if incomplete else 'generated')
+    if incomplete:
+        gap, = [g for g in run['gaps'] if g['source_unit_id'] == wvi['source_unit_id']]
+        assert gap['reason']=='item_lookup_partly_connected'
+    assert not run['runtime_verified']
+
+
 def test_source_lookup_handlers_are_generated_but_original_reads_stay_disabled(client):
     from pathlib import Path
     c,root,pid=client

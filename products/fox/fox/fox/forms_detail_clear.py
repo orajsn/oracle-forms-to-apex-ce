@@ -238,23 +238,14 @@ def draft_status(rows, fields, current_seq, *, submitted=None, revision=None, ex
 
 def _save_providers(documents, packet, chunks, trace, files):
     """Rebuild normal Save authority before interpreting its private ROW slots."""
-    from .forms_draft_policy import _render as policy_page, _MESSAGE
-    from .forms_synthetic_save import apply_synthetic_saves, SCOPE as save_scope
+    from .forms_draft_providers import rebuild_draft_providers
+    from .forms_synthetic_save import SCOPE as save_scope
     if 'fox-package/buffer-plan.json' not in files:
         return []
-    plan = json.loads(files['fox-package/buffer-plan.json'])
-    targets = json.loads(files['fox-package/buffer-receipt.json'])['generated_operations']
-    guards = json.loads(files['fox-package/draft-policy-receipt.json'])['adapted_operations']
-    base = dict(files)
+    plan, targets, proved, receipt, item_layouts = rebuild_draft_providers(documents, packet, chunks, trace, files)
     def one(rows):
         _need(len(rows) == 1, 'UNIQUE_SAVE_PROVIDER_REQUIRED')
         return rows[0]
-    for target in targets:
-        buffer = one([b for b in plan['operations'] if b['operation_id'] == target['operation_id']])
-        guard = one([g for g in guards if g['buffer_operation_id'] == buffer['operation_id']])
-        base[target['page_file']] = policy_page(buffer, target['page_id'], guard['policy_expression_sql'], _MESSAGE)
-    proved, receipt = apply_synthetic_saves(documents, packet, chunks, trace, base)
-    _need(json.loads(files['fox-package/synthetic-save-receipt.json']) == receipt, 'SAVE_RECEIPT_CHANGED')
     # Reconstruct A's exact permitted additions, including its focus script.
     # No prefix test, arbitrary appended content or caller-rehashed receipt is
     # accepted as authority to reinterpret a mutating Save page.
@@ -279,7 +270,9 @@ def _save_providers(documents, packet, chunks, trace, files):
         target = one([t for t in targets if t['operation_id'] == buffer['operation_id']])
         _need(files[target['page_file']] == population_files[target['page_file']], 'NORMAL_SAVE_PAGE_CHANGED')
         name = 'FOX_S_' + native_buffer._sha(_json({'buffer': buffer, 'contract': contract, 'scope': save_scope}))[:20].upper() + '_'
-        result.append({'buffer': buffer, 'contract': contract, **target, 'namespace': name})
+        item = item_layouts.get(buffer['operation_id'])
+        result.append({'buffer': buffer, 'contract': contract, **target,
+                       'namespace': item['collection_namespace'] if item else name, 'item_layout': item})
     return result
 
 
@@ -289,6 +282,9 @@ def _dirty_sql(provider, alias='d'):
     nonempty = ' or '.join(f'{alias}.c{i:03} is not null' for i in editable) or '1=0'
     changed = ' or '.join('not (' + native_buffer._parent_match(f'{alias}.c{i:03}', f'{alias}.c{20+i:03}') + ')'
                           for i in editable) or '1=0'
+    if provider.get('item_layout'):
+        nonempty += f' or {alias}.n002 is not null or {alias}.c044 is not null or {alias}.c043 is not null'
+        changed += f" or {alias}.c043 is not null or decode({alias}.n002,{alias}.n003,1,0)=0 or not (" + native_buffer._parent_match(alias+'.c044',alias+'.c040') + ')'
     return f'(({alias}.n001 is null and ({nonempty})) or ({alias}.n001 is not null and ({changed})))'
 
 
@@ -303,6 +299,8 @@ def _inspect_buffer_sql(provider, number):
     equal = ' and '.join(native_buffer._parent_match('c.' + f['column'], f'd.c{20+i:03}')
                          for i, f in enumerate(fields, 1))
     equal += ' and ' + native_buffer._parent_match('c.' + contract['route']['column'], 'd.c040')
+    if provider.get('item_layout'):
+        equal += ' and decode(c.' + provider['item_layout']['fields']['weight']['column'] + ',d.n003,1,0)=1'
     membership = ' and '.join('p.' + p['parent_column'] + '=c.' + p['child_column'] for p in rel['join_pairs'])
     inherited = ' and '.join(native_buffer._parent_match(f'd.c{i:03}', 'p.' + f['parent_copy']['parent_column'])
                               for i, f in enumerate(fields, 1) if f.get('parent_copy')) or '1=1'
