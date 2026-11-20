@@ -10,6 +10,18 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-20
 
+### [testing] Verify the corrected synthetic Save in installed APEX
+The 0.41.0 draft approval check passed all eight installed browser stages.
+The 0.42.1 Save check reused one synthetic parent in the isolated APEX 26.1.6
+workspace and finished with exactly two related rows. Eleven database
+checkpoints covered empty Save, insert, repeat Save, duplicate rejection,
+independent parent-route changes, unchanged and edited rows, and rejection of
+a stale edit. The stale input stayed visible and prior rows were preserved.
+One browser observation after a successful second insert still showed an old
+alert. The stored row and its identity were reconciled before the test resumed
+without reinserting it. This evidence covers the installed Save workflow.
+The 0.43.0 list-return feature has separate target and source-interface checks.
+
 ### [testing] Check when a record-entry rule is ready to generate
 The discrepancy regression covers both outcomes for the same synthetic rule.
 With an explicit target field size, FOX generates the record-entry action.
