@@ -1,9 +1,9 @@
 {
-  "version": "0.38.1",
+  "version": "0.38.2",
   "released_on": "2026-11-20",
-  "title": "Open verified conversion results faster",
+  "title": "Keep completed XML exports readable across parser changes",
   "changes": [
-    "Opening run history or downloading a completed conversion now verifies the saved source, package and compiler evidence directly."
+    "Verify the exact saved export against its original source and completion records without asking the current Forms parser to reinterpret the old module."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

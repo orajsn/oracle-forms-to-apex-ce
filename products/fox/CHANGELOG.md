@@ -133,6 +133,26 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.38.2] - 2026-11-20
+
+### [fix] Keep saved XML exports available after parser changes
+Impact: A new parser rejecting an old module need not prevent a user from
+downloading the already-validated export from that run.
+Change: Verify retained original file bytes and the historical unit manifest
+without reinterpreting old XML. Bind the UI discrepancy report to the saved
+run; keep generation eligibility tied to the current assessment.
+Delivery: Source-only patch; no hosted rollout, cloud storage or data migration.
+Verification: With the same saved 0.38.0 synthetic ZIP and deliberately rejecting
+parser, 0.38.1 returned HTTP 409; 0.38.2 returned HTTP 200 and the original
+SHA-256. Local API tests also reopened an isolated SQLite backup plus job files
+in a second store, rejected altered evidence, and confirmed no extra run, render
+or compiler call. An Edge browser fixture showed Download while Generate stayed
+disabled; a mismatched saved report binding hid the link. Compiler was a test
+double at creation, not a live Oracle/SQLcl execution.
+Remaining: Local artifacts and their job database still require coordinated
+backup. See [export recovery](docs/export-durability.md) for the proposed hosted
+storage path and its crash-recovery acceptance criteria.
+
 ## [0.38.1] - 2026-11-20
 
 ### [performance] Open saved conversions without regenerating packages

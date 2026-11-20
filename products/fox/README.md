@@ -9,6 +9,12 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+**Saved exports (0.38.2 source):** downloading a completed XML-mapping package
+checks its original source, ZIPs and compiler evidence without re-running today's
+Forms parser on that saved run. New conversions still use the current parser.
+This is a local artifact-reader change, not a change to conversion coverage or
+a hosted rollout. See [export recovery and the proposed OCI storage design](docs/export-durability.md).
+
 ## Parent-child context and assignment encoding - 19 November 2026
 
 Private preview 0.34.0 is verified through a fresh browser generation/download

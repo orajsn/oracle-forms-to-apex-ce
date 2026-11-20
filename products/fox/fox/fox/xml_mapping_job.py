@@ -143,7 +143,8 @@ def checked_output(c, root, run):
     details['buffer_summary'] = _buffer_fields(metadata, ledger)
     details['lookup_summary'] = _lookup_fields(metadata, ledger)
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
-    return package, {'generated_units': generated, 'unsupported_units': counts['total'] - generated,
+    return package, {'saved_source_binding': snapshot['source_binding'],
+                     'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
 
 

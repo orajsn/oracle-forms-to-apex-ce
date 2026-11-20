@@ -9,9 +9,9 @@ from collections import Counter
 from copy import deepcopy
 import hashlib
 import json
+import re
 
 from .forms_native_plan import POLICY_ID
-from .forms_understanding_packet import _build
 from .prototype_export_only import _members, _validated_log
 
 _FALSE = ('schema_prepared', 'import_verified', 'runtime_verified',
@@ -48,6 +48,48 @@ def _apex(files):
             if name.endswith('.apx') or name.startswith('.apex/')}
 
 
+def _sources(files, manifest, snapshot, documents):
+    """Check original bytes, not a reinterpretation by the installed XML parser."""
+    _need(type(documents) is list and bool(documents)
+          and type(snapshot['files']) is list and len(snapshot['files']) == len(documents))
+    originals = {}
+    for name, raw in documents:
+        _need(type(name) is str and bool(name) and type(raw) is bytes and bool(raw)
+              and name.casefold() not in {key.casefold() for key in originals})
+        originals[name] = raw
+    expected = [{'name': name, 'sha256': _sha(raw), 'bytes': len(raw)}
+                for name, raw in sorted(originals.items())]
+    _need(len({row['sha256'] for row in expected}) == len(expected))
+    saved = snapshot['files']
+    _need(all(type(row) is dict and type(row.get('name')) is str
+              and type(row.get('bytes')) is int for row in saved))
+    _need(sorted(({key: row[key] for key in ('name', 'sha256', 'bytes')} for row in saved),
+                 key=lambda row: row['name']) == expected)
+    _need(manifest['files'] == expected
+          and all(type(row['bytes']) is int for row in manifest['files']))
+    _need({name for name in files if name.startswith('fox-package/sources/')} ==
+          {'fox-package/sources/' + name for name in originals})
+    for name, raw in originals.items():
+        _need(files['fox-package/sources/' + name] == raw)
+
+
+def _units(rows, chunks):
+    """Use the sealed historical chunk inventory, never today's code-unit parser."""
+    _need(type(rows) is list and len(rows) == len(chunks))
+    identities, seen_chunks = {}, set()
+    for row in rows:
+        _need(type(row) is dict)
+        unit, chunk = row['source_unit_id'], row['source_chunk_id']
+        _need(type(unit) is str and bool(unit) and unit not in identities
+              and type(chunk) is str and chunk in chunks and chunk not in seen_chunks
+              and row['source_unit_sha256'] == chunks[chunk]
+              and row['status'] in {'generated_wired_adapted', 'unsupported', 'missing_input'})
+        identities[unit] = (chunk, row['source_unit_sha256'], row['status'])
+        seen_chunks.add(chunk)
+    _need(seen_chunks == set(chunks))
+    return identities
+
+
 def verify_retained_package(candidate, package, proof, snapshot, documents, validation_directory):
     """Verify original sealed evidence without executing any old or new generator."""
     expected_proof = {'schema_version', 'scope', 'candidate_sha256', 'apex_members',
@@ -68,16 +110,17 @@ def verify_retained_package(candidate, package, proof, snapshot, documents, vali
     ledger = _json(before['fox-package/mapping-ledger.json'])
     _need(all(type(value.get('schema_version')) is int and value['schema_version'] == 1
               for value in (metadata, manifest, catalog, ledger)))
-    packet, chunks = _build(documents)
-    _need(packet['source_binding'] == snapshot['source_binding'] == metadata['source_binding']
+    # The caller authenticated the immutable snapshot and exact candidate hash.
+    # Preserve that original interpretation; a newer parser is not its authority.
+    _need(type(snapshot['source_binding']) is str
+          and re.fullmatch(r'[a-f0-9]{64}', snapshot['source_binding'])
+          and snapshot['source_binding'] == metadata['source_binding']
           == manifest['source_binding'] == ledger['source_binding'])
-    expected_sources = [{key: entry['source'][key] for key in ('name', 'sha256', 'bytes')}
-                        for entry in packet['sources']]
-    _need(manifest['files'] == expected_sources)
-    _need(manifest['selected_chunk_hashes'] == {c['id']: c['sha256'] for c in chunks})
-    originals = dict(documents)
-    for source in expected_sources:
-        _need(before['fox-package/sources/' + source['name']] == originals[source['name']])
+    _sources(before, manifest, snapshot, documents)
+    chunks = manifest['selected_chunk_hashes']
+    _need(type(chunks) is dict and all(type(key) is str and bool(key)
+          and type(value) is str and re.fullmatch(r'[a-f0-9]{64}', value)
+          for key, value in chunks.items()))
     _need(metadata['scope'] == 'fox-xml-mapping-package-v1'
           and metadata['origin'] == 'deterministic_local_xml'
           and metadata['data_mode'] == 'synthetic_test_only'
@@ -99,19 +142,8 @@ def verify_retained_package(candidate, package, proof, snapshot, documents, vali
           and catalog['catalog_sha256'] == snapshot['catalog_sha256']
           == metadata['catalog_sha256'] == ledger['catalog_sha256']
           and catalog['implementation_sources'] == snapshot['implementation_sources'])
-    expected_units = {c['code_unit_id']: c for c in chunks}
     coverage = _json(before['fox-package/behavior-coverage.json'])
-    _need(type(coverage) is list and len(coverage) == len(expected_units)
-          and {r['source_unit_id'] for r in coverage} == set(expected_units)
-          and type(ledger['code_units']) is list and len(ledger['code_units']) == len(expected_units)
-          and len({r['source_unit_id'] for r in ledger['code_units']}) == len(expected_units)
-          and {r['source_unit_id'] for r in ledger['code_units']} == set(expected_units))
-    for row in coverage + ledger['code_units']:
-        unit = expected_units[row['source_unit_id']]
-        _need(row['source_unit_sha256'] == unit['sha256'] and row['source_chunk_id'] == unit['id']
-              and row['status'] in {'generated_wired_adapted', 'unsupported', 'missing_input'})
-    _need({r['source_unit_id']:r['status'] for r in coverage} ==
-          {r['source_unit_id']:r['status'] for r in ledger['code_units']})
+    _need(_units(coverage, chunks) == _units(ledger['code_units'], chunks))
     _need(metadata['behavior_coverage'] == {'total': len(coverage),
           'counts': dict(Counter(row['status'] for row in coverage))})
     _need(_apex(before) == proof['apex_members'] == _apex(after) == metadata['apex_members'])
