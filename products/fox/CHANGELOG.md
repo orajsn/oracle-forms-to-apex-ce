@@ -138,8 +138,9 @@ No runtime behavior, generated asset or software version changes.
 ### [fix] Inherit the selected parent for new detail drafts
 Impact: Entering the first detail or adding another detail now carries forward the parent's business key. Users enter the detail code once. Duplicate entries stay on the current draft for correction.
 Change: A source CopyValueFromItem on a duplicate-key field must resolve to a matching master/detail join. The generated page loads the value from the selected synthetic parent, protects it from editing and checks the stored and submitted values before changing the draft. A new lookup action requires a provider for every input. Lookups with additional row-dependent inputs are available on existing records.
-Delivery: Source patch for the single-FMB workflow.
+Delivery: Published as fox-v0.39.2 and deployed to the private preview. Public 0.39.1 is the last verified public release.
 Verification: The original form and a renamed dispatch form were generated and format validated with SQLcl. Model checks exercised initial and subsequent details, duplicate correction, conflicting parent values and the same code under a different parent.
+The integrated suite passed 190 cases on Windows and Linux. One authenticated private generation/download verified the inherited field in the delivered package and preserved the previous download.
 Remaining: The changes cover session drafts. Execution inside an installed APEX target and customer-table saves require separate verification.
 
 ## [0.39.1] - 2026-11-20
