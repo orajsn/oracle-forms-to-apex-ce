@@ -75,7 +75,7 @@ test('hosted FMB real local HTTP/browser journey',{skip:process.env.FOX_HOSTED_B
   await page.getByText('Saved source version selected',{exact:true}).waitFor();
   const assessment=await context.request.get(`${origin}/api/projects/${pid}/prototype-assessment`);assert.equal(assessment.status(),200);
   const assessed=await assessment.json();await writeFile(path.join(out,'prototype-assessment.json'),JSON.stringify(assessed,null,2));
-  await page.getByRole('button',{name:'Open prepared prototype intake',exact:true}).click();
+  await page.getByRole('region',{name:'Convert the project',exact:true}).waitFor();
   await page.getByRole('button',{name:'Review prototype scope',exact:true}).click();
   await page.getByText('1 source files; 1 code units identified.',{exact:true}).waitFor();
   await page.getByText('0 of 1 code units selected — metadata-only; no business code selected.',{exact:true}).waitFor();

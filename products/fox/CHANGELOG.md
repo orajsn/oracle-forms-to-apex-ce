@@ -142,6 +142,13 @@ and proceeds to Convert. A single confirmation covers both local processing
 and partial output using synthetic data.
 Change: Keep the source-version, permission and blocked-input checks; loading
 an existing project does not silently submit a form or approve conversion.
+Delivery: Deployed public source `04df588`. In a live browser a real FMB reached
+the format-validated APEXlang ZIP in 22 seconds, including sign-in and project
+creation. There was no preparation selector, Next advanced to Convert, and one
+checkbox authorized generation. Exactly one upload, source adoption and
+generation were submitted, with zero page errors. The prior export still
+downloaded byte-identically. UI regressions also cover blocked/stale sources
+and uncertain submissions. No additional source behavior or import is claimed.
 Remaining: The output is still a partial APEXlang ZIP, not an imported app.
 
 ## [0.39.0] - 2026-11-20
