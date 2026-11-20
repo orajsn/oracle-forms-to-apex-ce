@@ -1,11 +1,10 @@
 {
-  "version": "0.45.0",
+  "version": "0.45.1",
   "released_on": "2026-11-20",
-  "title": "Validate a changed draft field against its source-linked lookup",
+  "title": "Reuse validated source parsing within one conversion",
   "changes": [
-    "Run eligible changed-field validations in the actual synthetic draft editor, with the selected parent, source warnings, field assignments and rejection behavior.",
-    "Check prior field values across all mapped synthetic records and retain the source outcome separately from later navigation and commits.",
-    "Download a source-linked interface register showing calls, actual arguments and affected actions."
+    "Reuse byte-identical XML and source facts across adapters in the same package build.",
+    "Each adapter receives separate mutable values. A later generation or verification starts from the original source bytes again."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -36,7 +36,7 @@ from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
-from .forms_understanding_packet import _build
+from .forms_understanding_packet import _build, generation_sources
 from .prototype_export_only import (MAX_ZIP, _compatibility, _members, _validated_log,
                                     _zip, validate_offline)
 
@@ -298,6 +298,11 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     user business acceptance, AI review, external transfer or database authority.
     Existing packet, native planner and renderer bounds remain in force.
     """
+    with generation_sources(documents):
+        return _generate_xml_package(documents, project_id, project_name, approved_policy_id)
+
+
+def _generate_xml_package(documents, project_id, project_name, approved_policy_id):
     packet, chunks = _build(documents)
     # Same metadata-only inventory state as local_packet(); this records no
     # external content selection or processing approval.

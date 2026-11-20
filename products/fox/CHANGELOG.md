@@ -150,6 +150,23 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.45.1] - 2026-11-20
+
+### [performance] Reuse validated XML within one deterministic generation
+For the measured 53-unit form, a single package generation previously built
+the source packet 77 times and parsed the XML 218 times. Exact-input source
+reuse reduced both counts to one. Median time across three warm local runs
+fell from 6.43 seconds to 2.47 seconds. These measurements cover generation
+on the same Windows environment and exclude SQLcl startup, network and import.
+
+Independent adapters receive their own XML and packet values. Reuse ends
+with the generation, including on failure. Changed inputs, another task and
+subsequent package verification cannot borrow the previous build's results.
+Existing proof/consent checks and bounded retained reads retain their own scope.
+All 919 local regression checks passed. The original and renamed 53-unit
+packages retained the exact APEX members, source XML and detailed interface
+exports from 0.45.0 and passed SQLcl validation without warnings.
+
 ## [0.45.0] - 2026-11-20
 
 ### [feature] Validate a changed field and trace its required interfaces

@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter, defaultdict
+from contextvars import ContextVar
+from copy import deepcopy
 from xml.parsers import expat
 
 from defusedxml import ElementTree as ET
@@ -145,7 +147,37 @@ def _locations(raw: bytes) -> list[dict]:
     return locations
 
 
+_generation = ContextVar('fox_generation_source_snapshot', default=None)
+
+
 def _safe_input(name: str, raw: bytes):
+    state = _generation.get()
+    if not state or type(name) is not str or type(raw) is not bytes or (name, raw) not in state['documents']:
+        return _parse_checked_input(name, raw)
+    from .prototype_read_scope import _owner, current_read_root, MAX_DOCUMENT_BUILD_BYTES
+    from .prototype_initial_direct_read_scope import current_read_root as initial_read_root
+    if state['owner'] != _owner() or current_read_root() is not None or initial_read_root() is not None:
+        return _parse_checked_input(name, raw)
+    key = (name, raw)
+    cache = state['xml']
+    if key in cache:
+        if cache[key] is None:
+            return _parse_checked_input(name, raw)
+        root, locations = cache[key]
+        return deepcopy(root), [dict(loc) for loc in locations]
+    root, locations = _parse_checked_input(name, raw)
+    # The immutable input and indexed paths bound optional retained data.
+    # Caller-owned trees and location dictionaries always remain independent.
+    weight = len(raw) + sum(len(loc['path'].encode()) + 32 for loc in locations)
+    if state['xml_bytes'] + weight <= MAX_DOCUMENT_BUILD_BYTES:
+        cache[key] = (deepcopy(root), [dict(loc) for loc in locations])
+        state['xml_bytes'] += weight
+    else:
+        cache[key] = None
+    return root, locations
+
+
+def _parse_checked_input(name: str, raw: bytes):
     if (not isinstance(name, str) or not name or len(name) > 180 or ".." in name
             or any(c in name for c in "/\\:") or any(ord(c) < 32 or ord(c) == 127 for c in name)
             or not name.lower().endswith(".xml")):

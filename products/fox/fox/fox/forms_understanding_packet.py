@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 
 from . import forms_facts
 
@@ -27,27 +28,72 @@ def _hash(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _plain_documents(documents):
+    if type(documents) is not list or not 1 <= len(documents) <= MAX_FILES:
+        return None
+    snapshot = tuple(documents)
+    if any(type(row) is not tuple or len(row) != 2 or type(row[0]) is not str
+           or len(row[0]) > 180 or type(row[1]) is not bytes
+           or not 0 < len(row[1]) <= forms_facts.MAX_FILE_BYTES for row in snapshot):
+        return None
+    if sum(len(raw) for _, raw in snapshot) > MAX_TOTAL_SOURCE_BYTES:
+        return None
+    return snapshot
+
+
+@contextmanager
+def generation_sources(documents):
+    """Reuse only byte-identical source derivations inside one synchronous build."""
+    from .prototype_read_scope import current_read_root, _owner
+    from .prototype_initial_direct_read_scope import current_read_root as initial_read_root
+    snapshot = _plain_documents(documents)
+    if snapshot is None or current_read_root() is not None or initial_read_root() is not None:
+        yield
+        return
+    state = {"documents": snapshot, "owner": _owner(), "checked": False, "encoded": None,
+             "xml": {}, "xml_bytes": 0}
+    token = forms_facts._generation.set(state)
+    try:
+        yield
+    finally:
+        state.clear()
+        forms_facts._generation.reset(token)
+
+
 def _build(documents: list[tuple[str, bytes]]) -> tuple[dict, list[dict]]:
-    from .prototype_read_scope import current_read_root, optional_document_build
+    from .prototype_read_scope import current_read_root, optional_document_build, _owner, MAX_DOCUMENT_BUILD_VALUE_BYTES
     root = current_read_root()
     if root is None:
         # Initial-direct saved reads have their own full-job fence. Never open
         # an epoch scope or borrow its proof budget for these historical jobs.
         from .prototype_initial_direct_read_scope import current_read_root, optional_document_build
         root = current_read_root()
-    if root is None or type(documents) is not list or not 1 <= len(documents) <= MAX_FILES:
+    generation = forms_facts._generation.get()
+    if root is None and not generation:
         return _build_uncached(documents)
     # Copy the container; every accepted key component is a plain immutable
     # value. Subclasses/malformed inputs retain the original uncached behavior.
-    snapshot = list(documents)
-    if any(type(row) is not tuple or len(row) != 2 or type(row[0]) is not str
-           or len(row[0]) > 180 or type(row[1]) is not bytes
-           or not 0 < len(row[1]) <= forms_facts.MAX_FILE_BYTES for row in snapshot):
+    snapshot = _plain_documents(documents)
+    if snapshot is None:
         return _build_uncached(documents)
-    if sum(len(raw) for _, raw in snapshot) > MAX_TOTAL_SOURCE_BYTES:
-        return _build_uncached(documents)
+    if root is None:
+        if generation["owner"] != _owner() or generation["documents"] != snapshot:
+            return _build_uncached(documents)
+        if generation["encoded"] is not None:
+            packet, chunks = json.loads(generation["encoded"])
+            return packet, chunks
+        value = _build_uncached(list(snapshot))
+        if not generation["checked"]:
+            generation["checked"] = True
+            # The packet and chunks contain only JSON data. Store an immutable
+            # encoding before returning mutable copies to independent adapters.
+            # Oversized values retain the normal uncached path for this build.
+            raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+            if len(raw) <= MAX_DOCUMENT_BUILD_VALUE_BYTES:
+                generation["encoded"] = raw
+        return value
     identity = tuple((name, len(raw), _hash(raw)) for name, raw in snapshot)
-    return optional_document_build(root, identity, lambda: _build_uncached(snapshot))
+    return optional_document_build(root, identity, lambda: _build_uncached(list(snapshot)))
 
 
 def _build_uncached(documents: list[tuple[str, bytes]]) -> tuple[dict, list[dict]]:
