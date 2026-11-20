@@ -133,6 +133,20 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.39.0] - 2026-11-20
+
+### [improvement] Guide a single hosted FMB from upload to Convert
+Impact: A business user can start with a project name and a raw FMB, see
+preparation progress, and continue from the confirmed saved source without
+reopening the project or uploading it again. No laptop Forms installation.
+Change: Prioritize hosted FMB intake, group other routes, poll preparation
+status with bounded read-only checks and tie Continue to the adopted source
+version. Keep explicit local processing and partial-conversion approval.
+Verification: TypeScript and production UI build. The hosted acceptance result
+is recorded separately from source publication.
+Remaining: Extraction and conversion are separate. A generated package can have
+unsupported Forms behavior; no target import or runtime equivalence is implied.
+
 ## [0.38.2] - 2026-11-20
 
 ### [fix] Keep saved XML exports available after parser changes

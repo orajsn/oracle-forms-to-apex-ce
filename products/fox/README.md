@@ -9,6 +9,14 @@ See [What changed](CHANGELOG.md) for versioned FOX increments and the
 [release policy](docs/release-policy.md) for source, verification and deployment
 boundaries. FOX tags use `fox-v…`; the root CE repository has separate versions.
 
+**Have one .fmb?** On a hosted installation with Forms preparation enabled,
+choose **New project**, give it a name, then select the file and click
+**Prepare FMB**. FOX checks extraction status on the server. Review the result,
+choose **Add prepared form to project → Continue to Convert**, confirm the two
+statements under reusable XML mapping, and choose **Generate APEX package**.
+Open **APEX output** for the ZIP and a list of what was not converted. The ZIP
+is a format-validated APEXlang project, not a conventional APEX SQL export.
+
 **Saved exports (0.38.2 source):** downloading a completed XML-mapping package
 checks its original source, ZIPs and compiler evidence without re-running today's
 Forms parser on that saved run. New conversions still use the current parser.

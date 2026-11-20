@@ -1,9 +1,9 @@
 {
-  "version": "0.38.2",
+  "version": "0.39.0",
   "released_on": "2026-11-20",
-  "title": "Keep completed XML exports readable across parser changes",
+  "title": "Guide one Forms file from upload to APEX package",
   "changes": [
-    "Verify the exact saved export against its original source and completion records without asking the current Forms parser to reinterpret the old module."
+    "Start with a raw FMB in the project, follow its hosted preparation status, and continue from the prepared source to local APEX package generation."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
