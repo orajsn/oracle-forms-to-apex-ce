@@ -133,6 +133,17 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.39.1] - 2026-11-20
+
+### [improvement] One Next step and one confirmation for a hosted form
+Impact: The hosted export user no longer chooses a masking mode or needs to
+understand what adding a prepared form means. Next saves the prepared source
+and proceeds to Convert. A single confirmation covers both local processing
+and partial output using synthetic data.
+Change: Keep the source-version, permission and blocked-input checks; loading
+an existing project does not silently submit a form or approve conversion.
+Remaining: The output is still a partial APEXlang ZIP, not an imported app.
+
 ## [0.39.0] - 2026-11-20
 
 ### [improvement] Guide a single hosted FMB from upload to Convert

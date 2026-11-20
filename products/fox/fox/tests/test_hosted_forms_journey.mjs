@@ -60,13 +60,13 @@ test('hosted FMB real local HTTP/browser journey',{skip:process.env.FOX_HOSTED_B
   const job=await submittedResponse.json();assert.equal(job.model_submission_allowed,false);assert.equal(job.business_accepted,false);
   for(let i=0;i<40;i++){
    await page.getByRole('button',{name:'Check preparation status',exact:true}).click();
-   if(await page.getByRole('button',{name:'Add prepared form to project',exact:true}).count())break;
+   if(await page.getByRole('button',{name:'Next',exact:true}).count())break;
    await page.waitForTimeout(100);
   }
-  await page.getByText('Preparation is not conversion, technical verification, or business acceptance.',{exact:true}).waitFor();
+  await page.getByText('FOX has read your form. Choose Next to review it before generating APEX.',{exact:true}).waitFor();
   await page.screenshot({path:path.join(out,'desktop-prepared.png'),fullPage:true});
   const adoption=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname.endsWith('/adopt'));
-  await page.getByRole('button',{name:'Add prepared form to project',exact:true}).click();
+  await page.getByRole('button',{name:'Next',exact:true}).click();
   const adoptedResponse=await adoption;assert.equal(adoptedResponse.status(),200);
   const adopted=await adoptedResponse.json();assert.equal(adopted.processing_approved,false);assert.match(adopted.selected_source_set_id,/^ss-/);
   // A source binding change clears transient workbench messages by design.

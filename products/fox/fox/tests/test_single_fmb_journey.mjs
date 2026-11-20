@@ -16,7 +16,7 @@ test('single FMB: bounded read-only polling, once-only adoption and safe recover
  const {chromium}=runtime('playwright'),{build}=dependencies('esbuild');
  const out=path.resolve(process.env.FOX_TEST_EVIDENCE_DIR);
  await mkdir(out,{recursive:false});
- const entry=`import React,{useState} from 'react';import{createRoot}from'react-dom/client';import Workbench from './web/ProjectWorkbench';import './web/style.css';function Harness(){const[source,setSource]=useState({project_id:'synthetic-p',source_hash:'${hash}',selected_source_set_id:null});return <Workbench project={{id:'synthetic-p',name:'Single FMB synthetic QA',customer:'Isolated QA'}} source={source} plan={null} runs={[]} capabilities={{}} processingNotice="" onRefresh={async()=>{window.refreshCount=(window.refreshCount??0)+1;if(window.refreshFails)return{status:'unconfirmed'};setSource({project_id:'synthetic-p',source_hash:'${adoptedHash}',selected_source_set_id:'ss-synthetic'});return{status:'confirmed'};}}/>;}createRoot(document.getElementById('root')).render(<Harness/>);`;
+ const entry=`import React,{useState} from 'react';import{createRoot}from'react-dom/client';import Workbench from './web/ProjectWorkbench';import './web/style.css';function Harness(){const[source,setSource]=useState({project_id:'synthetic-p',source_hash:'${hash}',selected_source_set_id:null});return <Workbench exportOnly={true} project={{id:'synthetic-p',name:'Single FMB synthetic QA',customer:'Isolated QA'}} source={source} plan={null} runs={[]} capabilities={{}} processingNotice="" onRefresh={async()=>{window.refreshCount=(window.refreshCount??0)+1;if(window.refreshFails)return{status:'unconfirmed'};setSource({project_id:'synthetic-p',source_hash:window.refreshMismatch?'${hash}':'${adoptedHash}',selected_source_set_id:'ss-synthetic'});return{status:'confirmed',safe_to_continue:true,refreshed_binding:{project_id:'synthetic-p',source_hash:window.refreshMismatch?'${hash}':'${adoptedHash}',selected_source_set_id:'ss-synthetic'}};}}/>;}createRoot(document.getElementById('root')).render(<Harness/>);`;
  const built=await build({stdin:{contents:entry,resolveDir:root,loader:'tsx'},nodePaths:[modules,path.resolve(process.env.FOX_UI_NODE_MODULES??modules)],bundle:true,write:false,outfile:'preview.js',format:'iife',platform:'browser',logLevel:'silent'});
  const js=built.outputFiles.find(f=>f.path.endsWith('.js')).text,css=built.outputFiles.find(f=>f.path.endsWith('.css')).text;
  const browser=await chromium.launch({channel:'msedge',headless:true});
@@ -32,7 +32,7 @@ test('single FMB: bounded read-only polling, once-only adoption and safe recover
   await page.route('**/*',async route=>{
    const req=route.request(),url=new URL(req.url());
    if(url.href==='http://localhost/')return route.fulfill({contentType:'text/html',body:'<div id="root"></div>'});
-   calls.push({method:req.method(),path:url.pathname});
+   calls.push({method:req.method(),path:url.pathname,...(req.method()==='POST'?{body:req.postData()}: {})});
    if(!url.pathname.startsWith('/api/projects/synthetic-p/native-preparations'))return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({detail:'Unconfigured synthetic route'})});
    const json=(body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
    if(req.method()==='POST'&&url.pathname.endsWith('/adopt'))return adoptionReject?json({detail:'Source version changed; refresh first.'},409):json({adopted:true,already_adopted:false,source_hash:adoptedHash,selected_source_set_id:'ss-synthetic',processing_approved:false});
@@ -58,8 +58,9 @@ test('single FMB: bounded read-only polling, once-only adoption and safe recover
   finally{await context.close();await writeFile(path.join(out,'receipts.json'),JSON.stringify(receipts,null,2));}
  }
  try{
-  await scenario('happy-poll-adopt-continue',async h=>{
+  await scenario('happy-poll-next-convert',async h=>{
    const {page}=h;
+   assert.equal(await page.getByRole('combobox').count(),0,'no preparation mode dropdown');
    assert.equal(await page.getByRole('button',{name:'Prepare FMB',exact:true}).isDisabled(),true);
    await page.getByLabel('Forms FMB file').setInputFiles({name:'empty.fmb',mimeType:'application/octet-stream',buffer:Buffer.alloc(0)});
    await page.getByRole('button',{name:'Prepare FMB',exact:true}).click();
@@ -69,16 +70,20 @@ test('single FMB: bounded read-only polling, once-only adoption and safe recover
    const gets=h.getCount();
    h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED'});
    await page.clock.runFor(5100);
-   await page.getByRole('button',{name:'Add prepared form to project',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Next',exact:true}).waitFor();
+   assert.equal(h.calls.filter(c=>c.method==='POST'&&c.path.endsWith('/adopt')).length,0,'viewing extraction never adopts');
+   assert.match(h.calls.find(c=>c.method==='POST').body,/name="preparation_mode"\r\n\r\ndevelopment_preserve/);
    assert.ok(h.getCount()>gets,'automatic refresh issued a GET');assert.equal(h.postCount(),1,'poll did not replay upload');
-   await page.getByText('Preparation is not conversion, technical verification, or business acceptance.',{exact:true}).waitFor();
+   await page.getByText('FOX has read your form. Choose Next to review it before generating APEX.',{exact:true}).waitFor();
    const stopped=h.getCount();await page.clock.runFor(16000);assert.equal(h.getCount(),stopped,'terminal preparation stopped polling');
-   await page.getByRole('button',{name:'Add prepared form to project',exact:true}).click();
-   await page.getByRole('button',{name:'Continue to Convert',exact:true}).waitFor();
+   await page.getByRole('button',{name:'Next',exact:true}).evaluate(button=>{button.click();button.click();});
+   await page.getByRole('region',{name:'Convert the project',exact:true}).waitFor();
    assert.equal(h.postCount(),2);assert.equal(await page.evaluate(()=>window.refreshCount),1);
-   assert.equal(await page.getByRole('button',{name:'Add prepared form to project',exact:true}).isDisabled(),true,'adopted result cannot be submitted again');
-   await page.getByRole('button',{name:'Continue to Convert',exact:true}).click();
-   await page.getByRole('region',{name:'Convert the project',exact:true}).waitFor();assert.equal(h.postCount(),2,'continue is navigation only');
+   assert.equal(await page.getByRole('button',{name:'Continue to Convert',exact:true}).count(),0,'no separate continue click');
+   assert.equal(await page.getByRole('button',{name:'Next',exact:true}).count(),0,'adoption leaves Upload');
+   await page.getByRole('button',{name:'Upload',exact:false}).first().click();
+   assert.equal(h.postCount(),2,'returning to preparation never replays adoption');
+   const previousPosts=h.postCount();await page.clock.runFor(16000);assert.equal(h.postCount(),previousPosts);
    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   });
   await scenario('poll-budget',async h=>{
@@ -96,30 +101,39 @@ test('single FMB: bounded read-only polling, once-only adoption and safe recover
   });
   await scenario('stale-source',async h=>{
    h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED',stale:true});await h.upload();
-   await h.page.getByText(/project source has changed/).waitFor();assert.equal(await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).isDisabled(),true);assert.equal(h.postCount(),1);
+   await h.page.getByText(/project source has changed/).waitFor();assert.equal(await h.page.getByRole('button',{name:'Next',exact:true}).isDisabled(),true);assert.equal(h.postCount(),1);
   });
   await scenario('poll-error-recovery',async h=>{
    await h.upload();await h.page.getByText('Queued for preparation',{exact:false}).waitFor();h.set({getFailure:true});
    await h.page.clock.runFor(5100);await h.page.getByRole('alert').waitFor();const after=h.getCount();
    await h.page.clock.runFor(16000);assert.equal(h.getCount(),after,'failed poll does not loop');assert.equal(h.postCount(),1);
    h.set({getFailure:false,state:'BLOCKED'});await h.page.getByRole('button',{name:'Check preparation status',exact:true}).click();await h.page.getByText(/Preparation blocked/).waitFor();
-   assert.equal(await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).count(),0);
+   assert.equal(await h.page.getByRole('button',{name:'Next',exact:true}).count(),0);
   });
   await scenario('malformed-status',async h=>{
    await h.upload();await h.page.getByText('Queued for preparation',{exact:false}).waitFor();h.set({malformed:true});
    await h.page.getByRole('button',{name:'Check preparation status',exact:true}).click();await h.page.getByRole('alert').filter({hasText:'could not be verified'}).waitFor();
-   assert.equal(await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).count(),0);assert.equal(h.postCount(),1);
+   assert.equal(await h.page.getByRole('button',{name:'Next',exact:true}).count(),0);assert.equal(h.postCount(),1);
   });
   await scenario('adopt-refresh-unknown',async h=>{
-   h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED'});await h.upload();await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).waitFor();await h.page.evaluate(()=>{window.refreshFails=true;});
-   await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).click();
+   h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED'});await h.upload();await h.page.getByRole('button',{name:'Next',exact:true}).waitFor();await h.page.evaluate(()=>{window.refreshFails=true;});
+   await h.page.getByRole('button',{name:'Next',exact:true}).click();
    await h.page.waitForFunction(()=>window.refreshCount===1);assert.equal(await h.page.getByRole('button',{name:'Continue to Convert',exact:true}).count(),0,'unconfirmed source refresh does not offer continue');assert.equal(h.postCount(),2);
-   assert.equal(await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).isDisabled(),true,'unknown adoption refresh fences repeat mutation');
+   assert.equal(await h.page.getByRole('button',{name:'Next',exact:true}).isDisabled(),true,'unknown adoption refresh fences repeat mutation');
+   assert.equal(await h.page.getByRole('region',{name:'Convert the project',exact:true}).count(),0);
   });
   await scenario('adoption-rejected',async h=>{
-   h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED',adoptionReject:true});await h.upload();await h.page.getByRole('button',{name:'Add prepared form to project',exact:true}).click();
+   h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED',adoptionReject:true});await h.upload();await h.page.getByRole('button',{name:'Next',exact:true}).click();
    await h.page.getByText('Source version changed; refresh first.',{exact:true}).waitFor();assert.equal(h.postCount(),2);
    assert.equal(await h.page.getByRole('button',{name:'Continue to Convert',exact:true}).count(),0);assert.equal(await h.page.evaluate(()=>window.refreshCount??0),0,'rejected adoption does not refresh a fictional new source');
+  });
+  await scenario('adopt-refresh-mismatched-binding',async h=>{
+   h.set({state:'PREPARED_DEVELOPMENT_REVIEW_REQUIRED'});await h.upload();await h.page.evaluate(()=>{window.refreshMismatch=true;});await h.page.getByRole('button',{name:'Next',exact:true}).click();
+   await h.page.waitForFunction(()=>window.refreshCount===1);await h.page.clock.runFor(1000);
+   assert.equal(await h.page.getByRole('region',{name:'Convert the project',exact:true}).count(),0,'confirmed but mismatched refresh cannot advance');assert.equal(h.postCount(),2);
+  });
+  await scenario('credentials-block-next',async h=>{
+   h.set({state:'CREDENTIAL_REVIEW_REQUIRED'});await h.upload();await h.page.getByText(/Possible credentials found/).waitFor();assert.equal(await h.page.getByRole('button',{name:'Next',exact:true}).count(),0);assert.equal(h.postCount(),1);
   });
  }finally{await browser.close();}
 });

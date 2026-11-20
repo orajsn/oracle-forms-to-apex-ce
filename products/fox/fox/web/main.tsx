@@ -298,7 +298,7 @@ function App(){
   const request=++detailRequest.current;sourceActionInFlight.current=true;setBusy(true);setError('');
   try{const value=await readSourceProject(pid);publishProject(value,request);if(!safetyReady.current&&session)restoreSafety(session);const pending=pendingProjectActions.current[pid];
    const safe=safetyReady.current&&(!pending||reconciledProjectAction(value,pending))&&setProjectUncertain(pid,null);
-   return {status:'confirmed',safe_to_continue:safe,message:safe?'Current project status loaded.':'Current status loaded, but the previous operation is not confirmed. Actions remain paused; contact FOX support with this project name. No operation was repeated.'};
+   return {status:'confirmed',safe_to_continue:safe,refreshed_binding:{project_id:value.id,source_hash:value.inventory.source_hash,selected_source_set_id:value.inventory.selected_source_set_id},message:safe?'Current project status loaded.':'Current status loaded, but the previous operation is not confirmed. Actions remain paused; contact FOX support with this project name. No operation was repeated.'};
   }catch{return {status:'unconfirmed',message:'The status check failed. No operation was repeated.'};}
   finally{sourceActionInFlight.current=false;setBusy(false);}
  }

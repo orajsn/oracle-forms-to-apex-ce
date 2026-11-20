@@ -20,7 +20,7 @@ test('hosted FMB preparation: simulated queue, uncertain upload and responsive s
   await page.getByLabel('Forms FMB file').setInputFiles({name:'sample.fmb',mimeType:'application/octet-stream',buffer:Buffer.from('synthetic')});await page.getByRole('button',{name:'Prepare FMB'}).click();
   await page.getByText(/Upload outcome unknown/).waitFor();assert.equal(postCount,1);assert.equal(await page.getByRole('button',{name:'Prepare FMB'}).isDisabled(),true);
   await page.screenshot({path:path.join(out,'hosted-unknown-desktop.png'),fullPage:true});await page.getByRole('button',{name:'Check preparation status'}).click();await page.getByText('Queued for preparation',{exact:false}).waitFor();assert.equal(postCount,1);
-  state='PREPARED_REDACTED_REVIEW_REQUIRED';await page.getByRole('button',{name:'Check preparation status'}).click();await page.getByRole('button',{name:'Add prepared form to project'}).waitFor();
+  state='PREPARED_REDACTED_REVIEW_REQUIRED';await page.getByRole('button',{name:'Check preparation status'}).click();await page.getByRole('button',{name:'Next'}).waitFor();
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:path.join(out,'hosted-prepared-mobile.png'),fullPage:true});
  }finally{await browser.close();}
 });

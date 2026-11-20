@@ -11,9 +11,11 @@ boundaries. FOX tags use `fox-v…`; the root CE repository has separate version
 
 **Have one .fmb?** On a hosted installation with Forms preparation enabled,
 choose **New project**, give it a name, then select the file and click
-**Prepare FMB**. FOX checks extraction status on the server. Review the result,
-choose **Add prepared form to project → Continue to Convert**, confirm the two
-statements under reusable XML mapping, and choose **Generate APEX package**.
+**Prepare FMB**. FOX checks extraction status on the server. Review the result
+and choose **Next**. FOX saves the prepared source to the project for you.
+Check the single local-processing and partial-output confirmation, then choose
+**Generate APEX package**. No redaction-mode selection is needed in the hosted
+export workflow. A blocked preparation explains why you cannot continue.
 Open **APEX output** for the ZIP and a list of what was not converted. The ZIP
 is a format-validated APEXlang project, not a conventional APEX SQL export.
 

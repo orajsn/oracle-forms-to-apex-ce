@@ -1,9 +1,9 @@
 {
-  "version": "0.39.0",
+  "version": "0.39.1",
   "released_on": "2026-11-20",
-  "title": "Guide one Forms file from upload to APEX package",
+  "title": "Simplify one-file upload and confirmation",
   "changes": [
-    "Start with a raw FMB in the project, follow its hosted preparation status, and continue from the prepared source to local APEX package generation."
+    "Prepare one FMB, review the result and choose Next. Confirm local partial generation once and download the APEXlang package."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
