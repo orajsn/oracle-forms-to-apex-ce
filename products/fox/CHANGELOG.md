@@ -142,8 +142,16 @@ reopening the project or uploading it again. No laptop Forms installation.
 Change: Prioritize hosted FMB intake, group other routes, poll preparation
 status with bounded read-only checks and tie Continue to the adopted source
 version. Keep explicit local processing and partial-conversion approval.
-Verification: TypeScript and production UI build. The hosted acceptance result
-is recorded separately from source publication.
+Delivery: Public hosted preview deployed at source `8f62530`.
+Verification: The authenticated public browser created a project, uploaded a
+real FMB, waited for automatic status, adopted the XML, continued to Convert
+and downloaded the result. One POST per step; no reopen, duplicate submission
+or page errors. The 21-second observation is for this file on a running host,
+not a service guarantee. The exact ZIP matched the SQLcl 26.1.2.0 offline
+validation receipt. The partial result showed 9 generated/adapted, 9 encoded
+but unwired, and 35 unimplemented units of 53. The earlier project and download
+were preserved. No AI call or database import. TypeScript, production build
+and modeled browser checks also passed.
 Remaining: Extraction and conversion are separate. A generated package can have
 unsupported Forms behavior; no target import or runtime equivalence is implied.
 
