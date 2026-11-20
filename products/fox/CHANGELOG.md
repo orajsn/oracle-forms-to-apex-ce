@@ -133,6 +133,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.40.0] - 2026-11-20
+
+### [feature] Generate source query, navigation and record-entry actions
+Impact: FOX creates a filtered source report, reference choices, guarded detail refreshes and session initialization from complete supported Forms rules. A record-entry page can apply a conditional assignment using explicitly selected rows.
+Change: APEX report queries preserve the recognized predicates and source ordering. Protected row selections bind synthetic context. Restricted session values provide trusted globals. Original interfaces require target verification before reads can be enabled. Reference reports identify their LOV return-field requirements. The original-source block filter applies to the dedicated query screen. Session initialization preserves a prior value when its single-row query fails. An entry condition preserves the selected record's previous value on a false or NULL result.
+Delivery: Source milestone for the ongoing form conversion.
+Verification: The combined Windows suite passed 227 checks, including the local original-package check. SQLcl 26.1.2 validated the exact original and renamed packages with zero warnings. An independent runtime exercise of the preceding 0.39.2 package imported generated application components into the JSN test workspace and completed the synthetic manifest/bag draft workflow.
+Remaining: Original interface activation, LOV return to calling fields, transactional approval/save/delete behavior and full business acceptance require further work. Installed verification of 0.39.2 applies to that exact build.
+
 ## [0.39.2] - 2026-11-20
 
 ### [fix] Inherit the selected parent for new detail drafts

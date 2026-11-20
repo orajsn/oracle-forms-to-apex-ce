@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules, native_buffer, record_buffer, native_lookups, source_lookup
+from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules, native_buffer, record_buffer, native_lookups, source_lookup, native_record_groups
 from forms2apex.native_behavior import render_behavior_package
 
 from .forms_blueprint import validate_blueprint
@@ -23,6 +23,10 @@ from .forms_policy_plan import build_policy_plan
 from .forms_order_rules import apply_order_rules
 from .forms_buffer_plan import build_buffer_plan
 from .forms_lookup_plan import build_lookup_plan
+from .forms_guarded_query import apply_guarded_queries
+from .forms_manifest_filter import apply_manifest_filters
+from .forms_session_defaults import apply_session_defaults
+from .forms_record_entry import apply_record_entries
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -35,6 +39,11 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "selected_record_entry_assignment": "fox.policy.selected-record-entry",
+    "source_filtered_block_query": "fox.query.source-block-filter",
+    "source_session_default": "fox.session.source-default",
+    "guarded_related_query": "fox.query.guarded-related-query",
+    "record_group_reference_report": "fox.query.record-group-report",
     "source_select_into_lookup": "fox.lookup.source-read-event",
     "loaded_draft_duplicate_record": "fox.buffer.duplicate-record-validation",
     "local_comparison_report_column": "fox.behavior.local-comparison-report-column",
@@ -89,14 +98,24 @@ def mapping_catalog():
          "Native session-draft editor validates the current record against loaded same-parent drafts before keeping or moving records.", "No customer-table save. Explicit draft lifecycle, 1000-row cap, source size limits and matching binary comparison/encoding prerequisites; target runtime remains unverified."),
         ("fox.lookup.source-read-event", "Complete same-block SELECT INTO lookup with exact source exception/null-reset behavior and typed native fields.",
          "Native selected-record POST-QUERY handlers or explicit Apply lookup POST-CHANGE adapters, linked from source reports.", "Original read interfaces are embedded but disabled by default behind restricted server-only readiness items. Existing field edit restrictions are retained; no customer save. Verify original objects, types, privileges and authorization before activation; runtime remains unverified."),
+        ("fox.query.record-group-report", "Complete query record group with matching projected columns, verified row context and bounded SELECT grammar.",
+         "Native reference choices report linked from the synthetic source row chooser.", "Original database and session inputs require trusted configuration. Read-only selection view. LOV return to the calling field remains pending."),
+        ("fox.query.guarded-related-query", "Complete item KEY-EXEQRY guard using non-null keys on the selected parent in a proven incoming relation.",
+         "Manual Execute query action refreshes the related synthetic report after checking its parent keys.", "Uses the selected persisted row. The related view can also query on initial entry. Automatic coordination and dirty record buffers remain separate."),
+        ("fox.session.source-default", "Complete form initialization loads one global from a single-row NVL lookup and preserves it on error.",
+         "Runs on the first mapped module page visited in an enabled application session.", "Trusted source context and a verified original interface are required. A new APEX session adapts Forms launch timing. Subsequent visits retain the initialized value."),
+        ("fox.query.source-block-filter", "Whole block filter consists of direct source column equalities with literals and trusted globals.",
+         "A dedicated original-source query page applies the declared filter to its verified database source.", "Source reads require a trusted session context and an enabled interface. The other prototype screens continue to use synthetic tables. This read adapter covers the source query only."),
+        ("fox.policy.selected-record-entry", "Complete conditional scalar assignment on record entry with an explicitly selected record and proven parent chain.",
+         "Native page applies the assignment to session state for the selected synthetic record.", "Inputs come from the selected synthetic rows. False and NULL conditions preserve the previous flag. Other lookup pages and drafts have independent state. This adapter applies when the selected record-entry page is opened."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 7,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 8,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -105,6 +124,7 @@ def mapping_catalog():
                       "forms2apex/native_policy_rules.py": _sha(Path(native_policy_rules.__file__).read_bytes()),
                       "forms2apex/native_buffer.py": _sha(Path(native_buffer.__file__).read_bytes()),
                       "forms2apex/record_buffer.py": _sha(Path(record_buffer.__file__).read_bytes()),
+                      "forms2apex/native_record_groups.py": _sha(Path(native_record_groups.__file__).read_bytes()),
                       "forms2apex/native_lookups.py": _sha(Path(native_lookups.__file__).read_bytes()),
                       "forms2apex/source_lookup.py": _sha(Path(source_lookup.__file__).read_bytes())},
                "rules": [{"id": key, "revision": 1, "guards": guard,
@@ -255,10 +275,45 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     lookup_gaps = {op["source_unit_id"]: op["reason"] for op in lookup_receipt["unrendered_operations"]} if lookup_receipt else {}
     if set(looked) & (set(encoded) | set(policy_encoded) | set(buffered)):
         raise ValueError("A source event cannot have two native/review owners.")
+    files, group_receipt = native_record_groups.apply_record_groups(documents, packet, chunks, trace, files)
+    files["fox-package/record-group-receipt.json"] = _bytes(group_receipt)
+    files, query_receipt = apply_guarded_queries(documents, packet, chunks, trace, files)
+    files["fox-package/guarded-query-receipt.json"] = _bytes(query_receipt)
+    files, filter_receipt = apply_manifest_filters(documents, packet, chunks, trace, files)
+    files["fox-package/block-filter-receipt.json"] = _bytes(filter_receipt)
+    files, defaults_receipt = apply_session_defaults(packet, chunks, trace, files)
+    files["fox-package/session-defaults.json"] = _bytes(defaults_receipt)
+    files, entry_receipt = apply_record_entries(documents, packet, chunks, trace, files)
+    files["fox-package/record-entry-receipt.json"] = _bytes(entry_receipt)
+    for operation in entry_receipt["generated_operations"]:
+        uid = operation["source_unit_id"]
+        review = policy_encoded.pop(uid, None)
+        if review is None or review["source_unit_sha256"] != operation["source_unit_sha256"]:
+            raise ValueError("Record entry requires the exact encoded source policy.")
+    source_adapters = {}
+    for receipt, reason in (
+        (entry_receipt, "selected_record_entry_generated"),
+        (query_receipt, "related_query_action_generated"),
+        (group_receipt, "record_group_query_generated_interface_pending"),
+        (filter_receipt, "source_block_filter_read_adapter"),
+        (defaults_receipt, "source_session_default_generated"),
+    ):
+        for operation in receipt["generated_operations"]:
+            uid = operation["source_unit_id"]
+            if uid in source_adapters or uid in looked or uid in buffered or uid in encoded or uid in policy_encoded:
+                raise ValueError("Two mappings claim the same source unit.")
+            source_adapters[uid] = (operation, reason)
     ordered = {op["source_unit_id"]: op for op in order_receipt["generated_operations"]}
     coverage = deepcopy(coverage)
     for row in coverage:
         uid = row["source_unit_id"]
+        if uid in source_adapters:
+            if row["status"] == "generated_wired_adapted" or uid in ordered:
+                raise ValueError("A source adapter cannot replace generated behavior.")
+            operation, reason = source_adapters[uid]
+            if operation["source_unit_sha256"] != row["source_unit_sha256"]:
+                raise ValueError("Adapter receipt differs from its source unit.")
+            row.update(status="generated_wired_adapted", reason=reason, operation_id=operation["operation_id"])
         if uid in looked:
             if row["status"] == "generated_wired_adapted":
                 raise ValueError("A lookup cannot replace existing generated behavior.")
@@ -297,6 +352,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     generated.update(ordered)
     generated.update(buffered)
     generated.update(looked)
+    generated.update((uid, operation) for uid, (operation, _) in source_adapters.items())
     remediation = deepcopy(native_plan["remediation"])
     for row in remediation:
         if row.get("code") == "code_unit_not_translated" and row.get("code_unit_id") in generated:
@@ -357,9 +413,14 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "source_binding": packet["source_binding"], "catalog_sha256": catalog["catalog_sha256"],
         "objects": ledger_objects, "code_units": ledger_units,
         "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
-        "policy_review": policy_receipt["generated_operations"],
+        "policy_review": list(policy_encoded.values()),
+        "selected_record_entries": entry_receipt["generated_operations"],
         "buffer_flows": list(buffered.values()),
         "source_lookups": list(looked.values()),
+        "record_group_reports": group_receipt["generated_operations"],
+        "source_block_filters": filter_receipt["generated_operations"],
+        "session_defaults": defaults_receipt["generated_operations"],
+        "guarded_queries": query_receipt["generated_operations"],
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -378,6 +439,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     if behavior_receipt:
         compatibility["behavior_renderer"] = {"scope": behavior_receipt["scope"],
                                                "sources": behavior_receipt["renderer_sources"]}
+    original_reads = any(receipt["generated_operations"] for receipt in (group_receipt, defaults_receipt, filter_receipt)) or bool(looked)
     metadata = {"schema_version": 1, "scope": SCOPE,
         "status": "GENERATED_FORMAT_VALIDATION_PENDING", "origin": "deterministic_local_xml",
         "project_id": project_id, "project_name": project_name, "application_count": 1,
@@ -394,8 +456,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "policy_summary": {"rules_generated_unwired": len(policy_encoded)},
         "buffer_summary": {"record_validation_flows": len(buffered)},
         "lookup_summary": {"generated_lookup_handlers": len(looked), "original_reads_enabled": False},
-        "original_read_adapters": {"embedded": bool(looked), "enabled_by_default": False,
-            "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": bool(looked)},
+        "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
+            "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": original_reads},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
         "discrepancy_report_path": "fox-package/discrepancies.json",
         "discrepancy_report_sha256": _sha(files["fox-package/discrepancies.json"]),
@@ -462,7 +524,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "blueprint_validation": blueprint_validation, "native_plan": native_plan,
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
         "mapping_ledger": ledger, "gap_report": gap_report, "discrepancies": discrepancies, "dependency_evidence": dependency_evidence, "relation_plan": relation_plan,
-        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "buffer_plan": buffer_plan, "buffer_receipt": buffer_receipt, "lookup_plan": lookup_plan, "lookup_receipt": lookup_receipt, "apex_members": metadata["apex_members"],
+        "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "buffer_plan": buffer_plan, "buffer_receipt": buffer_receipt, "lookup_plan": lookup_plan, "lookup_receipt": lookup_receipt, "record_group_receipt": group_receipt, "guarded_query_receipt": query_receipt, "apex_members": metadata["apex_members"],
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 
