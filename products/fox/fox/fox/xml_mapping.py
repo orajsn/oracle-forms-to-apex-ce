@@ -29,6 +29,7 @@ from .forms_session_defaults import apply_session_defaults
 from .forms_record_entry import apply_record_entries
 from .forms_draft_policy import apply_draft_policies
 from .forms_synthetic_save import apply_synthetic_saves
+from .forms_lov_return import apply_lov_returns
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -41,6 +42,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "record_group_with_caller_returns": "fox.query.record-group-caller-returns",
     "synthetic_parent_copy_write": "fox.assignment.synthetic-record-save",
     "selected_record_entry_assignment": "fox.policy.selected-record-entry",
     "source_filtered_block_query": "fox.query.source-block-filter",
@@ -107,6 +109,8 @@ def mapping_catalog():
          "Native selected-record POST-QUERY handlers or explicit Apply lookup POST-CHANGE adapters, linked from source reports.", "Original read interfaces are embedded but disabled by default behind restricted server-only readiness items. Existing field edit restrictions are retained; no customer save. Verify original objects, types, privileges and authorization before activation; runtime remains unverified."),
         ("fox.query.record-group-report", "Complete query record group with matching projected columns, verified row context and bounded SELECT grammar.",
          "Native reference choices report linked from the synthetic source row chooser.", "Original database and session inputs require trusted configuration. Read-only selection view. LOV return to the calling field remains pending."),
+        ("fox.query.record-group-caller-returns", "The query has an explicit source calling item and complete typed return bindings on a supported record.",
+         "Choose a reference row and apply its values to the calling field and its declared companion fields.", "The caller editor uses the selected synthetic row and its session draft. Applying a choice requires a verified source interface and a permitted current row."),
         ("fox.query.guarded-related-query", "Complete item KEY-EXEQRY guard using non-null keys on the selected parent in a proven incoming relation.",
          "Manual Execute query action refreshes the related synthetic report after checking its parent keys.", "Uses the selected persisted row. The related view can also query on initial entry. Automatic coordination and dirty record buffers remain separate."),
         ("fox.session.source-default", "Complete form initialization loads one global from a single-row NVL lookup and preserves it on error.",
@@ -118,11 +122,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 10,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 11,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -138,6 +142,45 @@ def mapping_catalog():
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
     return {**catalog, "catalog_sha256": _sha(_bytes(catalog))}
+
+
+def _final_record_groups(groups, returns):
+    """Keep query and return evidence together and count the query unit once."""
+    by_lov = {}
+    for op in returns["generated_operations"]:
+        key = (op["source_group_unit_id"], op["source_lov_id"])
+        if key in by_lov:
+            raise ValueError("Duplicate LOV caller binding.")
+        by_lov[key] = op
+    unresolved = {(g["source_unit_id"], g["source_lov_id"]): g for g in returns["gaps"]}
+    result = deepcopy(groups["generated_operations"])
+    for group in result:
+        connected = 0
+        for lov in group["associated_lovs"]:
+            key = (group["source_unit_id"], lov["source_lov_id"])
+            op = by_lov.pop(key, None)
+            if op is None:
+                gap = unresolved.pop(key)
+                if gap["declared_return_mappings"] != lov["return_mappings"]:
+                    raise ValueError("Unresolved LOV returns differ from their source.")
+                lov["return_gap"] = gap["reason"]
+                continue
+            if (op["record_group_operation_id"] != group["operation_id"]
+                    or op["source_group_unit_sha256"] != group["source_unit_sha256"]
+                    or len(op["return_mappings"]) != len(lov["return_mappings"])):
+                raise ValueError("LOV caller returns differ from their source query.")
+            connected += len(op["return_mappings"])
+            lov.update(lov_return_implemented=True, caller=op["source_caller_name"],
+                       caller_item_id=op["source_caller_item_id"], return_operation_id=op["operation_id"])
+        if connected:
+            pending = group["unimplemented_lov_return_mapping_count"] - connected
+            group.update(kind="record_group_with_caller_returns", connected_return_count=connected,
+                         unimplemented_lov_return_mapping_count=pending, lov_return_implemented=pending == 0,
+                         warnings=["explicit_source_lov_return_mappings_unimplemented"] if pending else [],
+                         adaptation="The query supports selection and return to a source-linked session draft for the recorded caller.")
+    if by_lov or unresolved:
+        raise ValueError("LOV disposition does not match a generated record group.")
+    return result
 
 
 def _blueprint(packet):
@@ -296,6 +339,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files["fox-package/draft-policy-receipt.json"] = _bytes(draft_policy)
     files, save_receipt = apply_synthetic_saves(documents, packet, chunks, trace, files)
     files["fox-package/synthetic-save-receipt.json"] = _bytes(save_receipt)
+    files, lov_receipt = apply_lov_returns(documents, packet, chunks, trace, files)
+    files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
+    final_groups = _final_record_groups(group_receipt, lov_receipt)
     for save in save_receipt["generated_operations"]:
         uid = save["source_unit_id"]
         review = encoded.pop(uid, None)
@@ -334,7 +380,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         (save_receipt, "parent_copy_wired_to_synthetic_write"),
         (entry_receipt, "selected_record_entry_generated"),
         (query_receipt, "related_query_action_generated"),
-        (group_receipt, "record_group_query_generated_interface_pending"),
+        ({"generated_operations": final_groups}, "record_group_query_generated_interface_pending"),
         (filter_receipt, "source_block_filter_read_adapter"),
         (defaults_receipt, "source_session_default_generated"),
     ):
@@ -466,7 +512,9 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "selected_record_entries": entry_receipt["generated_operations"],
         "buffer_flows": list(buffered.values()),
         "source_lookups": list(looked.values()),
-        "record_group_reports": group_receipt["generated_operations"],
+        "record_group_reports": final_groups,
+        "lov_returns": lov_receipt["generated_operations"],
+        "lov_return_gaps": lov_receipt["gaps"],
         "source_block_filters": filter_receipt["generated_operations"],
         "session_defaults": defaults_receipt["generated_operations"],
         "guarded_queries": query_receipt["generated_operations"],

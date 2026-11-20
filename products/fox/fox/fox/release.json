@@ -1,10 +1,11 @@
 {
-  "version": "0.42.1",
+  "version": "0.43.0",
   "released_on": "2026-11-20",
-  "title": "Return to the selected manifest after a synthetic save",
+  "title": "Return a list choice to the calling form fields",
   "changes": [
-    "Carry the selected parent into the page displayed after a successful Save, including an empty or unchanged record.",
-    "Identify a missing, moved or externally edited synthetic row when the stored baseline check returns no match."
+    "On eligible existing records, select a reference row and return its declared values into the calling field and companion fields in the same session draft.",
+    "Check the caller's current permission and query inputs before applying a choice. Reopening a changed source record starts from fresh stored values.",
+    "The discrepancy view identifies connected fields and explains when a registered list still lacks an editable caller."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

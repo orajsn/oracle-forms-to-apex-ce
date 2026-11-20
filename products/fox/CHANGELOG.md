@@ -138,6 +138,28 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.43.0] - 2026-11-20
+
+### [feature] Return the selected list row to its source fields
+FOX connects an eligible Forms list of values to its calling item in a native
+APEX editor. Apply rechecks the current selected record, source permission,
+readiness and query inputs. It returns the declared columns to the same session
+draft, including display fields, when the selected source row is unambiguous.
+The visible choices preserve supported source ordering. The source-unit notes
+show each connected return and the reason other declared returns remain open.
+
+The original form has one eligible existing-record caller with two returns.
+Another caller is update-disabled and needs a proven new-record context. A third
+list has declared returns and no supported calling item in the supplied module.
+Source database reads default to disabled. A choice updates session draft fields.
+The existing record-group query counts once in source-unit coverage.
+
+All 725 local integration checks passed. SQLcl 26.1.2 validated both the
+original package and a renamed example without warnings. Independent review
+rebuilt both packages byte-for-byte. The three original list outcomes were
+also checked in the local desktop and mobile discrepancy view. Live execution
+of a list against its original database interface remains unverified.
+
 ## [0.42.1] - 2026-11-20
 
 ### [fix] Keep the selected parent after a synthetic save

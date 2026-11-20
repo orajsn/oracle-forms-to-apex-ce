@@ -289,6 +289,41 @@ def _reference_description(kind, name, status):
             "Review the authoritative relationship and target binding without treating an unresolved link as a missing file.")
 
 
+def _lov_return_note(target, available):
+    """Explain checked record-group returns without changing historical reports."""
+    if not isinstance(target, dict) or target.get("kind") not in {
+            "record_group_reference_report", "record_group_with_caller_returns"}:
+        return ""
+    lovs = target.get("associated_lovs", [])
+    notes = []
+    for lov in lovs:
+        mappings = lov["return_mappings"]
+        if not mappings:
+            continue
+        fields = ", ".join(f'{m["source_column_name"]} to {m["return_item"]}' for m in mappings)
+        if lov.get("lov_return_implemented"):
+            notes.append(f'LOV {lov["source_lov_name"]}: caller {lov["caller"]} returns {fields} to the selected draft.')
+        else:
+            reason = lov.get("return_gap", "")
+            if reason == "LOV_RETURN_EXISTING_ROW_UPDATE_DISABLED_NEW_DRAFT_INPUTS_AND_PERMISSIONS_UNPROVEN":
+                detail = "Existing-row updates are disabled; new-draft inputs and permissions are not established."
+            elif reason == "LOV_RETURN_DECLARED_RETURNS_WITHOUT_SOURCE_CALLER":
+                detail = "No source calling item was found."
+            else:
+                detail = "The source caller or return conditions are not yet supported."
+            notes.append(f'LOV {lov["source_lov_name"]}: declared returns {fields} remain unconnected. {detail}')
+    if not notes:
+        return ""
+    result = " " + " ".join(notes)
+    if len(result) <= available:
+        return result
+    # Do not silently truncate field names or suggest the omitted details are complete.
+    fallback = (f' LOV return details for {len(notes)} source LOV(s) exceed the report message limit; '
+                'review the source-linked mapping ledger for the complete fields and gaps.')
+    _require(len(fallback) <= available)
+    return fallback
+
+
 def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dependency_evidence=None):
     """Build the complete report from fresh source facts and checked mapping evidence.
 
@@ -305,6 +340,7 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
             if row["status"] == "generated_wired_adapted":
                 status = "generated"
                 message = "Generated with adaptations. " + rules[row["rule_id"]]["adaptations"]
+                message += _lov_return_note(row.get("target"), 4000 - len(message))
                 action = "Verify target runtime and business behavior against the original source; neither is accepted here."
             else:
                 status = "encoded_unwired" if row.get("encoding_status") == "generated_unwired" else "unimplemented"

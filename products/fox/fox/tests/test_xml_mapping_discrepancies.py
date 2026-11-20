@@ -112,3 +112,35 @@ def test_encoded_newlines_do_not_hide_external_calls_from_the_ui_report():
     assert files['fox-package/sources/encoded.xml']==raw
     evidence=json.loads(files['fox-package/discrepancy-evidence.json'])
     assert evidence['source_binding']==report['source_binding']
+
+
+@pytest.mark.parametrize('variant, expected', [
+    ('connected', ('caller VIA returns ROUTE_DEST to HEADER.VIA, CITY_NAME to HEADER.CITY', 'selected draft')),
+    ('disabled', ('declared returns ROUTE_DEST to HEADER.VIA, CITY_NAME to HEADER.CITY remain unconnected', 'Existing-row updates are disabled', 'new-draft inputs and permissions are not established')),
+    ('no_caller', ('declared returns ROUTE_DEST to HEADER.VIA, CITY_NAME to HEADER.CITY remain unconnected', 'No source calling item was found')),
+])
+def test_record_group_discrepancy_explains_source_lov_return(variant, expected):
+    from test_forms_lov_return import SOURCE as lov_source
+    raw = lov_source
+    if variant == 'disabled':
+        raw = raw.replace(b'LovName="VIA_CHOICES"', b'UpdateAllowed="false" LovName="VIA_CHOICES"')
+    elif variant == 'no_caller':
+        raw = raw.replace(b'LovName="VIA_CHOICES"', b'')
+    candidate, report = xml_mapping.generate_xml_package([('dispatch.xml', raw)], 'lov-note', 'LOV note', POLICY_ID)
+    group, = report['mapping_ledger']['record_group_reports']
+    unit = next(u for u in report['discrepancies']['units'] if u['source_unit_id'] == group['source_unit_id'])
+    assert unit['status'] == 'generated'
+    assert all(part in unit['message'] for part in expected)
+    assert not report['discrepancies']['runtime_verified'] and not report['discrepancies']['business_behavior_accepted']
+    files = _members(candidate)
+    assert xml_mapping_job._discrepancy_fields(report['metadata'], report['mapping_ledger'], report['gap_report'], files) == report['discrepancies']
+
+
+def test_lov_message_limit_reports_omitted_details_explicitly():
+    from fox.forms_discrepancies import _lov_return_note
+    target = {'kind': 'record_group_reference_report', 'associated_lovs': [{
+        'source_lov_name': 'CHOICES', 'return_mappings': [{'source_column_name': 'COLUMN', 'return_item': 'X' * 5000}],
+        'lov_return_implemented': False, 'return_gap': 'LOV_RETURN_DECLARED_RETURNS_WITHOUT_SOURCE_CALLER'}]}
+    note = _lov_return_note(target, 300)
+    assert 'exceed the report message limit' in note and 'complete fields and gaps' in note
+    assert len(note) <= 300
