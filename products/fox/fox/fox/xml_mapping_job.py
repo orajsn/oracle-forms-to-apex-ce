@@ -12,7 +12,7 @@ import time
 from . import source_history, xml_mapping
 from .forms_native_plan import POLICY_ID
 from .forms_understanding_packet import _build
-from .prototype_export_only import _sqlcl_path, _members
+from .prototype_export_only import _sqlcl_path
 from .xml_mapping_retained import verify_retained_package
 from .forms_mapping_gaps import CATEGORIES
 from .forms_discrepancies import validate_discrepancies
@@ -127,22 +127,12 @@ def checked_output(c, root, run):
     docs = [(row['name'], source_history.readable_source_bytes(row)) for row in snapshot['files']]
     stored_candidate = read_file(root, directory / 'candidate.zip')
     package = read_file(root, directory / 'apexlang.zip')
-    if snapshot['catalog_sha256'] == xml_mapping.mapping_catalog()['catalog_sha256']:
-        candidate, report = xml_mapping.generate_xml_package(docs, snapshot['project_id'], snapshot['project_name'], POLICY_ID)
-        if report['source_binding'] != snapshot['source_binding'] or stored_candidate != candidate:
-            raise ValueError('XML mapping candidate differs from the approved original source.')
-        sealed, proof = xml_mapping._seal_validated_xml_package(candidate,
-            {'candidate_sha256': sha(candidate), 'validation': receipt['proof']['validation']}, directory / 'validation')
-        if proof != receipt['proof'] or package != sealed:
-            raise ValueError('XML mapping package proof changed.')
-        metadata, ledger, gaps = report['metadata'], report['mapping_ledger'], report.get('gap_report')
-        files = _members(package)
-    else:
-        # Original consent/result event anchors were verified above. Preserve
-        # old completed output under its own catalog, not current-engine claims.
-        metadata, ledger, files = verify_retained_package(stored_candidate, package,
-            receipt['proof'], snapshot, docs, directory / 'validation')
-        gaps = json.loads(files['fox-package/mapping-gaps.json']) if 'fox-package/mapping-gaps.json' in files else None
+    # Completion anchored the exact source and compiler proof in the result event.
+    # Serve those verified bytes for every catalog, including the current one.
+    metadata, ledger, files = verify_retained_package(
+        stored_candidate, package, receipt['proof'], snapshot, docs, directory / 'validation')
+    gap_member = 'fox-package/mapping-gaps.json'
+    gaps = json.loads(files[gap_member]) if gap_member in files else None
     if receipt['source_binding'] != snapshot['source_binding']:
         raise ValueError('XML mapping source binding changed.')
     counts = metadata['behavior_coverage']

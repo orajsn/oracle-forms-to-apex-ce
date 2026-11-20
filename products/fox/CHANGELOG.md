@@ -133,6 +133,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.38.1] - 2026-11-20
+
+### [performance] Open saved conversions without regenerating packages
+Impact: Reviewing completed runs takes less time, especially in projects with several saved conversions.
+Change: History, detail and download requests now use the same authenticated evidence reader for completed runs across mapping catalog versions. Each read checks the original source, event records, compiler log and both ZIPs.
+Delivery: Source patch for the 0.38 series.
+Verification: Four local reads of the same 53-unit package per version took a median of 2.57 seconds before the patch and 0.085 seconds after it. Package builds per read dropped from two to zero. Result details and download bytes matched.
+Remaining: History still verifies each listed run and reads its saved artifacts. Timings measure the local verification path.
+
 ## [0.38.0] - 2026-11-20
 
 ### [feature] Generate connected source lookup event handlers

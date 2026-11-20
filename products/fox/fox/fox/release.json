@@ -1,11 +1,9 @@
 {
-  "version": "0.38.0",
+  "version": "0.38.1",
   "released_on": "2026-11-20",
-  "title": "Generate connected source lookup handlers",
+  "title": "Open verified conversion results faster",
   "changes": [
-    "Generate complete source SELECT-INTO lookup handlers with exact zero-row and other-error reset behavior.",
-    "Connect selected-record POST-QUERY processing and explicit Apply lookup actions through native pages and preserved report navigation.",
-    "Preserve source field edit restrictions, whitespace and typed values; original database reads remain disabled until a trusted operator verifies their target interfaces."
+    "Opening run history or downloading a completed conversion now verifies the saved source, package and compiler evidence directly."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -1,4 +1,4 @@
-"""Read an older completed XML package after its mapping library has advanced.
+"""Verify a completed XML mapping package against its saved generation evidence.
 
 Caller MUST first authenticate the project owner and verify the original snapshot
 and result JSON against their durable DB-event hashes. This reader authenticates
