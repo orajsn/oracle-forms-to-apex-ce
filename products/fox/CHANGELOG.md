@@ -138,6 +138,20 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.42.1] - 2026-11-20
+
+### [fix] Keep the selected parent after a synthetic save
+The installed 0.42.0 app returned to the editor without its request-scoped
+parent ID after the first empty Save. APEX logged the missing-parent error
+and the database contained zero new detail rows. Save now uses the same
+protected return link as the other draft actions. Failed submissions retain
+their separate inline error path. The stale-row handler now recognizes the
+PL/SQL SQLCODE of +100 for NO_DATA_FOUND.
+
+All 685 local integration checks passed. SQLcl 26.1.2 validated the original
+and renamed packages without warnings. The corrected JSN test reuses the
+existing synthetic manifest from the 0.42.0 test.
+
 ## [0.42.0] - 2026-11-20
 
 ### [feature] Save the current related record to synthetic test tables

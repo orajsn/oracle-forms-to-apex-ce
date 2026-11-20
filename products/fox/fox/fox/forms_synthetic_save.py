@@ -242,7 +242,7 @@ exception when others then
   rollback to fox_synthetic_save;
   if l_error_code between -20029 and -20021 then
     l_error_message:=substr(l_error_message,instr(l_error_message,':')+2);
-  elsif l_error_code=-1403 then
+  elsif l_error_code=100 then
     l_error_message:='The loaded synthetic row is missing, reparented or changed. Reopen before saving.';
   elsif l_error_code=-54 then
     l_error_message:='Synthetic records are busy in another request. Draft input is retained.';
@@ -275,6 +275,15 @@ def _render(buffer, page, copies, guard, contract):
             f"            value: {','.join(native_buffer.REQUESTS)}\n        }}\n") + '    )'
     text, matches = re.subn(pattern, draft_only, text, flags=re.S)
     _need(matches == 3, 'DRAFT_VALIDATIONS')
+    # Successful APEX submissions redirect. Carry the protected parent into
+    # the new request via the same branch used by Keep and Next. The page's
+    # parent item is request-scoped and disappears on a default redirect.
+    branch = re.search(r'    branch show-current-record \(.*?\n    \)', text, re.S)
+    _need(branch is not None and f'P{page}_PARENT_ID: "&P{page}_PARENT_ID."' in branch[0],
+          'PROTECTED_PARENT_RETURN_BRANCH_REQUIRED')
+    original_requests = 'value: ' + ','.join(native_buffer.REQUESTS)
+    expanded = _replace(branch[0], original_requests, original_requests + ',' + REQUEST)
+    text = text[:branch.start()] + expanded + text[branch.end():]
     # Stay on the same editor on success/error. Reconcile REV ourselves; don't
     # reload collections over the submitted dirty fields after a Save failure.
     init = re.search(r'(    process load-draft \(.*?```plsql\n)(.*?)(\n\s*```)', text, re.S)

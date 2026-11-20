@@ -71,6 +71,13 @@ def test_source_events_are_wired_once_to_actual_draft_with_reviews_preserved(ren
     assert {n for n in files if files[n] != args[-1][n]} == {page}
     assert files['fox-package/sources/' + docs[0][0]] == docs[0][1]
     assert 'label: "Save synthetic record"' in files[page].decode()
+    text = files[page].decode()
+    branch = re.search(r'    branch show-current-record \(.*?\n    \)', text, re.S)[0]
+    page_id = rows[0]['page_id']
+    assert f'P{page_id}_PARENT_ID: "&P{page_id}_PARENT_ID."' in branch
+    assert 'value: ' + ','.join((*native_buffer.REQUESTS, REQUEST)) in branch
+    keep = re.search(r'    process keep-draft-and-move \(.*?\n    \)', text, re.S)[0]
+    assert REQUEST not in keep
 
 
 def generated(docs=None):
@@ -95,7 +102,7 @@ def test_guards_rechecks_and_reconciliation_share_a_single_transaction():
     assert not re.search(r'\bcommit\s*;', code, re.I)
     assert 'p_commit=>false' in code
     assert 'p_message=>l_error_message' in code and 'apex_debug.error' in code
-    assert 'l_error_code=-54' in code and 'l_error_code=-1403' in code
+    assert 'l_error_code=-54' in code and 'l_error_code=100' in code
     text = files[receipt['generated_operations'][0]['page_file']].decode()
     assert text.count('p_c041=>') == 1  # loaded baseline only; blank drafts stay new
     assert 'p_c021=>r.' in text and 'p_c040=>r.' in text

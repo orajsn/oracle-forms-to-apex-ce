@@ -1,11 +1,10 @@
 {
-  "version": "0.42.0",
+  "version": "0.42.1",
   "released_on": "2026-11-20",
-  "title": "Save a related synthetic record with its current parent value",
+  "title": "Return to the selected manifest after a synthetic save",
   "changes": [
-    "Save the current draft to the generated synthetic table when FOX can bind its insert and update events to the selected parent.",
-    "Copy the parent's current value immediately before inserting a new row or updating a changed row. Check approval, duplicates and concurrent changes before writing.",
-    "See which before-write events are connected to each synthetic save in the saved run and its source-unit notes."
+    "Carry the selected parent into the page displayed after a successful Save, including an empty or unchanged record.",
+    "Identify a missing, moved or externally edited synthetic row when the stored baseline check returns no match."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
