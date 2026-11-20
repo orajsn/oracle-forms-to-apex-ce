@@ -29,6 +29,14 @@ test('mapping and whole workbench protect uncertain requests and source-bound re
  // Connected draft checks are generated artifacts, never installed-runtime proof.
  await page.evaluate(()=>{window.f.runs=[{...window.run('123e4567-e89b-42d3-a456-426614174000'),buffer_summary:{record_validation_flows:1}}];});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByText(/Connected draft-record checks: 1/).waitFor();await page.getByText(/Installed APEX runtime verification is still pending/).waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),1);await page.screenshot({path:path.join(output,'draft-mobile.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
  await page.evaluate(()=>{window.f.runs[0].buffer_summary.record_validation_flows=3;});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByRole('alert').waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),0);
+ // Only an actual saved write-event summary advertises synthetic persistence.
+ await page.evaluate(()=>{window.f.runs=[{...window.run('123e4567-e89b-42d3-a456-426614174000'),synthetic_save_summary:{screens:1,before_write_events:2}}];});
+ await page.getByRole('button',{name:'Refresh mapping status'}).click();
+ await page.getByText(/Save is available on 1 synthetic draft screen/).waitFor();
+ await page.evaluate(()=>{window.f.runs[0].synthetic_save_summary.screens=3;});
+ await page.getByRole('button',{name:'Refresh mapping status'}).click();
+ await page.getByRole('alert').waitFor();
+ assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),0);
  // Generated source lookups retain a disabled datasource prerequisite.
  await page.evaluate(()=>{window.f.runs=[{...window.run('123e4567-e89b-42d3-a456-426614174000'),lookup_summary:{generated_lookup_handlers:1,original_reads_enabled:false}}];});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByText(/Source lookup handlers generated: 1/).waitFor();await page.getByText(/Original database reads are disabled until/).waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),1);
  await page.evaluate(()=>{window.f.runs[0].lookup_summary.original_reads_enabled=true;});await page.getByRole('button',{name:'Refresh mapping status'}).click();await page.getByRole('alert').waitFor();assert.equal(await page.getByRole('link',{name:'Download native APEXlang package'}).count(),0);

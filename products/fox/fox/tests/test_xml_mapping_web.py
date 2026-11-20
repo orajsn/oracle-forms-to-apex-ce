@@ -448,6 +448,35 @@ def test_connected_record_check_appears_in_native_package_and_api(client):
     assert not result['runtime_verified']
 
 
+def test_current_row_save_events_are_available_in_the_saved_download(client):
+    from pathlib import Path
+    c, root, pid = client
+    fixture = Path(__file__).resolve().parents[2] / 'examples/xml-mapping/synthetic_record_save.xml'
+    upload(c, pid, [(fixture.name, fixture.read_bytes())])
+    url = f'/api/projects/{pid}/xml-mapping'
+    scope = c.get(url).json()
+    body = {key: scope[key] for key in ('source_hash', 'selected_source_set_id', 'source_binding', 'catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()), approved_synthetic_scope=True, approved_local_source_processing=True)
+    response = c.post(url + '/runs', json=body)
+    assert response.status_code == 202
+    assert response.json()['synthetic_save_summary'] is None
+    process_one(connection(root), root)
+    run = c.get(url + '/runs/' + response.json()['id']).json()
+    assert run['state'] == 'GENERATED' and run['format_validated'] is True
+    assert run['synthetic_save_summary'] == {'screens': 1, 'before_write_events': 2}
+    assert run['context_summary']['assignments_generated_unwired'] == 0
+    assert (run['generated_units'], run['unsupported_units'], run['total_units']) == (5, 2, 7)
+    assert not run['runtime_verified'] and not run['business_behavior_accepted']
+    download = c.get(run['download_url'])
+    assert download.status_code == 200
+    files = _members(download.content)
+    events = json.loads(files['fox-package/synthetic-save-receipt.json'])['generated_operations']
+    assert {op['source_event'] for op in events} == {'PRE-INSERT', 'PRE-UPDATE'}
+    assert len({op['page_file'] for op in events}) == 1
+    assert b'FOX_SYNTHETIC_SAVE' in files[events[0]['page_file']]
+    assert files['fox-package/sources/' + fixture.name] == fixture.read_bytes()
+
+
 def test_partial_source_discrepancies_visible_after_generation(client):
     from pathlib import Path
     c,root,pid=client

@@ -138,6 +138,28 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.42.0] - 2026-11-20
+
+### [feature] Save the current related record to synthetic test tables
+The draft editor can save a new or edited row when both before-write assignments
+are bound to the selected parent. It reads the parent's current value at the
+write, checks approval, and protects loaded rows against stale edits. A changed
+row updates only the declared fields. An unchanged row keeps its existing route.
+The generated process uses non-waiting table locks on the two synthetic tables
+to serialize related writes. The source-unit ledger identifies each wired
+assignment and the saved-run view reports the corresponding screen.
+
+This action covers a single synthetic row. Customer saves, other field
+validations, approval side effects and the original Forms commit sequence remain
+open. The existing JSN runtime approval concerns the previous 0.41.0 package.
+
+All 685 integrated checks passed locally. SQLcl 26.1.2 validated the original
+and renamed packages without warnings. Independent verification reconstructed
+both sealed packages and exercised the emitted write statements on a local SQL
+model. The original now has 19 generated or adapted units, six encoded units
+awaiting connection and 28 unimplemented units. Installed APEX execution of
+synthetic saves and the original business transaction remain unverified.
+
 ## [0.41.0] - 2026-11-20
 
 ### [feature] Apply selected parent permissions to related drafts

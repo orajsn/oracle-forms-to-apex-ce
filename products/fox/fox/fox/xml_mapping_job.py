@@ -20,10 +20,9 @@ from .forms_discrepancies import validate_discrepancies
 PROFILE = 'xml-mapping-v1'
 APPROVAL = 'xml_mapping_local_consent:'
 RESULT = 'xml_mapping_result:'
-SCOPE_NOTICE = ('Installed deterministic mappings process the complete original XML locally, including unredacted '
-    'source. No AI transmission or database import. One synthetic APEX application; database blocks are '
-    'read-only tables and supported session-draft screens. Unconverted code and unverified dependencies remain explicit. Format validation, runtime '
-    'verification and business acceptance are separate.')
+SCOPE_NOTICE = ('FOX processes the original XML on this server and generates one synthetic APEX application. '
+    'The package can include reports, session drafts and current-row saves to its generated test tables. '
+    'Source-unit notes identify the behavior each screen supports. Generation uses no AI calls or database imports.')
 
 
 def encoded(value):
@@ -141,6 +140,7 @@ def checked_output(c, root, run):
     details['context_summary'] = _context_fields(metadata, ledger)
     details['policy_summary'] = _policy_fields(metadata, ledger)
     details['buffer_summary'] = _buffer_fields(metadata, ledger)
+    details['synthetic_save_summary'] = _synthetic_save_fields(metadata, ledger)
     details['lookup_summary'] = _lookup_fields(metadata, ledger)
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     return package, {'saved_source_binding': snapshot['source_binding'],
@@ -217,6 +217,37 @@ def _buffer_fields(metadata, ledger):
                 or row.get('generation_status') != 'generated_wired_adapted'
                 or any(row.get(k) is not False for k in ('event_activated','customer_table_writes','oracle_compiled','runtime_verified','business_accepted'))):
             raise ValueError('Saved draft event evidence is invalid.')
+    return summary
+
+
+def _synthetic_save_fields(metadata, ledger):
+    summary = metadata.get('synthetic_save_summary')
+    if summary is None:
+        return None
+    events = ledger['synthetic_write_events']
+    units = {row['source_unit_id']: row for row in ledger['code_units']}
+    written_units = {uid for uid, row in units.items() if row['rule_id'] == 'fox.assignment.synthetic-record-save'}
+    if (type(events) is not list or {op['source_unit_id'] for op in events} != written_units
+            or len(events) != len(written_units)):
+        raise ValueError('Invalid synthetic write event list.')
+    buffers = {op['operation_id']: op for op in ledger['buffer_flows']}
+    phases = {}
+    for event in events:
+        unit = units.get(event['source_unit_id'])
+        buffer = buffers.get(event['buffer_operation_id'])
+        if (unit is None or unit['target'] != event or unit['rule_id'] != 'fox.assignment.synthetic-record-save'
+                or buffer is None or event['page_id'] != buffer['page_id'] or event['page_file'] != buffer['page_file']
+                or event.get('native_event_wired') is not True or event['operation_id'] != unit['operation_id']
+                or unit['status'] != 'generated_wired_adapted' or event['source_event'] not in {'PRE-INSERT','PRE-UPDATE'}
+                or event['source_unit_sha256'] != unit['source_unit_sha256'] or event.get('synthetic_table_writes') is not True
+                or any(event.get(k) is not False for k in ('customer_table_writes', 'oracle_compiled', 'runtime_verified', 'business_accepted'))):
+            raise ValueError('Synthetic write event does not match the source ledger.')
+        phases.setdefault(event['page_file'], []).append(event['source_event'])
+    if any(sorted(values) != ['PRE-INSERT','PRE-UPDATE'] for values in phases.values()):
+        raise ValueError('Synthetic save screen is missing its paired write events.')
+    expected = {'screens': len(phases), 'before_write_events': len(events)}
+    if type(summary) is not dict or any(type(v) is not int for v in summary.values()) or summary != expected:
+        raise ValueError('Synthetic save summary differs from the generated events.')
     return summary
 
 
@@ -331,7 +362,8 @@ def public_run(c, root, run, current_hash=None, current_sid=None):
         selected_source_set_id=None, current_source=False, format_validated=False,
         generated_units=None, unsupported_units=None, total_units=None,
         download_url=None, package_sha256=None, runtime_verified=False, business_behavior_accepted=False,
-        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None, buffer_summary=None, lookup_summary=None, discrepancies=None)
+        gaps_available=False, gap_summary=None, gaps=[], context_summary=None, policy_summary=None,
+        buffer_summary=None, synthetic_save_summary=None, lookup_summary=None, discrepancies=None)
     try:
         snapshot, _ = load_snapshot(c, root, run)
         result.update(selected_source_set_id=snapshot['selected_source_set_id'], request_id=snapshot['request']['request_id'])

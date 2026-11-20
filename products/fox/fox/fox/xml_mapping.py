@@ -28,6 +28,7 @@ from .forms_manifest_filter import apply_manifest_filters
 from .forms_session_defaults import apply_session_defaults
 from .forms_record_entry import apply_record_entries
 from .forms_draft_policy import apply_draft_policies
+from .forms_synthetic_save import apply_synthetic_saves
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build
@@ -40,6 +41,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "synthetic_parent_copy_write": "fox.assignment.synthetic-record-save",
     "selected_record_entry_assignment": "fox.policy.selected-record-entry",
     "source_filtered_block_query": "fox.query.source-block-filter",
     "source_session_default": "fox.session.source-default",
@@ -91,6 +93,8 @@ def mapping_catalog():
          "Protected parent-row navigation and filtered read-only detail pages.", "Persisted synthetic rows and manual session selection only; no automatic query, cascading delete or write lifecycle."),
         ("fox.assignment.parent-copy-review", "Complete block-owned PRE-INSERT/PRE-UPDATE value copy under a proven direct source relation.",
          "Namespaced pure IN/OUT PL/SQL review procedures and exact source/event bindings.", "Generated but not Oracle-compiled, installed or event-wired; remains in not-yet-converted coverage."),
+        ("fox.assignment.synthetic-record-save", "Complete before-write parent-value copy on a supported related draft with a checked parent and mapped child fields.",
+         "Save the current synthetic row and copy the selected parent's value immediately before its insert or update.", "Only the mapped synthetic fields participate in this save. Other Forms validations, the full commit sequence and customer database writes require separate implementation."),
         ("fox.query.initial-report-order", "Complete ORDER BY of 1..6 direct mapped database columns, direction and NULL placement.",
          "Initial native saved-report sort, also retained by related report pages.", "Persisted synthetic rows; users may change report sorting. Equal-key order is unspecified; compatible database collation is required."),
         ("fox.policy.finite-review", "Complete finite IF/scalar/property/warning/failure rules, with proven same-module local calls.",
@@ -114,11 +118,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 9,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 10,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -290,6 +294,16 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     files["fox-package/record-entry-receipt.json"] = _bytes(entry_receipt)
     files, draft_policy = apply_draft_policies(documents, packet, chunks, trace, files)
     files["fox-package/draft-policy-receipt.json"] = _bytes(draft_policy)
+    files, save_receipt = apply_synthetic_saves(documents, packet, chunks, trace, files)
+    files["fox-package/synthetic-save-receipt.json"] = _bytes(save_receipt)
+    for save in save_receipt["generated_operations"]:
+        uid = save["source_unit_id"]
+        review = encoded.pop(uid, None)
+        if (review is None or review["source_unit_sha256"] != save["source_unit_sha256"]
+                or review["operation_id"] != save["assignment_operation_id"]
+                or save["source_event"] != review["source_event"]
+                or save["synthetic_table_writes"] is not True or save["customer_table_writes"] is not False):
+            raise ValueError("Synthetic write event differs from the original before-write assignment.")
     # A permanently read-only fallback has no reachable draft validator.
     # The earlier buffer-renderer receipt records what that stage produced.
     buffer_ids = {op["operation_id"]: uid for uid, op in buffered.items()}
@@ -317,6 +331,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
             raise ValueError("Record entry requires the exact encoded source policy.")
     source_adapters = {}
     for receipt, reason in (
+        (save_receipt, "parent_copy_wired_to_synthetic_write"),
         (entry_receipt, "selected_record_entry_generated"),
         (query_receipt, "related_query_action_generated"),
         (group_receipt, "record_group_query_generated_interface_pending"),
@@ -443,7 +458,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     ledger = {"schema_version": 1, "scope": "fox-xml-source-to-target-v1",
         "source_binding": packet["source_binding"], "catalog_sha256": catalog["catalog_sha256"],
         "objects": ledger_objects, "code_units": ledger_units,
-        "relations": relation_coverage, "assignment_review": assignment_receipt["generated_operations"],
+        "relations": relation_coverage, "assignment_review": list(encoded.values()),
+        "synthetic_write_events": save_receipt["generated_operations"],
         "policy_review": list(policy_encoded.values()),
         "draft_policy_guards": draft_policy["adapted_operations"],
         "draft_policy_gaps": draft_policy["gaps"],
@@ -487,6 +503,8 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "behavior_coverage": {"total": len(coverage), "counts": counts},
         "context_summary": context_summary,
         "policy_summary": {"rules_generated_unwired": len(policy_encoded)},
+        "synthetic_save_summary": {"screens": len({op["page_file"] for op in save_receipt["generated_operations"]}),
+                                   "before_write_events": len(save_receipt["generated_operations"])},
         "buffer_summary": {"record_validation_flows": len(buffered)},
         "lookup_summary": {"generated_lookup_handlers": len(looked), "original_reads_enabled": False},
         "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
@@ -538,7 +556,7 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
         "Any linked Continue page validates an existing synthetic row without saving it. "
         "Source-supported related-record links are manual, read-only adaptations; retained session selection is explicit. "
         "assignment-review.sql contains generated value-copy procedures only: not installed, Oracle-compiled or event-wired. "
-        "Their original insert/update events remain unconverted; no write, cascade or validation guard is bypassed. "
+        "synthetic-save-receipt.json and the mapping ledger identify before-write events connected to a synthetic save. Other assignment procedures remain available for review. "
         "policy-review.sql preserves complete supported scalar, permission, warning and failure rules as ordered effects; it is not installed, Oracle-compiled or event-wired. "
         "Initial source report ordering is generated when every sort column is directly mapped; users may change the saved-report sort. "
         "Draft edits use a source-bound parent context and current-record validation before navigation; no customer-table save, source transaction or full Forms lifecycle is implied. "

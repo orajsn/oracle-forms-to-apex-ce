@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<FormModule Name="DISPATCH_DRAFT">
+  <Block Name="LOADS" DatabaseBlock="true">
+    <Item Name="LOAD_REFERENCE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16" />
+    <Relation Name="LOAD_PIECES" RelationType="Join" DetailBlock="PIECES" JoinCondition="PIECES.LOAD_REFERENCE = LOADS.LOAD_REFERENCE" AutoQuery="false" Deferred="false" DeleteRecord="Cascading" PreventMasterlessOperations="false" />
+    <Item Name="CLOSED_FLAG" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="1" />
+    <Item Name="DISPATCH_ROUTE" ItemType="Text Item" DataType="Char" DataLengthSemantics="BYTE" MaximumLength="20" DatabaseItem="true" />
+  </Block>
+  <Block Name="PIECES" DatabaseBlock="true">
+    <Item CopyValueFromItem="LOADS.LOAD_REFERENCE" Required="true" Name="LOAD_REFERENCE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16" />
+    <Item Name="PIECE_CODE" ItemType="Text Item" DatabaseItem="true" DataType="Char" MaximumLength="16" />
+    <Item Name="SAME_KEY" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Formula" Formula="COMPARE_KEY(:CHECKS.CURRENT_KEY, :PIECES.LOAD_REFERENCE || :PIECES.PIECE_CODE)" />
+    <Trigger Name="WHEN-VALIDATE-RECORD" TriggerText="BEGIN :CHECKS.CURRENT_KEY := :PIECES.LOAD_REFERENCE || :PIECES.PIECE_CODE; IF :CHECKS.DUPLICATE_COUNT &gt; 1 THEN MESSAGE('This record already exists'); MESSAGE('This record already exists'); RAISE FORM_TRIGGER_FAILURE; END IF; END;" />
+    <Item Name="CONFIRMED_ROUTE" ItemType="Text Item" DataType="Char" DataLengthSemantics="BYTE" MaximumLength="20" DatabaseItem="true" />
+    <Trigger Name="PRE-INSERT" TriggerText=":PIECES.CONFIRMED_ROUTE := :LOADS.DISPATCH_ROUTE;" />
+    <Trigger Name="PRE-UPDATE" TriggerText=":PIECES.CONFIRMED_ROUTE := :LOADS.DISPATCH_ROUTE;" />
+  </Block>
+  <Block Name="CHECKS" DatabaseBlock="false">
+    <Item Name="CURRENT_KEY" ItemType="Text Item" DatabaseItem="false" DataType="Char" MaximumLength="50" DataLengthSemantics="BYTE" />
+    <Item Name="DUPLICATE_COUNT" ItemType="Display Item" DatabaseItem="false" DataType="Number" CalculateMode="Summary" SummaryFunction="Sum" SummaryBlockName="PIECES" SummaryItemName="SAME_KEY" />
+  </Block>
+  <ProgramUnit Name="COMPARE_KEY" ProgramUnitType="Function" ProgramUnitText="FUNCTION COMPARE_KEY(val1 VARCHAR2, val2 VARCHAR2) RETURN NUMBER IS answer NUMBER := 0; BEGIN IF val1 = val2 THEN answer := 1; END IF; RETURN(answer); END;" />
+  <ProgramUnit Name="APPLY_PIECE_RULES" ProgramUnitType="Procedure" ProgramUnitText="PROCEDURE APPLY_PIECE_RULES IS&#10;BEGIN&#10;SET_BLOCK_PROPERTY('PIECES',INSERT_ALLOWED,PROPERTY_TRUE);&#10;SET_BLOCK_PROPERTY('PIECES',UPDATE_ALLOWED,PROPERTY_TRUE);&#10;IF :LOADS.CLOSED_FLAG IS NOT NULL AND :LOADS.CLOSED_FLAG = 'Y' THEN&#10;SET_BLOCK_PROPERTY('PIECES',INSERT_ALLOWED,PROPERTY_FALSE);&#10;SET_BLOCK_PROPERTY('PIECES',UPDATE_ALLOWED,PROPERTY_FALSE);&#10;END IF;&#10;END;" />
+  <Trigger Name="WHEN-NEW-RECORD-INSTANCE" TriggerText="APPLY_PIECE_RULES;" />
+</FormModule>
