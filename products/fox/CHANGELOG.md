@@ -10,6 +10,21 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-21
 
+### [testing] Verify settled bag focus and the complete entry reset
+
+An installed APEX 26.1.6 app retained focus on the intended next field after
+initialization. Keeping a new session draft with a bag code and an empty
+destination reached the reset branch. The app cleared the code, focused the
+header destination and cleared the marker after a single acknowledgement.
+The final rendered page retained destination focus. The consignment end-of-list
+and explicit draft assignment checks also passed. The assignment fixture had
+a null summary. All three synthetic business tables matched their starting rows.
+
+The same engine generated SQLcl-validated packages for two distinct Forms XML
+inputs. Their active-route queries ran locally on synthetic data and preserved
+each form's original filtering and join conditions. The second input has local
+generation and query evidence. Its lookup return fields still require wiring.
+
 ### [testing] Verify field commands on an installed 0.50.0 APEX app
 
 In an isolated APEX 26.1.6 app, both source-directed focus moves worked by
