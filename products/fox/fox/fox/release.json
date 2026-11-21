@@ -1,10 +1,10 @@
 {
-  "version": "0.45.1",
-  "released_on": "2026-11-20",
-  "title": "Reuse validated source parsing within one conversion",
+  "version": "0.46.0",
+  "released_on": "2026-11-21",
+  "title": "Check a selected manifest before approval",
   "changes": [
-    "Reuse byte-identical XML and source facts across adapters in the same package build.",
-    "Each adapter receives separate mutable values. A later generation or verification starts from the original source bytes again."
+    "Show the blocking field or bag on the selected manifest, checking actual bag weight before destination.",
+    "Distinguish saved-row diagnostics from the original commits and approval write. The transaction plan records each independent commit and the later external calls."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -150,6 +150,23 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.46.0] - 2026-11-21
+
+### [feature] Show source-backed approval readiness on the selected manifest
+FOX binds the approval button to its current source permission, selected
+header and matching bag and consignment records. A missing or zero actual
+weight is checked before a missing destination. The page identifies the
+blocking field and a matching bag when one is available. Later checks report
+the state of saved rows and identify their position after source commit stages.
+
+The complete caller workflow records three independent commits, local helper
+calls and two external calls in source order. The native readiness action
+leaves data unchanged. The original whole-form state, commits and external
+interfaces need verified providers before business approval can run.
+
+This release also includes the 0.44.1 correction for multi-field master
+keys in APEX links. The chooser and receiving page use the same ordered digest.
+
 ## [0.45.1] - 2026-11-20
 
 ### [performance] Reuse validated XML within one deterministic generation

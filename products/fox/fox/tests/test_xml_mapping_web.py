@@ -544,6 +544,31 @@ def test_interface_csv_download_uses_exact_saved_register(client):
     assert c.get(url).status_code == 401
 
 
+def test_approval_readiness_is_partial_and_links_both_external_call_sites(client):
+    from test_forms_approval_plan import source as approval_source
+    c,root,pid=client
+    upload(c,pid,approval_source(renamed=True))
+    url=f'/api/projects/{pid}/xml-mapping'
+    scope=c.get(url).json()
+    body={k:scope[k] for k in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()),approved_synthetic_scope=True,approved_local_source_processing=True)
+    queued=c.post(url+'/runs',json=body)
+    assert queued.status_code==202
+    process_one(connection(root),root)
+    result=c.get(url+'/runs/'+queued.json()['id']).json()
+    assert result['state']=='GENERATED'
+    files=_members(c.get(result['download_url']).content)
+    ledger=json.loads(files['fox-package/mapping-ledger.json'])
+    action,=ledger['approval_readiness']
+    links=ledger['approval_interface_links']
+    assert action['approval_flag_written'] is False and action['page_file'] in files
+    assert [(link['stage_id'],link['supplied_argument_count']) for link in links]==[('external_1',2),('external_2',5)]
+    assert all(link['interface_record_id'] and not link['external_outcome_verified'] for link in links)
+    unit=next(u for u in result['discrepancies']['units'] if u['source_unit_id']==action['source_unit_id'])
+    assert unit['status']=='encoded_unwired'
+    assert 'additional commit stages' in unit['message']
+
+
 def test_retained_interface_csv_requires_its_declared_digest():
     metadata = {'source_binding':'source', 'interface_register':{
         'scope':'fox-source-interface-register-v1','source_binding':'source','record_count':1,

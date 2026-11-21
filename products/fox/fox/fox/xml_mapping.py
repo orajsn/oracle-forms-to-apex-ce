@@ -34,6 +34,7 @@ from .forms_interface_inventory import build_interface_inventory, interface_inve
 from .forms_lov_return import apply_lov_returns
 from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
+from .forms_approval_action import apply_approval_actions
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build, generation_sources
@@ -134,14 +135,18 @@ def mapping_catalog():
          "Check related drafts when the selected master changes.", "The native clear gate covers its recorded session buffers. Other blocks and the original form-wide commit remain open."),
         ("fox.relation.partial-unit", "An incomplete source unit has exact native effect bindings in its coordination receipt.",
          "Source-linked records identify the generated pages and the effect of this unit on each page.", "Whole-unit coverage remains unfinished until the remaining event and state behavior is connected."),
+        ("fox.approval.staged-review", "The complete button procedure is parsed, including separate commits, failure branches and external call sites.",
+         "Retain ordered workflow stages and identify each stage's required provider.", "Actual form state, commit outcomes and external calls require separate bindings."),
+        ("fox.approval.saved-readiness", "A source-bound approval button and its current permission are linked to a selected synthetic master and two proved related blocks.",
+         "Check the saved master and its related rows for the conditions in the source.", "Later checks describe currently saved rows. The action leaves approval, source commit segments and external calls pending."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 13,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 14,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -217,6 +222,42 @@ def _coordination_effects(population, clearing, chunks, files):
                             (op["caller_source_unit_id"], op["caller_source_unit_sha256"])):
             record(uid, digest, "master_clear_partly_connected", op, "fox.relation.selected-master-clear", op["population_operation_id"])
     return result
+
+
+def _approval_bindings(plan, receipt, chunks, files):
+    hashes = {c["code_unit_id"]: c["sha256"] for c in chunks}
+    parsed = {}
+    for op in plan["operations"]:
+        uid = op["source_unit_id"]
+        if uid in parsed or hashes.get(uid) != op["source_unit_sha256"]:
+            raise ValueError("Approval plan differs from its source action.")
+        parsed[uid] = op
+    connected = {}
+    for op in receipt["adapted_operations"]:
+        uid = op["source_unit_id"]
+        if (uid not in parsed or uid in connected or op["source_unit_sha256"] != hashes[uid]
+                or op["page_file"] not in files or op["entry_file"] not in files
+                or op["source_transaction_stages"] != parsed[uid]["stages"]
+                or op["whole_source_unit_converted"] is not False or op["approval_flag_written"] is not False):
+            raise ValueError("Approval-readiness evidence differs from its bound source stages.")
+        connected[uid] = op
+    return parsed, connected
+
+
+def _approval_interface_links(plans, inventory):
+    sites = {(r["source"]["source_unit_id"], r["position"]["character_offset"], (r["name"] or "").upper()): r
+             for r in inventory["records"] if r["role"] == "routine_invocation" and r["position"]}
+    links = []
+    for uid, op in plans.items():
+        for call in op["parsed"]["external_calls"]:
+            site = sites.get((uid, call["position"]["character_offset"], call["callee"].upper()))
+            matched = site is not None and site["position"] == call["position"] and site["argument_count"] == len(call["arguments"])
+            links.append({"source_unit_id": uid, "call_site_id": call["call_site_id"], "stage_id": call["stage_id"],
+                          "callee": call["callee"], "supplied_argument_count": len(call["arguments"]),
+                          "interface_record_id": site["id"] if matched else None,
+                          "binding": "same_source_span" if matched else "see_source_call_site",
+                          "external_outcome_verified": False})
+    return links
 
 
 def _final_record_groups(groups, returns):
@@ -437,6 +478,10 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files, clearing = apply_detail_clear(documents, packet, chunks, trace, files)
     files["fox-package/detail-clear-receipt.json"] = _bytes(clearing)
     coordination = _coordination_effects(population, clearing, chunks, files)
+    files, approval = apply_approval_actions(documents, packet, chunks, trace, files)
+    files["fox-package/approval-action-receipt.json"] = _bytes(approval)
+    approval_plan = json.loads(files["fox-package/approval-plan.json"])
+    approval_units, approval_pages = _approval_bindings(approval_plan, approval, chunks, files)
     for save in save_receipt["generated_operations"]:
         uid = save["source_unit_id"]
         review = encoded.pop(uid, None)
@@ -538,6 +583,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         effect = coordination.get(row["source_unit_id"])
         if effect and row["status"] != "generated_wired_adapted":
             row["reason"] = effect["reason"]
+        uid = row["source_unit_id"]
+        if uid in approval_units:
+            if row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired":
+                raise ValueError("Two adapters claim the same approval trigger.")
+            row.update(encoding_status="generated_unwired", reason=(
+                "approval_readiness_partly_connected" if uid in approval_pages else "approval_source_binding_pending"))
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -605,6 +656,14 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "source_file": source_files[row["source_owner_id"]],
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
+        uid = row["source_unit_id"]
+        if uid in approval_units:
+            plan_op = approval_units[uid]
+            row.update(rule_id="fox.approval.saved-readiness" if uid in approval_pages else "fox.approval.staged-review",
+                       target={"source_unit_id": uid, "source_unit_sha256": plan_op["source_unit_sha256"],
+                               "operation_id": plan_op["operation_id"], "operation_sha256": plan_op["operation_sha256"],
+                               "plan_member": "fox-package/approval-plan.json", "whole_source_unit_converted": False,
+                               "native_page": approval_pages[uid]["page_file"] if uid in approval_pages else None})
         if row["source_unit_id"] in item_review:
             row.update(rule_id="fox.validation.item-lookup-review", target=deepcopy(item_review[row["source_unit_id"]]))
         if row["source_unit_id"] in encoded:
@@ -635,6 +694,10 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "lov_returns": lov_receipt["generated_operations"],
         "lov_return_gaps": lov_receipt["gaps"],
         "coordination_partial_units": list(coordination.values()),
+        "approval_readiness": [{"source_unit_id": uid, "source_unit_sha256": op["source_unit_sha256"],
+                                "page_file": op["page_file"], "entry_file": op["entry_file"],
+                                "operation_id": op["operation_id"], "entry_kind": op["entry_kind"],
+                                "approval_flag_written": False} for uid, op in approval_pages.items()],
         "source_block_filters": filter_receipt["generated_operations"],
         "session_defaults": defaults_receipt["generated_operations"],
         "guarded_queries": query_receipt["generated_operations"],
@@ -648,6 +711,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         dependency_evidence=dependency_evidence)
     interface_register = build_interface_inventory(packet, chunks, ledger, dependency_evidence=dependency_evidence,
                                                    discrepancies=discrepancies, documents=documents)
+    ledger["approval_interface_links"] = _approval_interface_links(approval_units, interface_register)
     files["fox-package/discrepancy-evidence.json"] = _bytes(dependency_evidence)
     files["fox-package/discrepancies.json"] = _bytes(discrepancies)
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})
@@ -738,6 +802,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "Draft edits use a source-bound parent context and current-record validation before navigation; no customer-table save, source transaction or full Forms lifecycle is implied. "
         "item-validation-receipt.json identifies changed-field events, the selected parent inputs and any additional synthetic write fields they bind. "
         "The current row's validation state is maintained separately from its loaded baseline. Later navigation and whole-form commits remain separate events. "
+        "approval-plan.json retains each proved approval stage and commit in source order. approval-action-receipt.json identifies connected readiness checks and pending target operations. "
         "lookup-activation.md lists native source SELECT-INTO handlers and restricted readiness items. Original reads are disabled by default and require verified target interfaces and separate activation authority. POST-CHANGE is adapted to Apply lookup; POST-QUERY runs after selecting a record. These pages do not save records. "
         "Other dependencies, relationship lifecycle, source transactions and behavior remain unresolved.\n\n"
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "

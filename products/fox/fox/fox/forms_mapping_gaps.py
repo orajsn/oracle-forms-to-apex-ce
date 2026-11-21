@@ -79,6 +79,14 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
             action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
+        elif reason == 'approval_readiness_partly_connected':
+            category = 'engine_context'
+            message = 'The approval button can check the selected saved manifest and its related rows. The source workflow has additional commit stages before the external calls.'
+            action = 'Review the results on the readiness page, then bind whole-form state, each commit and both external routine interfaces before enabling business approval.'
+        elif reason == 'approval_source_binding_pending':
+            category = 'engine_context'
+            message = 'The approval workflow is encoded in source order. Its selected-row inputs or button permission still need a native binding.'
+            action = 'Inspect the approval plan and action receipt for the exact missing fields, relation or permission.'
         elif reason == 'draft_policy_context_unresolved':
             category = 'engine_context'
             message = 'FOX could not establish edit permissions for this draft. The generated screen is read-only.'
