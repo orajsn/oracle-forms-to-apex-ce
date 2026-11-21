@@ -569,6 +569,41 @@ def test_approval_readiness_is_partial_and_links_both_external_call_sites(client
     assert 'additional commit stages' in unit['message']
 
 
+def test_staging_refresh_retains_delete_insert_and_read_for_the_same_action(client):
+    from test_forms_manifest_filter import source
+    action = ('IF :TRACKING IS NOT NULL THEN DELETE APP.QUERY_ROWS WHERE TRACKING=:TRACKING; '
+              'INSERT INTO APP.QUERY_ROWS(TRACKING,KIND,DEPOT,SERIAL) '
+              'SELECT TRACKING,KIND,DEPOT,SERIAL FROM APP.ARCHIVE_ROWS WHERE TRACKING=:TRACKING; '
+              'EXECUTE_QUERY; ELSE NULL; END IF;')
+    item = ('<Item Name="TRACKING" ColumnName="TRACKING" DataType="Char" MaximumLength="20" '
+            'DatabaseItem="true" ItemType="Text Item"><Trigger Name="KEY-EXEQRY" TriggerText="' +
+            action + '"/></Item>')
+    c, root, pid = client
+    raw = source(table='APP.QUERY_ROWS', extra=item, kind_extra='MaximumLength="20"',
+                 depot_extra='MaximumLength="20"')
+    upload(c, pid, [('dispatch.xml', raw)])
+    url = f'/api/projects/{pid}/xml-mapping'
+    scope = c.get(url).json()
+    body = {k: scope[k] for k in ('source_hash', 'selected_source_set_id', 'source_binding', 'catalog_sha256')}
+    body.update(request_id=str(uuid.uuid4()), approved_synthetic_scope=True, approved_local_source_processing=True)
+    queued = c.post(url + '/runs', json=body)
+    assert queued.status_code == 202
+    process_one(connection(root), root)
+    result = c.get(url + '/runs/' + queued.json()['id']).json()
+    assert result['state'] == 'GENERATED'
+    files = _members(c.get(result['download_url']).content)
+    ledger = json.loads(files['fox-package/mapping-ledger.json'])
+    target, = ledger['staged_queries']
+    links = ledger['staged_query_interfaces']
+    assert target['native_page'] in files and target['whole_source_unit_converted'] is False
+    assert [(r['role'], r['source_table']) for r in links] == [
+        ('delete', 'APP.QUERY_ROWS'), ('insert', 'APP.QUERY_ROWS'), ('read', 'APP.ARCHIVE_ROWS')]
+    assert len({r['interface_record_id'] for r in links}) == 3
+    assert all(r['interface_record_id'] and r['position'] and not r['target_interface_verified'] for r in links)
+    unit = next(r for r in result['discrepancies']['units'] if r['source_unit_id'] == target['source_unit_id'])
+    assert unit['status'] == 'encoded_unwired' and 'APEX session' in unit['message']
+
+
 def test_retained_interface_csv_requires_its_declared_digest():
     metadata = {'source_binding':'source', 'interface_register':{
         'scope':'fox-source-interface-register-v1','source_binding':'source','record_count':1,

@@ -374,6 +374,11 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
             previous = tokens[index - 1][1].upper() if index else None
             if word in {"FROM", "JOIN"}:
                 role = "delete" if word == "FROM" and previous == "DELETE" else "read"
+            elif (word == "DELETE" and previous in {None, ";", "BEGIN", "THEN", "ELSE", "LOOP"}
+                  and target < len(tokens) and tokens[target][1].upper() != "FROM"):
+                # Oracle permits DELETE table WHERE ... without FROM. A
+                # collection's .DELETE method is a different operation.
+                role = "delete"
             elif word == "UPDATE" and previous != "FOR":
                 role = "update"
             elif word in {"INSERT", "MERGE"} and target < len(tokens) and tokens[target][1].upper() == "INTO":

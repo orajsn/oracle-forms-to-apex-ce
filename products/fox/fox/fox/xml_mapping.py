@@ -35,6 +35,7 @@ from .forms_lov_return import apply_lov_returns
 from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
 from .forms_approval_action import apply_approval_actions
+from .forms_staged_query import apply_staged_queries
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build, generation_sources
@@ -139,14 +140,17 @@ def mapping_catalog():
          "Retain ordered workflow stages and identify each stage's required provider.", "Actual form state, commit outcomes and external calls require separate bindings."),
         ("fox.approval.saved-readiness", "A source-bound approval button and its current permission are linked to a selected synthetic master and two proved related blocks.",
          "Check the saved master and its related rows for the conditions in the source.", "Later checks describe currently saved rows. The action leaves approval, source commit segments and external calls pending."),
+        ("fox.query.staged-refresh", "A guarded query trigger deletes and repopulates rows for one key before executing the block query.",
+         "Record the ordered source statements and link any generated session refresh page.", "Database staging visibility and the caller's transaction require target verification."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 14,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 15,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py")}
+                                "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
+                                "forms_staged_query_plan.py", "forms_staged_query.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -242,6 +246,47 @@ def _approval_bindings(plan, receipt, chunks, files):
             raise ValueError("Approval-readiness evidence differs from its bound source stages.")
         connected[uid] = op
     return parsed, connected
+
+
+def _staged_query_targets(plan, receipt, chunks, files):
+    sources = {chunk["code_unit_id"]: chunk["sha256"] for chunk in chunks}
+    targets = {}
+    for op in plan["operations"]:
+        uid = op["source_unit_id"]
+        if uid in targets or sources.get(uid) != op["source_unit_sha256"]:
+            raise ValueError("Staged query plan differs from its source action.")
+        targets[uid] = {"source_unit_id": uid, "source_unit_sha256": op["source_unit_sha256"],
+                        "operation_id": op["operation_id"], "plan_member": "fox-package/staged-query-plan.json",
+                        "native_page": None, "whole_source_unit_converted": False}
+    for action in receipt["generated_operations"]:
+        target = targets.get(action["source_unit_id"])
+        if (not target or target["native_page"] is not None or action["page_file"] not in files
+                or action["plan_operation_id"] != target["operation_id"]
+                or action["source_unit_sha256"] != target["source_unit_sha256"]
+                or action["native_event_wired"] is not True or action["customer_table_writes"] is not False
+                or action["whole_source_unit_converted"] is not False):
+            raise ValueError("Staged query page differs from its source plan.")
+        target["native_page"] = action["page_file"]
+    return targets
+
+
+def _staged_query_interfaces(plan, register):
+    """Link each table access to its own source position, including DELETE without FROM."""
+    sites = {}
+    for record in register["records"]:
+        if record["role"] in {"delete", "insert", "read"} and record["position"]:
+            key = (record["source"]["source_unit_id"], record["role"], record["name"].upper())
+            sites.setdefault(key, []).append(record)
+    links = []
+    for op in plan["operations"]:
+        for role, table in (("delete", op["staging_table"]), ("insert", op["staging_table"]), ("read", op["source_table"])):
+            matches = sites.get((op["source_unit_id"], role, table.upper()), [])
+            site = matches[0] if len(matches) == 1 else None
+            links.append({"source_unit_id": op["source_unit_id"], "role": role, "source_table": table,
+                          "position": site["position"] if site else None,
+                          "interface_record_id": site["id"] if site else None,
+                          "target_interface_verified": False})
+    return links
 
 
 def _approval_interface_links(plans, inventory):
@@ -482,6 +527,10 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files["fox-package/approval-action-receipt.json"] = _bytes(approval)
     approval_plan = json.loads(files["fox-package/approval-plan.json"])
     approval_units, approval_pages = _approval_bindings(approval_plan, approval, chunks, files)
+    files, stage_receipt = apply_staged_queries(documents, packet, chunks, trace, files)
+    files["fox-package/staged-query-receipt.json"] = _bytes(stage_receipt)
+    stage_plan = json.loads(files["fox-package/staged-query-plan.json"])
+    staged_units = _staged_query_targets(stage_plan, stage_receipt, chunks, files)
     for save in save_receipt["generated_operations"]:
         uid = save["source_unit_id"]
         review = encoded.pop(uid, None)
@@ -584,6 +633,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         if effect and row["status"] != "generated_wired_adapted":
             row["reason"] = effect["reason"]
         uid = row["source_unit_id"]
+        if uid in staged_units:
+            if row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired":
+                raise ValueError("Two mappings claim the same staging trigger.")
+            row.update(encoding_status="generated_unwired", reason=(
+                "staged_query_partly_connected" if staged_units[uid]["native_page"] else "staged_query_binding_pending"))
         if uid in approval_units:
             if row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired":
                 raise ValueError("Two adapters claim the same approval trigger.")
@@ -657,6 +711,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in staged_units:
+            row.update(rule_id="fox.query.staged-refresh", target=staged_units[uid])
         if uid in approval_units:
             plan_op = approval_units[uid]
             row.update(rule_id="fox.approval.saved-readiness" if uid in approval_pages else "fox.approval.staged-review",
@@ -701,6 +757,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "source_block_filters": filter_receipt["generated_operations"],
         "session_defaults": defaults_receipt["generated_operations"],
         "guarded_queries": query_receipt["generated_operations"],
+        "staged_queries": list(staged_units.values()),
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -712,6 +769,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     interface_register = build_interface_inventory(packet, chunks, ledger, dependency_evidence=dependency_evidence,
                                                    discrepancies=discrepancies, documents=documents)
     ledger["approval_interface_links"] = _approval_interface_links(approval_units, interface_register)
+    ledger["staged_query_interfaces"] = _staged_query_interfaces(stage_plan, interface_register)
     files["fox-package/discrepancy-evidence.json"] = _bytes(dependency_evidence)
     files["fox-package/discrepancies.json"] = _bytes(discrepancies)
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})

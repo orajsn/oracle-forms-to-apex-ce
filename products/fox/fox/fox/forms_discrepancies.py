@@ -47,6 +47,8 @@ _PAREN_CALL = re.compile(rf"(?<![\w:$#.@])({_DOTTED})\s*\(", re.I)
 # Only registered same-module names, known Forms APIs or qualified references
 # qualify. A lone identifier in a SQL expression is insufficient.
 _BARE_CALL = re.compile(rf"(?:\A|;|\b(?:BEGIN|THEN|ELSE|LOOP)\b)\s*({_DOTTED})\s*(?=;)", re.I)
+_DELETE_WITHOUT_FROM = re.compile(
+    rf"(?:\A|;|\b(?:BEGIN|THEN|ELSE|LOOP)\b)\s*DELETE\s+(?!FROM\b)({_DOTTED})", re.I)
 _LOCAL_BODY_TOKEN = re.compile(
     rf"\b(?:FUNCTION|PROCEDURE)\s+(?P<declaration>{_NAME})(?![\w$#])|"
     rf"\bEND\s+(?P<ending>{_NAME})\s*;|\b(?P<keyword>IS|AS|BEGIN)\b|;", re.I)
@@ -176,6 +178,9 @@ def build_dependency_evidence(packet, chunks, ledger):
             replacements.add((unit["owner_id"], unit["source_attribute"], _canonical(unit["location"])))
             masked = _semantic_mask(semantic)
             database_matches = list(forms_facts._DATABASE_REFERENCE.finditer(masked))
+            # Fresh dependency evidence may recognize additional syntax without
+            # changing the historical Forms facts or their binding hashes.
+            database_matches.extend(_DELETE_WITHOUT_FROM.finditer(masked))
             database_positions = {match.start(1) for match in database_matches}
             candidates = [("database_object", match[1]) for match in database_matches]
             candidates.extend(("database_object", name) for name in _comma_from_candidates(masked, database_matches))

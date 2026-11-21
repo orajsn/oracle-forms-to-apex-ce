@@ -94,6 +94,30 @@ def test_database_roles_exact_qualified_targets_and_platform_names():
     assert next(r for r in result["records"] if r["role"] == "report_registration")["name"] == "slip"
 
 
+def test_delete_without_from_records_the_target_at_its_own_call_site():
+    text = """IF :LINES.CODE IS NOT NULL THEN
+        DELETE app.stage_rows WHERE code=:LINES.CODE;
+        INSERT INTO app.stage_rows(code) SELECT code FROM app.source_rows;
+        keys.DELETE(1);
+        -- DELETE app.obsolete;
+    END IF;"""
+    *_, result = context(text)
+    deletes = [r for r in result["records"] if r["role"] == "delete"]
+    assert [r["name"] for r in deletes] == ["app.stage_rows"]
+    span = deletes[0]["position"]
+    assert text[span["character_offset"]:span["end_character_offset"]] == "app.stage_rows"
+    assert span["line"] == 2
+    assert any(r["role"] == "insert" and r["name"] == "app.stage_rows" for r in result["records"])
+
+
+def test_bare_delete_alone_identifies_the_affected_database_object_in_discrepancies():
+    packet, chunks, ledger, _, result = context("BEGIN DELETE app.expired_rows WHERE code=:LINES.CODE; END;")
+    deletion, = [r for r in result["records"] if r["role"] == "delete"]
+    assert deletion["affected_actions"]
+    evidence = build_dependency_evidence(packet, chunks, ledger)
+    assert any(r["evidence"].get("name") == deletion["name"] for r in evidence["references"])
+
+
 def test_static_local_paths_module_isolation_cycles_and_nested_effects():
     helpers = [("HELPER", "PROCEDURE HELPER IS BEGIN APP.API.DELETE_ROW(:LINES.CODE); OTHER; END HELPER;"),
                ("OTHER", "PROCEDURE OTHER IS BEGIN HELPER; END OTHER;")]

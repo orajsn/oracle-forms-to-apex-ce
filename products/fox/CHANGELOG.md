@@ -150,6 +150,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.47.0] - 2026-11-21
+
+### [feature] Refresh staged query rows for the entered key
+
+FOX recognizes the Forms sequence that clears staged rows for one key,
+reloads them from a distinct source table and executes the block query. The
+generated APEX screen can refresh that key in a private session collection,
+retain matching duplicates and other keys, and apply the block filter and sort.
+The source interface and trusted session values require administrator setup.
+
+The package records the full ordered column list, the caller-owned transaction
+and each table access. The interface register now recognizes Oracle DELETE
+statements that omit FROM. The discrepancy view identifies the remaining work
+to reproduce original staging visibility, defaults and transaction lifetime.
+
 ## [0.46.0] - 2026-11-21
 
 ### [feature] Show source-backed approval readiness on the selected manifest

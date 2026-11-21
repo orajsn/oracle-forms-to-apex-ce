@@ -79,6 +79,14 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
             action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
+        elif reason == 'staged_query_partly_connected':
+            category = 'engine_context'
+            message = 'Execute query can refresh staged rows for the entered key in the APEX session. Other database callers may depend on the original staging table and transaction.'
+            action = 'Verify the source read interface, staging-table visibility and transaction ownership before enabling the workflow against original data.'
+        elif reason == 'staged_query_binding_pending':
+            category = 'engine_context'
+            message = 'The staging statements and block query are encoded in source order. The generated screen still needs a verified query binding.'
+            action = 'Review the staged-query receipt for the unresolved source columns, filter or target page.'
         elif reason == 'approval_readiness_partly_connected':
             category = 'engine_context'
             message = 'The approval button can check the selected saved manifest and its related rows. The source workflow has additional commit stages before the external calls.'

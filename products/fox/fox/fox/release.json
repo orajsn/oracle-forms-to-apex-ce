@@ -1,10 +1,10 @@
 {
-  "version": "0.46.0",
+  "version": "0.47.0",
   "released_on": "2026-11-21",
-  "title": "Check a selected manifest before approval",
+  "title": "Refresh staged query rows by key",
   "changes": [
-    "Show the blocking field or bag on the selected manifest, checking actual bag weight before destination.",
-    "Distinguish saved-row diagnostics from the original commits and approval write. The transaction plan records each independent commit and the later external calls."
+    "Recognize the Forms trigger that deletes staged rows for one key, reloads them from a source table and executes the block query.",
+    "Identify the source read and both staging-table operations separately in the interface register."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
