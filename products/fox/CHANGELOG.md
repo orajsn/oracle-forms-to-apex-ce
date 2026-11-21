@@ -200,6 +200,31 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.53.0] - 2026-11-22
+
+### [feature] Generate more lookup queries and field-event code from Forms XML
+
+FOX now recognizes explicit SELECT ALL, simple single-table lists, direct
+column aliases, literal exclusions and ordering by projection position.
+For SELECT * FROM DUAL it requires the matching single-column Forms
+declaration. Reference reports preserve their source filters, duplicates and
+sort order. Original database access still requires a verified interface.
+
+When an optional chooser's field also has a supported POST-CHANGE lookup,
+keeping a changed typed key recalculates the companion fields on that draft.
+The source lookup and its missing-value failure are checked independently of
+the list filter. A failed or ambiguous lookup leaves the draft unchanged.
+
+Complete scalar audit and numeric validation triggers can also produce a
+callable PL/SQL package. Its source-linked parameter list identifies the
+trusted globals, current field and row outputs required by the event host.
+FOX reports these procedures as awaiting wiring.
+
+Two original forms passed SQLcl package validation. All 21 record-group
+queries matched the corresponding source queries on local synthetic test
+rows. The release regression suite passed 1,615 checks. Installed APEX
+execution and Oracle compilation of the optional procedures remain unverified.
+
 ## [0.52.0] - 2026-11-21
 
 ### [feature] Return a lookup choice to the selected draft row

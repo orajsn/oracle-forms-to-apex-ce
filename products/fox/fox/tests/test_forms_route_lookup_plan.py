@@ -36,6 +36,62 @@ SOURCE = b'''<FormModule Name="SHIPPING">
 </RecordGroup>
 </FormModule>'''
 
+TYPED_BODY = """BEGIN
+ SELECT NETWORK.DEPARTURE, NETWORK.ARRIVAL INTO :LINES.START_AT, :LINES.END_AT
+ FROM NETWORK WHERE NETWORK.CODE = :LINES.VIA;
+EXCEPTION WHEN NO_DATA_FOUND THEN MESSAGE('Invalid routing'); RAISE FORM_TRIGGER_FAILURE; END;"""
+
+
+def typed_source(body=TYPED_BODY):
+    root = ET.fromstring(SOURCE)
+    next(n for n in root.iter() if n.get('Name') == 'POST-CHANGE').set('TriggerText', body)
+    return ET.tostring(root)
+
+
+def test_typed_post_change_full_source_identity_and_unfiltered_query_are_proved():
+    args = prepare(typed_source())
+    c, = compile_row_lookups(*args)
+    t = c['typed_lookup']
+    units = {u['id']:u for s in args[1]['sources'] for u in s['facts']['code_units']}
+    assert t['source_unit_sha256'] == units[t['source_unit_id']]['sha256']
+    assert t['source_event'] == 'POST-CHANGE' and t['source_table'] == 'NETWORK'
+    assert t['key_column'] == 'CODE' and not t['active_filter_applied']
+    assert t['no_data_message'] == 'Invalid routing' and t['no_data_failure'] == 'FORM_TRIGGER_FAILURE'
+    assert [a['source_column'] for a in t['assignments']] == ['DEPARTURE', 'ARRIVAL']
+    assert t['source_unit_id'] not in c['omitted_source_unit_ids']
+    assert 'WHEN-CREATE-RECORD' in {u['source_event'] for u in c['unexecuted_source_events']}
+
+
+@pytest.mark.parametrize('old,new', [
+    ('FROM NETWORK', 'FROM OTHER'),
+    ('NETWORK.CODE = :LINES.VIA', 'NETWORK.OTHER = :LINES.VIA'),
+    ('NETWORK.CODE = :LINES.VIA', 'NETWORK.CODE = :HEADER.LABEL'),
+    (':LINES.END_AT', ':HEADER.LABEL'),
+    (':LINES.END_AT', ':LINES.START_AT'),
+    ('NETWORK.ARRIVAL INTO', 'NETWORK.CODE INTO'),
+    (';\nEXCEPTION', " AND NETWORK.STATE='1';\nEXCEPTION"),
+    ('RAISE FORM_TRIGGER_FAILURE;', 'NULL;'),
+    ("MESSAGE('Invalid routing')", "MESSAGE(:LINES.VIA)"),
+    ('END;', 'NULL; END;'),
+])
+def test_nonmatching_event_gates_caller_mutation_without_losing_052_chooser(old, new):
+    assert old in TYPED_BODY
+    c, = compile_row_lookups(*prepare(typed_source(TYPED_BODY.replace(old,new))))
+    assert not c.get('typed_lookup') and c['typed_lookup_gap']
+    assert len(c['returns']) == 3 and c['query_already_counted']
+
+
+def test_unrelated_fields_do_not_become_typed_targets_and_safe_literal_is_decoded():
+    raw = typed_source(TYPED_BODY.replace('Invalid routing', "Invalid ''route'' & :value <tag>"))
+    c, = compile_row_lookups(*prepare(raw))
+    assert c['typed_lookup']['no_data_message'] == "Invalid 'route' & :value <tag>"
+    assert {a['field']['source_name'] for a in c['typed_lookup']['assignments']} == {'START_AT','END_AT'}
+
+
+def test_old_noop_fixture_never_claims_typed_behavior():
+    c, = compile_row_lookups(*prepare())
+    assert 'typed_lookup' not in c and 'typed_lookup_gap' not in c
+
 
 def prepare(raw=SOURCE, *, name='shipping.xml', project_id='row-lookup-test'):
     docs = [(name, raw)]
@@ -235,5 +291,7 @@ def test_optional_project_local_original_source():
     c = contracts[0]
     assert len(c['returns']) == 3 and len([f for f in c['returns'] if f['display_only']]) == 2
     assert all(f['source_data_type_omitted'] for f in c['fields'])
-    assert {'POST-CHANGE', 'WHEN-CREATE-RECORD'} <= {u['source_event'] for u in c['unexecuted_source_events']}
-    assert args[-1]['gaps'] and args[-2]['gaps']
+    assert c['typed_lookup']['source_event'] == 'POST-CHANGE'
+    assert 'WHEN-CREATE-RECORD' in {u['source_event'] for u in c['unexecuted_source_events']}
+    assert args[-1]['gaps'] # ordinary unsupported LOV callers remain visible
+    assert len(args[-2]['generated_operations']) == 18 and not args[-2]['gaps']

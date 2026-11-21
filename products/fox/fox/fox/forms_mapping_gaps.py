@@ -67,7 +67,11 @@ def classify_gaps(packet, chunks, coverage):
             code = _mask_code(semantic)
         except UnsupportedBehavior:
             code = ''
-        if reason == 'parent_value_copy_encoded_write_lifecycle_unimplemented':
+        if reason == 'scalar_event_host_pending':
+            category = 'engine_context'
+            message = 'The complete trigger body is available as a typed PL/SQL procedure in scalar-events.sql.'
+            action = 'Use its source-linked parameter list in the mapping ledger to bind the event host, current row and trusted Forms context.'
+        elif reason == 'parent_value_copy_encoded_write_lifecycle_unimplemented':
             category = 'engine_context'
             message = 'The parent-value copy procedure is generated, but its insert/update event is not wired.'
             action = 'Wire the original write event and required validation/permission guards before activating the generated review code.'

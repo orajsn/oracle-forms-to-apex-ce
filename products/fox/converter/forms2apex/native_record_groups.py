@@ -69,7 +69,7 @@ def _lov_metadata(documents, packet):
 
 def _tokens(text):
     tokens, pos = [], 0
-    pattern = re.compile(r"(?P<string>'(?:[^']|'')*')|(?P<word>[A-Za-z][A-Za-z0-9_$#]*)|(?P<number>[0-9]+(?:\.[0-9]+)?)|(?P<symbol><>|[=.,:()])")
+    pattern = re.compile(r"(?P<string>'(?:[^']|'')*')|(?P<word>[A-Za-z][A-Za-z0-9_$#]*)|(?P<number>[0-9]+(?:\.[0-9]+)?)|(?P<symbol><>|[=.,:()*])")
     while pos < len(text):
         if text[pos].isspace():
             pos += 1
@@ -133,21 +133,50 @@ class _Parser:
             return {'kind': kind, 'value': value}
         return {'kind': 'column', 'parts': self.name()}
 
+    def projection(self):
+        parenthesized = self.peek('(')
+        if parenthesized: self.take('(')
+        source = self.name()
+        if parenthesized: self.take(')')
+        alias = None
+        if self.peek('AS'):
+            self.take('AS')
+            alias = _identifier(self.take(kind='word'))
+        elif (self.pos < len(self.tokens) and self.tokens[self.pos][0] == 'word'
+              and self.tokens[self.pos][1] not in RESERVED):
+            alias = _identifier(self.take(kind='word'))
+        return source, [alias] if alias else source
+
     def query(self, depth=0):
         _need(depth <= 3, 'QUERY_DEPTH')
         self.take('SELECT')
-        projections = [self.name()]
-        while self.peek(','):
-            self.take(',')
-            projections.append(self.name())
+        explicit_all = self.peek('ALL')
+        if explicit_all: self.take('ALL')
+        wildcard = self.peek('*')
+        sources, projections = [], []
+        if wildcard:
+            self.take('*')
+            sources, projections = [['DUMMY']], [['DUMMY']]
+        else:
+            while True:
+                source, output = self.projection()
+                sources.append(source)
+                projections.append(output)
+                if not self.peek(','): break
+                self.take(',')
         self.take('FROM')
         tables = [self.name()]
         while self.peek(','):
             self.take(',')
             tables.append(self.name())
-        self.take('WHERE')
+        filtered = self.peek('WHERE')
+        # An absent predicate is complete source SQL only for this closed
+        # projected single-table family. Never repair an incomplete WHERE or
+        # widen the existing multi-table language to unfiltered cartesian reads.
+        if filtered: self.take('WHERE')
+        else: _need(len(tables) == 1, 'UNFILTERED_SINGLE_TABLE_REQUIRED')
         predicates = []
-        while True:
+        while filtered:
             left = self.operand()
             if self.peek('IS'):
                 self.take('IS')
@@ -155,13 +184,33 @@ class _Parser:
                 if self.peek('NOT'): self.take('NOT')
                 self.take('NULL')
                 predicate = {'left': left, 'op': op}
-            elif self.peek('IN'):
+            elif self.peek('IN') or self.peek('NOT'):
+                negative = self.peek('NOT')
+                if negative: self.take('NOT')
                 self.take('IN')
                 self.take('(')
-                child = self.query(depth + 1)
-                _need(len(child['projections']) == 1, 'IN_PROJECTION')
+                if self.peek('SELECT'):
+                    _need(not negative, 'NOT_IN_SUBQUERY_UNSUPPORTED')
+                    child = self.query(depth + 1)
+                    _need(len(child['projections']) == 1, 'IN_PROJECTION')
+                    predicate = {'left': left, 'op': 'IN', 'query': child}
+                else:
+                    values = []
+                    while True:
+                        if self.peek('NULL'):
+                            self.take('NULL')
+                            value = {'kind': 'null'}
+                        else:
+                            value = self.operand()
+                            _need(value['kind'] == 'string', 'IN_STRING_LITERAL_REQUIRED')
+                        # Oracle treats an empty character literal as NULL.
+                        # Retain it verbatim; never turn NOT IN into inequalities.
+                        values.append(value)
+                        _need(len(values) <= 100, 'IN_LIST_CAPACITY')
+                        if not self.peek(','): break
+                        self.take(',')
+                    predicate = {'left': left, 'op': 'NOT IN' if negative else 'IN', 'values': values}
                 self.take(')')
-                predicate = {'left': left, 'op': 'IN', 'query': child}
             else:
                 _need(self.peek('=') or self.peek('<>'), 'PREDICATE_OPERATOR')
                 predicate = {'left': left, 'op': self.take(), 'right': self.operand()}
@@ -173,20 +222,40 @@ class _Parser:
             self.take('ORDER')
             self.take('BY')
             while True:
-                term = {'parts': self.name(), 'direction': None}
+                if self.pos < len(self.tokens) and self.tokens[self.pos][0] == 'number':
+                    raw = self.take(kind='number')
+                    _need(re.fullmatch(r'[1-9][0-9]*', raw) and int(raw) <= len(projections), 'ORDER_ORDINAL')
+                    ordinal = int(raw)
+                    term = {'parts': [projections[ordinal - 1][-1]], 'direction': None, 'ordinal': ordinal}
+                else:
+                    term = {'parts': self.name(), 'direction': None}
                 if self.peek('ASC') or self.peek('DESC'): term['direction'] = self.take()
                 order.append(term)
                 if not self.peek(','): break
                 self.take(',')
         _need(1 <= len(projections) <= 30 and len(tables) <= 8 and len(predicates) <= 40 and len(order) <= 6, 'QUERY_CAPACITY')
-        return {'projections': projections, 'tables': tables, 'predicates': predicates, 'order': order}
+        query = {'projections': projections, 'tables': tables, 'predicates': predicates, 'order': order}
+        # Keep the existing implicit-ALL tree and receipts byte-compatible.
+        if explicit_all: query['select_all'] = True
+        if sources != projections: query['projection_sources'] = sources
+        if wildcard:
+            # This is the only wildcard family. Source declaration validation
+            # in apply_record_groups is also required before emitting a page.
+            _need(depth == 0 and not explicit_all and tables == [['DUAL']] and
+                  not predicates and not order, 'CANONICAL_DUAL_REQUIRED')
+            query['dual_wildcard'] = True
+        return query
 
 
 def parse_record_group_query(raw):
-    """Complete SELECT columns FROM tables WHERE conjunction [ORDER BY columns].
+    """Complete SELECT [ALL] direct columns FROM tables and closed predicates.
 
-    Predicates: equality, inequality, null test, or IN a single-column filtered
-    subquery. No functions, aliases, writes, DB links, unions or unknown suffix.
+    Predicates: equality, inequality, null test, or IN a single-column
+    subquery, or string/NULL literal list. Direct-column aliases and bounded
+    positional sorting are supported. No expressions, writes, DB links or unions.
+    WHERE may be absent only for a single-table projected query. ALL preserves
+    duplicates; DISTINCT and arbitrary wildcards stay gaps. Only canonical
+    SELECT * FROM DUAL may expand, with its source declaration checked later.
     Original case-insensitive identifiers and literal values retain SQL meaning.
     """
     from fox.forms_behavior_plan import decode_control_entities
@@ -206,18 +275,25 @@ def render_query(query, bindings, extra_predicates=()):
         if kind == 'column': return '.'.join(value['parts'])
         if kind == 'string': return _literal(value['value'])
         if kind == 'number': return value['value']
+        if kind == 'null': return 'NULL'
         raise ValueError('RECORD_GROUP_OPERAND')
     predicates = []
     for pred in query['predicates']:
         text = operand(pred['left']) + ' ' + pred['op']
         if 'right' in pred: text += ' ' + operand(pred['right'])
         if 'query' in pred: text += ' (' + render_query(pred['query'], bindings) + ')'
+        if 'values' in pred: text += ' (' + ', '.join(operand(v) for v in pred['values']) + ')'
         predicates.append(text)
     predicates.extend(extra_predicates)
-    result = ('SELECT ' + ', '.join('.'.join(v) for v in query['projections']) + '\nFROM ' +
-              ', '.join('.'.join(v) for v in query['tables']) + '\nWHERE ' + '\nAND '.join(predicates))
+    sources = query.get('projection_sources', query['projections'])
+    projected = ['.'.join(source) + (' AS ' + output[-1] if source != output else '')
+                 for source, output in zip(sources, query['projections'], strict=True)]
+    result = ('SELECT ' + ('ALL ' if query.get('select_all') else '') +
+              ', '.join(projected) + '\nFROM ' +
+              ', '.join('.'.join(v) for v in query['tables']))
+    if predicates: result += '\nWHERE ' + '\nAND '.join(predicates)
     if query['order']:
-        result += '\nORDER BY ' + ', '.join('.'.join(v['parts']) + (' ' + v['direction'] if v['direction'] else '') for v in query['order'])
+        result += '\nORDER BY ' + ', '.join((str(v['ordinal']) if 'ordinal' in v else '.'.join(v['parts'])) + (' ' + v['direction'] if v['direction'] else '') for v in query['order'])
     return result
 
 
@@ -371,6 +447,10 @@ def apply_record_groups(documents, packet, chunks, trace, members):
                 _need(len(candidates) == 1, 'NAVIGATION_CONTEXT_NOT_UNIQUE')
                 context = candidates[0]
             children = [o for o in objects.values() if o['kind'] == 'RecordGroupColumn' and o['parent_id'] == owner['id']]
+            if query.get('dual_wildcard'):
+                _need(len(children) == 1 and children[0]['name'] == 'DUMMY' and
+                      properties[children[0]['id']].get('ColumnDataType', '').upper() == 'CHARACTER' and
+                      properties[children[0]['id']].get('MaximumLength') == '1', 'CANONICAL_DUAL_DECLARATION_REQUIRED')
             _need(len(children) == len(query['projections']), 'SOURCE_COLUMNS')
             specs = []
             for child, projection in zip(children, query['projections']):

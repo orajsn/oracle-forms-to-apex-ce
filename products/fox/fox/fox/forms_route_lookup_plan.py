@@ -16,6 +16,7 @@ from .forms_interface_inventory import _arguments, _lex
 from .forms_lov_return import apply_lov_returns
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
 from .forms_understanding_packet import _build, generation_sources
+from .forms_route_lookup_typed import compile_typed_lookup
 
 SCOPE = 'fox-source-row-lookup-contract-v1'
 
@@ -76,6 +77,8 @@ def _normal_receipts(documents, packet, chunks, trace, files, group_receipt, lov
 
 def _closed_query(group, objects, props):
     query = group['query']
+    _need(set(query) == {'tables', 'projections', 'predicates', 'order'} and
+          all(set(term) == {'parts', 'direction'} for term in query['order']), 'CLOSED_QUERY_SHAPE_REQUIRED')
     _need(not group['source_bindings'] and not group['global_bindings'] and
           len(query['tables']) == 1 and len(query['tables'][0]) == 1 and
           len(query['predicates']) == 1, 'UNBOUND_SINGLE_TABLE_FILTER_REQUIRED')
@@ -223,6 +226,14 @@ def _contract(group, lov, caller, objects, props, trace, units, texts, source_bi
         'scope_note': 'Session-only selected-row chooser. Other source events, record creation, validation, permissions providers and database saves are unexecuted. Original sources are preserved; explicit partial scope consent is required.',
         'original_interface_enabled': False, 'source_query_executed': False, 'customer_table_writes': False,
         'synthetic_table_writes': False, 'runtime_verified': False, 'business_accepted': False}
+    contract.update(compile_typed_lookup(contract, objects, units, texts))
+    if contract.get('typed_lookup'):
+        typed_id = contract['typed_lookup']['source_unit_id']
+        contract['unexecuted_source_events'] = [u for u in omitted if u['source_unit_id'] != typed_id]
+        contract['omitted_source_unit_ids'] = [u['source_unit_id'] for u in contract['unexecuted_source_events']]
+        contract['scope_note'] = ('Session-only row chooser and source POST-CHANGE adapted to explicit changed-caller Keep/Apply against an empty synthetic catalog. '
+            'Other source events, record creation, permissions providers and business-table saves are unexecuted. '
+            'Original sources are preserved; explicit partial scope consent is required.')
     contract['contract_id'] = 'row-lookup-' + groups._sha(groups._json(contract))[:24]
     return contract
 

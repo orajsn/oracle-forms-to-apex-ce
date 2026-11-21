@@ -116,6 +116,26 @@ def test_optional_lookup_reaches_the_downloaded_caller_and_preserves_coverage(cl
     assert any('selected session draft from the synthetic catalog' in u['message'] for u in run['discrepancies']['units'])
 
 
+def test_download_includes_the_typed_event_and_separate_callable_code(client):
+    from test_forms_route_lookup_plan import typed_source
+    from xml.etree import ElementTree as ET
+    form = ET.fromstring(typed_source())
+    block = next(b for b in form.iter("Block") if b.get("Name") == "LINES")
+    ET.SubElement(block, "Item", Name="STAMP", ItemType="Display Item", DataType="Datetime")
+    block.find("Trigger").set("TriggerText", "BEGIN :STAMP := SYSDATE; END;")
+    c, _, _, _, run = finish(client, [("shipping.xml", ET.tostring(form))])
+    files = _members(c.get(run["download_url"]).content)
+    ledger = json.loads(files["fox-package/mapping-ledger.json"])
+    typed, = ledger["typed_draft_lookups"]
+    scalar, = ledger["scalar_event_procedures"]
+    statuses = {r["source_unit_id"]:r["status"] for r in run["discrepancies"]["units"]}
+    assert statuses[typed["source_unit_id"]] == "generated"
+    assert typed["source_unit_id"] != ledger["lov_returns"][0]["source_group_unit_id"]
+    assert typed["page_file"] in files and typed["changed_input_only"]
+    assert statuses[scalar["source_unit_id"]] == "encoded_unwired"
+    assert scalar["procedure_name"].encode() in files[scalar["code_member"]]
+
+
 def test_queue_exact_source_consent_without_ai_approvals(client):
     c, root, pid, body, run = queue(client)
     assert run['conversion_profile'] == 'xml-mapping-v1'

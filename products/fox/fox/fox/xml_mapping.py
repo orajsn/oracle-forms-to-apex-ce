@@ -33,6 +33,7 @@ from .forms_synthetic_save import apply_synthetic_saves
 from .forms_item_validation import apply_item_validations
 from .forms_interface_inventory import build_interface_inventory, interface_inventory_csv
 from .forms_gap_requirements import add_gap_requirements
+from .forms_event_callables import CODE_MEMBER as SCALAR_EVENT_CODE, build_event_callables
 from .forms_lov_return import apply_lov_returns
 from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
@@ -50,6 +51,7 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "typed_draft_lookup": "fox.validation.typed-row-lookup",
     "literal_item_focus": "fox.item.literal-focus-command",
     "item_null_query_override": "fox.item.null-query-command",
     "cross_block_item_lookup_validation": "fox.validation.draft-item-lookup",
@@ -167,12 +169,18 @@ def mapping_catalog():
          "Current record state, navigation side effects and whole-form commits require the recorded providers where applicable."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
+        ("fox.event.scalar-procedure", "A complete scalar trigger assigns global or clock values, optionally guarded by record status or a numeric validation.",
+         "Generate a PL/SQL procedure with explicit typed inputs and current-row outputs.",
+         "The event host must supply the correct row, trusted Forms context and target field constraints. The procedure is available in scalar-events.sql."),
+        ("fox.validation.typed-row-lookup", "A complete field change reads companion values by the typed key and defines its missing-row behavior.",
+         "Recalculate the selected draft's companion fields when keeping a changed input.",
+         "The generated editor uses the private synthetic lookup table. It validates a typed value on explicit submission."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 20,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 21,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
-                                "forms_route_lookup_plan.py", "forms_route_lookup_native.py",
+                                "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -843,8 +851,21 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         review = policy_encoded.pop(uid, None)
         if review is None or review["source_unit_sha256"] != operation["source_unit_sha256"]:
             raise ValueError("Record entry requires the exact encoded source policy.")
+    typed_lookups = []
+    for op in row_lookups:
+        for typed in op["native_target"].get("typed_lookup_receipts", []):
+            if (typed["source_binding"] != packet["source_binding"]
+                    or typed["source_caller_item_id"] != op["source_caller_id"]
+                    or source_objects[typed["source_owner_id"]]["parent_id"] != op["source_caller_id"]
+                    or typed["source_event"] != "POST-CHANGE" or not typed["native_event_wired"]
+                    or {p["page_file"] for p in typed["page_bindings"]} != {op["page_file"],op["chooser_file"]}
+                    or any(p["page_file"] not in files for p in typed["page_bindings"])):
+                raise ValueError("Typed lookup does not match its caller and native pages.")
+            typed_lookups.append(dict(typed, kind="typed_draft_lookup",
+                                      operation_id="typed-lookup-" + typed["source_unit_id"], page_file=op["page_file"]))
     source_adapters = {}
     for receipt, reason in (
+        ({"generated_operations": typed_lookups}, "typed_lookup_draft_generated"),
         (commands, "item_command_generated"),
         (item_validation, "item_lookup_validation_wired_to_draft"),
         (save_receipt, "parent_copy_wired_to_synthetic_write"),
@@ -875,7 +896,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                 raise ValueError("A lookup cannot replace existing generated behavior.")
             row.update(status="generated_wired_adapted", reason="source_lookup_generated_read_interface_pending",
                        operation_id=looked[uid]["operation_id"])
-        if uid in lookup_gaps:
+        if uid in lookup_gaps and uid not in source_adapters:
             row.update(reason=lookup_gaps[uid])
         if uid in buffer_gaps:
             row.update(reason=buffer_gaps[uid])
@@ -950,6 +971,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             if op.get('draft_wiring'):
                 row['reason'] = ('item_entry_draft_callable' if op['draft_wiring']=='routine'
                                  else 'item_entry_draft_connected')
+    scalar_events, scalar_sql = build_event_callables(documents, packet, chunks, coverage, project_id)
+    if scalar_sql:
+        files[SCALAR_EVENT_CODE] = scalar_sql
+        for row in coverage:
+            if row["source_unit_id"] in scalar_events:
+                row.update(encoding_status="generated_unwired", reason="scalar_event_host_pending")
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -971,6 +998,9 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                 reason="Value-copy review code is generated; insert/update event wiring and required guards remain pending.",
                 next_action="Review assignment-review.sql and activate only after the native write lifecycle is implemented.")
     for row in remediation:
+        if row.get("code") == "code_unit_not_translated" and row.get("code_unit_id") in scalar_events:
+            row.update(code="scalar_event_host_pending", reason="The complete scalar procedure is generated.",
+                       next_action="Bind its typed parameters to a verified row and event before installation.")
         if row.get("code_unit_id") in policy_encoded and row.get("code") == "code_unit_not_translated":
             row.update(code="policy_generated_unwired", encoding_status="generated_unwired",
                 reason="Complete policy review code generated; original event and state providers remain unwired.",
@@ -1018,6 +1048,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in scalar_events:
+            row.update(rule_id="fox.event.scalar-procedure", target=scalar_events[uid])
         if uid in entry_targets:
             row.update(rule_id='fox.workflow.xml-item-entry',target=entry_targets[uid])
         if uid in delete_targets:
@@ -1059,6 +1091,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "source_lookups": list(looked.values()),
         "record_group_reports": final_groups,
         "lov_returns": lov_receipt["generated_operations"],
+        "scalar_event_procedures": list(scalar_events.values()),
+        "typed_draft_lookups": typed_lookups,
         "lov_return_gaps": lov_receipt["gaps"],
         "coordination_partial_units": list(coordination.values()),
         "approval_readiness": [{"source_unit_id": uid, "source_unit_sha256": op["source_unit_sha256"],
@@ -1169,6 +1203,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "verified and business accepted are separate states. This package has no target import or runtime proof.\n\n"
         "Read discrepancies.json for all source-unit statuses, generated adaptations and reference candidates to verify. Findings do not imply missing files or prevent generation of supported parts. "
         "Read mapping-ledger.json, behavior-coverage.json, remediation.json and supporting-schema.sql. "
+        "When scalar_event_procedures is populated in the ledger, scalar-events.sql contains those complete "
+        "trigger procedures and the ledger identifies their parameters. An event host supplies the current row and trusted globals. "
         "The interface register lists source call sites, supplied argument forms and affected actions. "
         "See metadata.json for included JSON or CSV exports. The mandatory reference inventory is in discrepancy-evidence.json. "
         "Database blocks default to read-only reports; control values use APEX session state, not customer-table writes. "

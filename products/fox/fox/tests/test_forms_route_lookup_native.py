@@ -14,9 +14,9 @@ import sqlite3
 
 import pytest
 
-from fox.forms_route_lookup_native import action_code, choice_query, render_row_lookup
+from fox.forms_route_lookup_native import action_code, choice_query, render_row_lookup, _source_message
 from fox.forms_route_lookup_plan import compile_row_lookups
-from test_forms_route_lookup_plan import SOURCE, prepare
+from test_forms_route_lookup_plan import SOURCE, prepare, typed_source, TYPED_BODY
 
 
 @lru_cache(maxsize=4)
@@ -183,7 +183,7 @@ class EmittedSqlBoundary:
     def sql(self,text):
         text = re.sub(r'\bsysdate\b','now_clock()',text,flags=re.I)
         text = text.replace('utl_raw.cast_to_raw','cast_to_raw')
-        return re.sub(r'\bl_(uuid|return[0-9]+)\b',r':l_\1',text)
+        return re.sub(r'\bl_(uuid|return[0-9]+|typed[0-9]+|prior_caller|caller_unchanged)\b',r':l_\1',text)
 
     def seed(self, rows):
         names = [col['name'] for col in self.c['columns']]
@@ -223,6 +223,50 @@ class EmittedSqlBoundary:
         for condition in re.findall(r'if (nvl\(lengthb\(l_return.*?) then',code):
             if self.db.execute(self.sql('select case when '+condition+' then 1 else 0 end'),params).fetchone()[0]:
                 return False
+        if not self.typed_boundary(code,params):
+            return False
+        statement, = re.findall(r'update FOX_RD_.*?;',code,re.S)
+        return self.db.execute(self.sql(statement),params).rowcount==1
+
+    def typed_boundary(self, code, params):
+        """Model PL/SQL branch/exception control, executing emitted SQL."""
+        self.last_error = None
+        prior = re.search(r'select (F\d+) into l_prior_caller (.*?);',code,re.S)
+        if not prior:
+            return True
+        params['l_prior_caller'] = self.db.execute(self.sql('select '+prior[1]+' '+prior[2]),params).fetchone()[0]
+        comparison = re.search(r'select (case when .*?) into l_caller_unchanged from dual;',code,re.S)[1]
+        same = self.db.execute(self.sql('select '+comparison),params).fetchone()[0]
+        params['l_caller_unchanged'] = same
+        lookup = re.search(r'select ([A-Z0-9_$#,]+) into (l_typed1.*?) from (.*?);',code,re.S)
+        if not same:
+            if lookup is None:
+                self.last_error = 'unresolved'
+                return False
+            rows = self.db.execute(self.sql('select '+lookup[1]+' from '+lookup[3]),params).fetchall()
+            if len(rows) != 1:
+                self.last_error = 'no_data_found' if not rows else 'too_many_rows'
+                return False
+            params.update({'l_typed'+str(i):value for i,value in enumerate(rows[0],1)})
+            for condition in re.findall(r'if (nvl\(lengthb\(l_typed.*?) then',code):
+                if self.db.execute(self.sql('select case when '+condition+' then 1 else 0 end'),params).fetchone()[0]:
+                    self.last_error = 'constraint'
+                    return False
+        elif lookup:
+            # Oracle local variables are null before assignment.
+            params.update({name:None for name in re.findall(r'l_typed\d+',lookup[2])})
+        return True
+
+    def typed_keep(self,row,revision,label,value):
+        code = action_code(self.c,self.page,'FOX_ROW_KEEP')
+        params = {f'P{self.page}_ROW':row,f'P{self.page}_REV':str(revision),
+                  f'P{self.page}_LABEL':label,f'P{self.page}_F1':value or None}
+        lock = re.search(r'select REVISION into l_revision (.*?) for update nowait;',code,re.S)[1]
+        current = self.db.execute(self.sql('select REVISION '+lock),params).fetchall()
+        if len(current)!=1 or current[0][0]!=revision:
+            return False
+        if not self.typed_boundary(code,params):
+            return False
         statement, = re.findall(r'update FOX_RD_.*?;',code,re.S)
         return self.db.execute(self.sql(statement),params).rowcount==1
 
@@ -356,3 +400,173 @@ def test_optional_project_local_original_contract_emits_and_executes_generic_cho
     result = render_row_lookup(c,7800)
     assert result == render_row_lookup(c,7800)
     assert len([f for f in c['returns'] if f['display_only']])==2
+
+
+def typed_contract(renamed=False, body=TYPED_BODY):
+    raw = typed_source(body)
+    if renamed:
+        for a,b in [(b'LINES',b'POSITIONS'),(b'VIA',b'PATH'),(b'NETWORK',b'GRAPH'),
+                    (b'CODE',b'IDENTITY'),(b'START_AT',b'LEFT_END'),(b'END_AT',b'RIGHT_END'),
+                    (b'DEPARTURE',b'LEFT_NODE'),(b'ARRIVAL',b'RIGHT_NODE')]:
+            raw = raw.replace(a,b)
+    c, = compile_row_lookups(*prepare(raw))
+    return c
+
+
+@pytest.mark.parametrize('renamed',[False,True])
+def test_typed_keep_exact_source_lookup_changes_all_companions_only_for_changed_caller(renamed):
+    b = EmittedSqlBoundary(compiled_contract=typed_contract(renamed))
+    first,second = b.create('First'),b.create('Other')
+    b.seed([('A','NORTH','SOUTH','1'),('INACTIVE','EAST','WEST','0')])
+    assert b.typed_keep(first,0,'First','A')
+    assert b.draft(first)==('First',1,'A','NORTH','SOUTH')
+    assert b.draft(second)==('Other',0,None,None,None)
+    # Changing the source catalog does not rerun an unchanged field event.
+    b.db.execute('delete from '+b.m['catalog_table'])
+    assert b.typed_keep(first,1,'Label only','A')
+    assert b.draft(first)==('Label only',2,'A','NORTH','SOUTH')
+    b.seed([('INACTIVE','EAST','WEST','0')])
+    assert not b.choices(first,2) # chooser still has its active predicate
+    assert b.typed_keep(first,2,'Typed inactive','INACTIVE')
+    assert b.draft(first)==('Typed inactive',3,'INACTIVE','EAST','WEST')
+    assert not b.typed_keep(first,2,'Stale','INACTIVE')
+    assert b.draft(first)==('Typed inactive',3,'INACTIVE','EAST','WEST')
+
+
+@pytest.mark.parametrize('bad',['MISSING',None,'','a','A '])
+def test_typed_missing_null_case_and_space_mismatch_preserve_prior_values_and_revision(bad):
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    row = b.create('Draft')
+    b.seed([('A','NORTH','SOUTH','1')])
+    assert b.typed_keep(row,0,'Draft','A')
+    before = b.draft(row)
+    assert not b.typed_keep(row,1,'Must rollback',bad)
+    assert b.last_error == 'no_data_found' and b.draft(row)==before
+    code = action_code(b.c,b.page,'FOX_ROW_KEEP')
+    assert 'raise_application_error(-20031,'+_source_message('Invalid routing')+')' in code
+    assert 'when others then rollback to fox_row_lookup' in code
+
+
+def test_typed_ambiguous_even_inactive_match_and_changed_catalog_are_not_chooser_semantics():
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    row = b.create('Draft')
+    b.seed([('A','NORTH','SOUTH','1'),('A','EAST','WEST','0')])
+    choices = b.choices(row)
+    assert len(choices)==1
+    assert not b.typed_keep(row,0,'Draft','A') and b.last_error=='too_many_rows'
+    assert not b.apply(row,0,choices[0][-1]) and b.last_error=='too_many_rows'
+    assert b.draft(row)==('Draft',0,None,None,None)
+    b.db.execute('delete from '+b.m['catalog_table'])
+    b.seed([('A','CURRENT','TARGET','1')])
+    assert not b.apply(row,0,choices[0][-1]) # old chooser full-value token
+    assert b.typed_keep(row,0,'Draft','A')
+    assert b.draft(row)==('Draft',1,'A','CURRENT','TARGET')
+
+
+def test_typed_apply_cannot_skip_event_but_unchanged_caller_preserves_normal_lov_returns():
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    row = b.create('Draft')
+    b.seed([('A','NORTH','SOUTH','1')])
+    assert b.apply(row,0,b.choices(row)[0][-1])
+    assert b.draft(row)==('Draft',1,'A','NORTH','SOUTH')
+    b.db.execute('update '+b.m['catalog_table']+' set DEPARTURE=\'CHANGED\'')
+    # Same caller value does not invoke source POST-CHANGE again. Ordinary
+    # complete LOV mapping still applies the newly selected companion values.
+    assert b.apply(row,1,b.choices(row,1)[0][-1])
+    assert b.draft(row)==('Draft',2,'A','CHANGED','SOUTH')
+
+
+@pytest.mark.parametrize('key,value',[('APP_ID','43'),('APP_SESSION','OTHER'),('APP_USER','OTHER'),('APP_USER','NOBODY'),('APP_USER',None)])
+def test_typed_wrong_owner_or_session_cannot_run_event_or_update(key,value):
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    row = b.create('Draft')
+    b.seed([('A','NORTH','SOUTH','1')])
+    b.context[key]=value
+    assert not b.typed_keep(row,0,'Changed','A')
+    assert b.draft(row)==('Draft',0,None,None,None)
+
+
+def test_typed_receipt_binds_source_unit_pages_and_adaptation_without_runtime_claim():
+    c = typed_contract()
+    result = render_row_lookup(c,7800)
+    receipt, = result['metadata']['typed_lookup_receipts']
+    assert receipt['source_unit_id']==c['typed_lookup']['source_unit_id']
+    assert receipt['source_unit_sha256']==c['typed_lookup']['source_unit_sha256']
+    assert receipt['native_event_wired'] and receipt['changed_input_only']
+    assert receipt['page_bindings']==[
+        {'page_id':7800,'page_file':result['pages'][0]['page_file'],'request':'FOX_ROW_KEEP'},
+        {'page_id':7801,'page_file':result['pages'][1]['page_file'],'request':'FOX_ROW_APPLY'}]
+    assert receipt['adaptation'] and receipt['unresolved_semantics']
+    assert not any(receipt[k] for k in ['source_query_executed','oracle_compiled','runtime_verified','business_accepted'])
+    assert result['metadata']['source_post_change_wired'] and not result['metadata']['source_post_change_executed']
+    code = action_code(c,7800,'FOX_ROW_KEEP')
+    lookup = re.search(r'select .*? into l_typed1.*?;',code)[0]
+    assert 'STATE' not in lookup and c['source_table'] not in lookup
+    assert code.index('for update nowait') < code.index('into l_prior_caller') < code.index('into l_typed1') < code.index('update FOX_RD_')
+
+
+def test_nonmatching_body_mutation_is_gated_on_keep_and_apply():
+    c = typed_contract(body=TYPED_BODY.replace('FROM NETWORK','FROM DIFFERENT_TABLE'))
+    b = EmittedSqlBoundary(compiled_contract=c)
+    row = b.create('Draft')
+    b.seed([('A','NORTH','SOUTH','1')])
+    assert not b.typed_keep(row,0,'Draft','A') and b.last_error=='unresolved'
+    assert not b.apply(row,0,b.choices(row)[0][-1]) and b.last_error=='unresolved'
+    assert b.draft(row)==('Draft',0,None,None,None)
+
+
+def test_typed_message_literal_is_not_interpreted_as_code_or_binding():
+    message = "Invalid ''route'' & :value <tag>"
+    c = typed_contract(body=TYPED_BODY.replace('Invalid routing',message))
+    code = action_code(c,7800,'FOX_ROW_KEEP')
+    expression = re.search(r"apex_escape.html\(unistr\('([^']+)'\)\)",code)[1]
+    decoded = bytes.fromhex(expression.replace('\\','')).decode('utf-16-be')
+    assert decoded==message.replace("''", "'")
+    assert '<tag>' not in code and '& :value' not in code
+    assert render_row_lookup(c,7800)['metadata']['typed_lookup_receipts'][0]['no_data_message']==message.replace("''", "'")
+
+
+def test_typed_wrong_row_token_expiry_and_companion_constraints_preserve_every_row():
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    first,second = b.create('First'),b.create('Second')
+    b.seed([('A','NORTH','SOUTH','1')])
+    token = b.choices(first)[0][-1]
+    assert not b.apply(second,0,token)
+    assert b.draft(first)==('First',0,None,None,None)
+    assert b.draft(second)==('Second',0,None,None,None)
+    b.db.execute('update '+b.m['catalog_table']+' set DEPARTURE=?',('界'*4,))
+    assert not b.typed_keep(first,0,'Changed','A') and b.last_error=='constraint'
+    assert b.draft(first)==('First',0,None,None,None)
+    b.clock += 2
+    assert not b.typed_keep(first,0,'Expired','A')
+    assert b.draft(first)==('First',0,None,None,None)
+
+
+def test_unchanged_null_caller_keeps_label_without_lookup_or_fabricated_companions():
+    b = EmittedSqlBoundary(compiled_contract=typed_contract())
+    row = b.create('Before')
+    assert b.typed_keep(row,0,'After',None)
+    assert b.draft(row)==('After',1,None,None,None)
+
+
+@pytest.mark.parametrize('mutation',['table','key','target','message','proof','filter'])
+def test_typed_renderer_rejects_inconsistent_contract(mutation):
+    c = typed_contract()
+    t = c['typed_lookup']
+    if mutation=='table': t['source_table']='UNRELATED'
+    elif mutation=='key': t['key_column']='OTHER'
+    elif mutation=='target': t['assignments'][0]['field']=deepcopy(c['caller'])
+    elif mutation=='message': t['no_data_message']='bad\nmessage'
+    elif mutation=='proof': t['source_unit_sha256']='invented'
+    else: t['active_filter_applied']=True
+    with pytest.raises(ValueError,match='ROW_LOOKUP_NATIVE_TYPED_'):
+        render_row_lookup(c,7800)
+
+
+@pytest.mark.parametrize('action',['FOX_ROW_KEEP','FOX_ROW_APPLY'])
+def test_changed_input_comparison_keeps_sql_only_decode_out_of_procedural_if(action):
+    code = action_code(typed_contract(),7800,action)
+    assert re.search(r'select case when decode\(utl_raw.cast_to_raw\(l_prior_caller\).*? into l_caller_unchanged from dual;',code)
+    assert 'if l_caller_unchanged=0 then' in code
+    assert not re.search(r'\bif\s+(?:not\s*\()?decode\(',code,re.I)
+    assert 'case when l_caller_unchanged=1 then' in code

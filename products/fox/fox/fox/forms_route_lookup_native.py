@@ -1,9 +1,9 @@
 """Native source-linked row drafts and atomic complete LOV return.
 
 Only the private supporting draft/catalog tables are accessed. The catalog is
-empty until a tester supplies synthetic values; the source SELECT predicate is
-translated, never replaced with a precomputed choice list. No source lifecycle
-trigger, existing business row or original database interface is executed here.
+empty until a tester supplies synthetic values. Chooser predicates are retained;
+proved typed POST-CHANGE lookups use their own unfiltered source semantics.
+No original database interface or business row is accessed here.
 """
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import re
 
 from forms2apex import native_buffer, native_record_groups as groups
 from .forms_lov_return import _fingerprint
+from .forms_route_lookup_typed import message_supported
 
 SCOPE = 'fox-native-row-lookup-v1'
 REQUESTS = ('FOX_ROW_CREATE', 'FOX_ROW_KEEP', 'FOX_ROW_CHOOSE', 'FOX_ROW_DISCARD', 'FOX_ROW_APPLY')
@@ -77,6 +78,21 @@ def _checked(contract):
           and predicate['right']['kind'] == 'string', 'ACTIVE_LITERAL_PREDICATE')
     for parts in query['projections'] + [predicate['left']['parts']] + [o['parts'] for o in query['order']]:
         _need(len(parts) == 1 or (len(parts) == 2 and parts[0] == c['source_table']), 'COLUMN_QUALIFIER')
+    typed = c.get('typed_lookup')
+    if typed:
+        _need(not c.get('typed_lookup_gap') and typed['source_table'] == c['source_table'] and
+              typed['key_column'] == c['caller']['source_column'] and
+              typed['caller_source_item_id'] == c['source_caller_item_id'], 'TYPED_SOURCE')
+        expected = [f for f in fields if f != c['caller']]
+        _need(len(typed['assignments']) == len(expected) and
+              {a['field']['source_item_id'] for a in typed['assignments']} == {f['source_item_id'] for f in expected}
+              and all(a['field'] in expected and a['source_column'] == a['field']['source_column']
+                      for a in typed['assignments']), 'TYPED_COMPLETE_ASSIGNMENTS')
+        _need(typed['source_event'] == 'POST-CHANGE' and typed['no_data_failure'] == 'FORM_TRIGGER_FAILURE'
+              and typed['active_filter_applied'] is False and typed['exact_one_required'] is True
+              and re.fullmatch('[a-f0-9]{64}', typed['source_unit_sha256']), 'TYPED_PROOF')
+        message = typed['no_data_message']
+        _need(message_supported(message), 'TYPED_MESSAGE')
     return c
 
 
@@ -179,6 +195,15 @@ def _validate_value(field, value, *, required=True):
     return f"if {test} then raise_application_error(-20031,'A value violates a source field length or required constraint.'); end if;\n"
 
 
+def _source_message(value):
+    # ASCII-only UTF-16 escapes keep quotes, SQLcl ampersand substitution and
+    # APEX &ITEM. substitution out of generated executable text. Escape the
+    # resulting source text before passing it to the APEX error notification.
+    encoded = value.encode('utf-16-be').hex().upper()
+    escaped = ''.join('\\'+encoded[i:i+4] for i in range(0,len(encoded),4))
+    return "apex_escape.html(unistr('" + escaped + "'))"
+
+
 def _identity(page):
     return f"""if :P{page}_ROW is null or not regexp_like(:P{page}_ROW,'^[A-F0-9]{{32}}$')
 or :P{page}_REV is null or not regexp_like(:P{page}_REV,'^[0-9]{{1,12}}$') then
@@ -231,6 +256,12 @@ def action_code(contract, page, action):
     table = names['draft_table']
     fields = c['fields']
     declarations = 'l_revision number; l_count number; l_uuid varchar2(32);'
+    typed = c.get('typed_lookup')
+    guarded = bool(typed or c.get('typed_lookup_gap')) and action in ('FOX_ROW_KEEP', 'FOX_ROW_APPLY')
+    if guarded:
+        declarations += 'l_prior_caller varchar2(4000);l_caller_unchanged number;'
+    if typed and guarded:
+        declarations += ''.join(f'l_typed{i} varchar2(4000);' for i in range(1,len(typed['assignments'])+1))
     if action == 'FOX_ROW_APPLY':
         declarations += ''.join(f'l_return{i} varchar2(4000);' for i in range(1,len(c['returns'])+1))
     code = f"declare {declarations}\nbegin\nsavepoint fox_row_lookup;\n{_auth()}"
@@ -254,6 +285,8 @@ values(to_number(v('APP_ID')),v('APP_SESSION'),v('APP_USER'),l_uuid,:P{page}_LAB
         # apply a token derived from the same revision. CAS remains explicit.
         code += f"select REVISION into l_revision from {table} where {_row(c,page)} for update nowait;\n"
         code += f"if l_revision<>to_number(:P{page}_REV) then raise_application_error(-20031,'Draft changed. Reopen it before choosing again.'); end if;\n"
+        if guarded:
+            code += f"select {c['caller']['column']} into l_prior_caller from {table} where {_row(c,page,revision=True)};\n"
         if action == 'FOX_ROW_DISCARD':
             code += f"delete from {table} where {_row(c,page,revision=True)};\n"
             code += f':P{page}_ROW:=null; :P{page}_REV:=null; :P{page}_LABEL:=null;\n'
@@ -285,6 +318,34 @@ values(to_number(v('APP_ID')),v('APP_SESSION'),v('APP_USER'),l_uuid,:P{page}_LAB
                         # the complete mapped choice, including required fields.
                         code += _validate_value(field, value, required=False)
                         assignments.append(f"{field['column']}={value}")
+            if guarded:
+                caller = c['caller']
+                value = (f'l_return{next(i for i,f in enumerate(c["returns"],1) if f == caller)}'
+                         if action == 'FOX_ROW_APPLY' else f':P{page}_F{caller["slot"]}')
+                # Null-safe byte comparison is the source field's changed-input
+                # boundary; label/other-field edits do not re-run POST-CHANGE.
+                same = native_buffer._parent_match('l_prior_caller', value)
+                # DECODE is SQL-only; evaluate the null-safe comparison in SQL
+                # before branching in procedural PL/SQL.
+                code += f'select case when {same} then 1 else 0 end into l_caller_unchanged from dual;\n'
+                code += 'if l_caller_unchanged=0 then\n'
+                if typed:
+                    selected = ','.join(a['source_column'] for a in typed['assignments'])
+                    into = ','.join(f'l_typed{i}' for i in range(1,len(typed['assignments'])+1))
+                    code += f'begin\nselect {selected} into {into} from {names["catalog_table"]} where {typed["key_column"]}={value};\n'
+                    code += "exception when no_data_found then\n raise_application_error(-20031," + _source_message(typed['no_data_message']) + ");\nend;\n"
+                    for i,a in enumerate(typed['assignments'],1):
+                        code += _validate_value(a['field'],f'l_typed{i}')
+                    # A single update below publishes caller and companions.
+                    # On an unchanged caller, Apply retains ordinary LOV values.
+                    code += 'end if;\n'
+                    for i,a in enumerate(typed['assignments'],1):
+                        column = a['field']['column']
+                        fallback = next((s.split('=',1)[1] for s in assignments if s.startswith(column+'=')), column)
+                        assignments = [s for s in assignments if not s.startswith(column+'=')]
+                        assignments.append(f'{column}=case when l_caller_unchanged=1 then {fallback} else l_typed{i} end')
+                else:
+                    code += "raise_application_error(-20031,'Caller POST-CHANGE is unresolved; nothing was applied.');\nend if;\n"
             code += f"update {table} set {','.join(assignments)},REVISION=REVISION+1,EXPIRES_AT=sysdate+1 where {_row(c,page,revision=True)};\n"
             code += "if sql%rowcount<>1 then raise_application_error(-20031,'Draft changed; nothing was applied.'); end if;\n"
             code += f":P{page}_REV:=to_char(l_revision+1,'TM9');\n"
@@ -402,6 +463,13 @@ def render_row_lookup(contract, page, *, source_page=None):
     pages = []
     for current in (page, chooser):
         choosing = current == chooser
+        source_behavior = 'Source POST-CHANGE, WHEN-CREATE-RECORD and other omitted behavior are not executed. '
+        if c.get('typed_lookup'):
+            source_behavior = ('The source POST-CHANGE is wired to changed caller values on Keep and Apply, using the synthetic catalog without the chooser active filter. '
+                'WHEN-CREATE-RECORD and other omitted behavior remain unexecuted. ')
+        elif c.get('typed_lookup_gap'):
+            source_behavior = ('Caller POST-CHANGE is unresolved; changing the caller with Keep or Apply is blocked. '
+                'WHEN-CREATE-RECORD and other omitted behavior remain unexecuted. ')
         body = ''.join(_item(current, suffix, suffix, kind='hidden', protected=True)
                        for suffix in ('ROW','REV','CHOICE'))
         body += _item(current,'LABEL','Session draft label',kind='displayOnly' if choosing else 'textField',sequence=10)
@@ -473,8 +541,7 @@ def render_row_lookup(contract, page, *, source_page=None):
                 'Each UUID identifies an independent draft belonging to your authenticated application session. '
                 'The choice list returns every declared XML mapping to that row. Display items are not direct inputs. '
                 'Keep draft changes before opening the list. Opening or cancelling the list preserves the row and revision. '
-                'These private supporting-table drafts expire after 24 hours and are never saved as original business rows. '
-                'Source POST-CHANGE, WHEN-CREATE-RECORD and other omitted behavior are not executed. '
+                'These private supporting-table drafts expire after 24 hours and are never saved as original business rows. '+ source_behavior +
                 'Create uses the label only; enter permitted source inputs after opening the new draft.')
         body += _process('load-row-draft',load,point='beforeHeader')
         path = f'pages/p{current:05d}-fox_row_{current}.apx'
@@ -491,5 +558,25 @@ def render_row_lookup(contract, page, *, source_page=None):
         'draft_fields':deepcopy(c['fields']),'return_mappings':deepcopy(c['returns']),
         'original_interface_enabled':False,'business_table_writes':False,'session_draft_table_writes':True,
         'synthetic_catalog_writes_from_ui':False,'source_post_change_executed':False,
+        'source_post_change_wired':bool(c.get('typed_lookup')),
         'source_when_create_record_executed':False,'oracle_compiled':False,'runtime_verified':False,'business_accepted':False}
+    metadata['typed_lookup_receipts'] = []
+    if c.get('typed_lookup'):
+        typed = c['typed_lookup']
+        metadata['typed_lookup_receipts'].append({**deepcopy(typed),
+            'source_module_id':c['source_module_id'], 'source_block_id':c['source_block_id'],
+            'source_caller_item_id':c['source_caller_item_id'], 'source_binding':c['source_binding'],
+            'source_contract_id':c['contract_id'],
+            'page_bindings':[
+                {'page_id':page,'page_file':pages[0]['page_file'],'request':'FOX_ROW_KEEP'},
+                {'page_id':chooser,'page_file':pages[1]['page_file'],'request':'FOX_ROW_APPLY'}],
+            'native_event_wired':True,'changed_input_only':True,
+            'source_post_change_executed':False,'source_post_change_wired':True,
+            'message_transport':'UTF-16 UNISTR; HTML-escaped source MESSAGE text; raised failure rolls back all draft assignments.',
+            'adaptation':'Explicit Keep or LOV Apply on an owned revision-checked synthetic session draft; source table is replaced by its empty synthetic catalog.',
+            'source_query_executed':False,'oracle_compiled':False,'runtime_verified':False,'business_accepted':False,
+            'unresolved_semantics':['Original business-table contents and persistence',
+                                    'Oracle/APEX execution and source business acceptance']})
+    if c.get('typed_lookup_gap'):
+        metadata['typed_lookup_gap'] = c['typed_lookup_gap']
     return {'pages':pages,'supporting_sql':_ddl(c,names).encode(),'metadata':metadata}

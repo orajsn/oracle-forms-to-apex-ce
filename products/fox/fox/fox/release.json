@@ -1,10 +1,10 @@
 {
-  "version": "0.52.0",
-  "released_on": "2026-11-21",
-  "title": "Apply an optional lookup to the selected draft row",
+  "version": "0.53.0",
+  "released_on": "2026-11-22",
+  "title": "Generate reference queries and more field-event code",
   "changes": [
-    "Select a catalog choice to fill the calling field and its declared display fields together on the same draft row.",
-    "Switch between session-owned rows and recheck the selected choice and revision before applying changes."
+    "Generate a broader set of source-defined lookup queries and preserve their selection and sorting rules.",
+    "Resolve a changed typed key on supported session drafts and emit callable procedures for complete scalar audit and validation triggers."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

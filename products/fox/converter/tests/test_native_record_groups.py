@@ -2,7 +2,9 @@
 from copy import deepcopy
 from pathlib import Path
 import re
+import sqlite3
 import sys
+from xml.sax.saxutils import escape
 
 import pytest
 
@@ -194,3 +196,248 @@ def test_only_query_record_group_kind_is_adapted():
 def test_sql_string_separators_cannot_change_when_embedded_in_apexlang(separator):
     with pytest.raises(ValueError, match="LITERAL_CONTEXT"):
         parse_record_group_query("SELECT C FROM T WHERE FLAG = 'a" + separator + "b'")
+
+
+@pytest.mark.parametrize('raw', [
+    'select all C.CODE, C.DESCRIPTION from C order by CODE desc, DESCRIPTION asc',
+    'select C.CODE, C.DESCRIPTION from C',
+    "select all C.CODE, C.DESCRIPTION from C where FLAG = 'Y' order by CODE",
+    "select all CODE from C where CODE in (select all CODE from ALLOWED where FLAG = :GLOBAL.FLAG)",
+])
+def test_projected_single_table_and_explicit_all_round_trip(raw):
+    query, refs, _ = parse_record_group_query(raw)
+    replacements = {tuple(ref): ':TRUSTED_FLAG' for ref in refs}
+    rendered = render_query(query, replacements)
+    reparsed, rebound, _ = parse_record_group_query(rendered)
+    assert reparsed['projections'] == query['projections']
+    assert reparsed['order'] == query['order']
+    assert reparsed.get('select_all') == query.get('select_all')
+    assert rebound == ([['TRUSTED_FLAG']] if refs else [])
+    if not query['predicates']:
+        assert '\nWHERE ' not in rendered
+        guarded = render_query(query, replacements, [":READY = 'Y'"])
+        assert guarded.count('\nWHERE ') == 1
+        if query['order']:
+            assert guarded.index('\nWHERE ') < guarded.index('\nORDER BY ')
+
+
+@pytest.mark.parametrize('raw', [
+    'SELECT ALL CODE FROM C,T',
+    'SELECT CODE FROM C,T ORDER BY CODE',
+    'SELECT ALL * FROM C',
+    'SELECT DISTINCT CODE FROM C',
+    'SELECT ALL DISTINCT CODE FROM C',
+    'SELECT ALL CODE FROM C WHERE',
+    'SELECT ALL CODE FROM C WHERE FLAG =',
+    'SELECT ALL CODE FROM C WHERE FLAG = :GLOBAL.FLAG AND',
+    'SELECT ALL CODE FROM C ORDER BY 2',
+    'SELECT ALL CODE FROM C ORDER BY CODE NULLS FIRST',
+    'SELECT ALL CODE FROM C UNION SELECT CODE FROM PRIVATE_CODES',
+    'SELECT ALL CODE FROM C; DELETE FROM C',
+    'SELECT ALL CODE FROM C FOR UPDATE',
+    'SELECT ALL CODE FROM C OFFSET 1 ROWS',
+    'SELECT ALL CODE FROM C WHERE FLAG = :GLOBAL.FLAG OR 1 = 1',
+    'SELECT ALL CODE FROM C WHERE CODE NOT IN (1,2)',
+    'SELECT ALL CODE AS NAME.EXTRA FROM C',
+    'SELECT ALL CODE FROM C ALIAS',
+    'SELECT ALL CODE FROM C ORDER BY CODE WHERE FLAG = 1',
+    'SELECT ALL CODE FROM C WHERE CODE IN (SELECT CODE FROM C,T)',
+])
+def test_new_select_family_rejects_complete_unsupported_queries(raw):
+    with pytest.raises(ValueError):
+        parse_record_group_query(raw)
+
+
+@pytest.mark.parametrize('where', ['', " WHERE FLAG = 'Y'", ' WHERE CODE = :CODE'])
+def test_render_preserves_bag_projection_nulls_filter_and_order(where):
+    # SQLite is a local SQL semantics check, not an Oracle/runtime acceptance.
+    with sqlite3.connect(':memory:') as db:
+        db.execute('CREATE TABLE CHOICES (CODE TEXT, DESCRIPTION TEXT, FLAG TEXT)')
+        db.executemany('INSERT INTO CHOICES VALUES (?,?,?)', [
+            ('B', 'second', 'Y'), ('A', 'first', 'Y'), ('A', 'first', 'Y'),
+            ('A', None, 'N'), (None, 'unknown', 'Y'), ('Z', 'last', None)])
+        raw = 'SELECT ALL CODE, DESCRIPTION FROM CHOICES' + where + ' ORDER BY CODE DESC, DESCRIPTION ASC'
+        query, refs, _ = parse_record_group_query(raw)
+        rendered = render_query(query, {tuple(ref): ':INPUT_CODE' for ref in refs})
+        original = db.execute(raw, {'CODE': 'A'}).fetchall()
+        assert db.execute(rendered, {'INPUT_CODE': 'A'}).fetchall() == original
+        assert original.count(('A', 'first')) == 2
+        guarded = render_query(query, {tuple(ref): ':INPUT_CODE' for ref in refs}, [":READY = 'Y'"])
+        assert db.execute(guarded, {'INPUT_CODE': 'A', 'READY': 'N'}).fetchall() == []
+        assert db.execute(guarded, {'INPUT_CODE': 'A', 'READY': 'Y'}).fetchall() == original
+
+
+@pytest.mark.parametrize('raw,has_global', [
+    ('SELECT ALL PARCEL_NO, PARCEL_WEIGHT FROM SOURCE_PARCELS ORDER BY PARCEL_NO', False),
+    ('SELECT PARCEL_NO, PARCEL_WEIGHT FROM SOURCE_PARCELS', False),
+    ('SELECT ALL PARCEL_NO, PARCEL_WEIGHT FROM SOURCE_PARCELS WHERE PARCEL_BRANCH = :GLOBAL.DIVISION', True),
+])
+def test_new_family_is_navigable_and_retains_all_interface_gates(raw, has_global):
+    source = re.sub(rb'RecordGroupQuery="[^"]*"',
+        ('RecordGroupQuery="' + escape(raw, {'"': '&quot;'}) + '"').encode(), SOURCE)
+    args = baseline(source)
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['gaps'] and len(receipt['generated_operations']) == 1
+    op = receipt['generated_operations'][0]
+    page = files[op['page_file']].decode()
+    chooser = files[op['chooser_file']].decode()
+    parent = files[op['report_files'][0]].decode()
+    assert f'page: {op["chooser_page_id"]}' in parent
+    assert f'page: {op["page_id"]}' in chooser and '#FOX_ROW_ID#' in chooser
+    assert 'SOURCE_PARCELS' not in chooser
+    assert 'EXISTS (SELECT 1 FROM FOX_NATIVE_' in page
+    assert "NVL(V('" + op['readiness_item'] + "'), 'N') = 'Y'" in page
+    assert 'serverSideCondition' in page and 'is not null' in page
+    assert 'Validate selected synthetic source row' in page
+    assert 'checksumRequiredSessionLevel' in page
+    assert 'Original database reads are disabled' in page
+    assert 'sessionStateProtection: restricted' in files['shared-components/app-items.apx'].decode()
+    assert bool(op['global_bindings']) is has_global
+    assert not receipt['original_reads_enabled'] and not op['original_interface_enabled']
+    assert not op['source_query_executed'] and not op['business_accepted']
+    assert not op['lov_return_implemented']
+    assert op['unimplemented_lov_return_mapping_count'] == 1
+    if raw.startswith('SELECT ALL '):
+        assert 'SELECT ALL PARCEL_NO, PARCEL_WEIGHT' in page
+    if 'ORDER BY' in raw:
+        assert 'ORDER BY PARCEL_NO' in page
+    if has_global:
+        assert ':GLOBAL.DIVISION' not in page
+        assert 'PARCEL_BRANCH = :' + op['global_bindings'][0]['app_item'] in page
+
+
+def test_implicit_all_filtered_tree_and_sql_remain_compatible():
+    query, refs, _ = parse_record_group_query('SELECT CODE FROM CHOICES WHERE FLAG = :GLOBAL.FLAG ORDER BY CODE')
+    assert set(query) == {'projections', 'tables', 'predicates', 'order'}
+    assert refs == [['GLOBAL', 'FLAG']]
+    assert render_query(query, {('GLOBAL', 'FLAG'): ':TRUSTED_FLAG'}) == (
+        'SELECT CODE\nFROM CHOICES\nWHERE FLAG = :TRUSTED_FLAG\nORDER BY CODE')
+
+
+def test_unfiltered_query_cannot_invent_an_ambiguous_navigation_context():
+    source = re.sub(rb'RecordGroupQuery="[^"]*"',
+        b'RecordGroupQuery="SELECT ALL PARCEL_NO, PARCEL_WEIGHT FROM SOURCE_PARCELS"', SOURCE)
+    source = source.replace(b'<LOV Name=', b'''<Block Name="SECOND" DatabaseBlock="true">
+        <Item Name="CODE" DataType="Char" DatabaseItem="true" MaximumLength="10"/>
+        </Block><LOV Name=''')
+    args = baseline(source)
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['generated_operations'] and files == args[-1]
+    assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_NAVIGATION_CONTEXT_NOT_UNIQUE'
+
+
+@pytest.mark.parametrize('raw', [
+    "SELECT ALL C.CODE, C.DESCRIPTION FROM C WHERE ACTIVE = 'Y' AND CODE NOT IN ('990','992') ORDER BY 1",
+    "SELECT CODE ID, (DESCRIPTION) NAME FROM C WHERE ACTIVE = 'Y' ORDER BY 1 DESC",
+    "SELECT C.CODE AS ID, (C.DESCRIPTION) AS NAME FROM C ORDER BY ID, 2 DESC",
+    "SELECT CODE FROM C WHERE CODE IN ('A', 'B', NULL) ORDER BY 1",
+])
+def test_literal_lists_aliases_and_ordinals_round_trip(raw):
+    query, refs, _ = parse_record_group_query(raw)
+    assert not refs
+    rendered = render_query(query, {})
+    assert parse_record_group_query(rendered)[0] == query
+    assert query['order'][0]['parts'][-1] == query['projections'][0][-1]
+    if ' AS ' in rendered:
+        assert query['projections'] == [['ID'], ['NAME']]
+        assert 'projection_sources' in query
+
+
+@pytest.mark.parametrize('clause,expected', [
+    ("CODE NOT IN ('990','992')", [('A', 'first'), ('A', 'first'), ('B', None)]),
+    ("CODE IN ('A','B')", [('A', 'first'), ('A', 'first'), ('B', None)]),
+    ("CODE NOT IN ('990', NULL)", []),
+    ("CODE IN ('A', NULL)", [('A', 'first'), ('A', 'first')]),
+    ("CODE NOT IN ('990', '')", []),
+])
+def test_new_query_family_preserves_exact_bag_rows_nulls_aliases_and_order(clause, expected):
+    with sqlite3.connect(':memory:') as db:
+        db.execute('CREATE TABLE C (CODE TEXT, DESCRIPTION TEXT, ACTIVE TEXT)')
+        db.executemany('INSERT INTO C VALUES (?,?,?)', [
+            ('B', None, 'Y'), ('A', 'first', 'Y'), ('A', 'first', 'Y'),
+            ('990', 'excluded', 'Y'), ('992', 'excluded', 'Y'),
+            (None, 'null code', 'Y'), ('A', 'inactive', 'N')])
+        raw = f"SELECT ALL CODE ID, (DESCRIPTION) NAME FROM C WHERE ACTIVE = 'Y' AND {clause} ORDER BY 1, 2"
+        query, _, _ = parse_record_group_query(raw)
+        rendered = render_query(query, {})
+        # Oracle's empty string is NULL; SQLite needs this explicit model.
+        sqlite_raw = raw.replace("''", 'NULL')
+        sqlite_rendered = rendered.replace("''", 'NULL')
+        cursor = db.execute(sqlite_rendered)
+        assert [column[0] for column in cursor.description] == ['ID', 'NAME']
+        assert cursor.fetchall() == db.execute(sqlite_raw).fetchall() == expected
+        guarded = render_query(query, {}, [":READY = 'Y'"]).replace("''", 'NULL')
+        assert db.execute(guarded, {'READY': 'N'}).fetchall() == []
+        assert db.execute(guarded, {'READY': 'Y'}).fetchall() == expected
+
+
+@pytest.mark.parametrize('raw', [
+    'SELECT * FROM C', 'SELECT C.* FROM C', 'SELECT ALL * FROM DUAL',
+    'SELECT *, DUMMY FROM DUAL', 'SELECT * FROM SYS.DUAL',
+    'SELECT * FROM DUAL WHERE DUMMY = :X', 'SELECT * FROM DUAL ORDER BY 1',
+    'SELECT (CODE + DESCRIPTION) NAME FROM C', 'SELECT ((CODE)) NAME FROM C',
+    'SELECT CODE AS FROM C', 'SELECT CODE NAME OTHER FROM C',
+    "SELECT CODE FROM C WHERE CODE NOT IN ()", "SELECT CODE FROM C WHERE CODE NOT IN ('A',)",
+    'SELECT CODE FROM C WHERE CODE NOT IN (OTHER)', 'SELECT CODE FROM C WHERE CODE NOT IN (:VALUE)',
+    'SELECT CODE FROM C WHERE CODE NOT IN (1,2)',
+    'SELECT CODE FROM C WHERE CODE NOT IN (SELECT CODE FROM T)',
+    'SELECT CODE FROM C WHERE CODE NOT LIKE OTHER',
+    'SELECT CODE FROM C ORDER BY 0', 'SELECT CODE FROM C ORDER BY 01',
+    'SELECT CODE FROM C ORDER BY 1.0', 'SELECT CODE FROM C ORDER BY -1',
+])
+def test_new_family_remains_closed_on_malformed_and_unproved_variants(raw):
+    with pytest.raises(ValueError):
+        parse_record_group_query(raw)
+
+
+def test_aliased_report_uses_output_names_and_original_interface_gate():
+    source = re.sub(rb'RecordGroupQuery="[^"]*"',
+        b'''RecordGroupQuery="SELECT PARCEL_NO AS ID, (PARCEL_WEIGHT) WEIGHT FROM SOURCE_PARCELS ORDER BY 1"''', SOURCE)
+    source = source.replace(b'RecordGroupColumn Name="PARCEL_NO"', b'RecordGroupColumn Name="ID"')
+    source = source.replace(b'RecordGroupColumn Name="PARCEL_WEIGHT"', b'RecordGroupColumn Name="WEIGHT"')
+    files, receipt = apply_record_groups(*baseline(source))
+    assert not receipt['gaps']
+    op = receipt['generated_operations'][0]
+    page = files[op['page_file']].decode()
+    assert 'SELECT PARCEL_NO AS ID, PARCEL_WEIGHT AS WEIGHT' in page
+    assert 'column ID (' in page and 'column WEIGHT (' in page
+    assert 'displayColumn ID (' in page and 'ORDER BY 1' in page
+    assert not op['original_interface_enabled'] and not receipt['original_reads_enabled']
+    assert op['readiness_item'] in page and 'serverSideCondition' in page
+
+
+def dual_source():
+    source = re.sub(rb'<RecordGroup Name=.*?</RecordGroup>', b'''<RecordGroup Name="RG_DUMMY" RecordGroupQuery="SELECT * FROM DUAL">
+        <RecordGroupColumn Name="DUMMY" ColumnDataType="Character" MaximumLength="1"/>
+        </RecordGroup>''', SOURCE, flags=re.S)
+    return source
+
+
+def test_canonical_dual_expansion_requires_exact_declaration_and_retains_gate():
+    source = dual_source()
+    query, refs, _ = parse_record_group_query('SELECT * FROM DUAL')
+    assert query == {'projections': [['DUMMY']], 'tables': [['DUAL']], 'predicates': [], 'order': [], 'dual_wildcard': True}
+    assert not refs and render_query(query, {}) == 'SELECT DUMMY\nFROM DUAL'
+    files, receipt = apply_record_groups(*baseline(source))
+    assert not receipt['gaps']
+    op = receipt['generated_operations'][0]
+    page = files[op['page_file']].decode()
+    assert 'SELECT DUMMY' in page and 'FROM DUAL' in page and 'SELECT *' not in page
+    # Unqualified DUAL may be shadowed. No database interface exemption is made.
+    assert not receipt['original_reads_enabled'] and not op['original_interface_enabled']
+    assert op['readiness_item'] in page and 'serverSideCondition' in page
+    assert "NVL(V('" + op['readiness_item'] + "'), 'N') = 'Y'" in page
+    assert 'sessionStateProtection: restricted' in files['shared-components/app-items.apx'].decode()
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda raw: raw.replace(b'Name="DUMMY"', b'Name="OTHER"'),
+    lambda raw: raw.replace(b'MaximumLength="1"', b'MaximumLength="2"'),
+    lambda raw: raw.replace(b'ColumnDataType="Character"', b'ColumnDataType="Number"'),
+    lambda raw: raw.replace(b'</RecordGroup>', b'<RecordGroupColumn Name="SECOND" ColumnDataType="Character"/></RecordGroup>'),
+])
+def test_dual_wildcard_without_exact_source_declaration_is_a_whole_unit_gap(mutation):
+    args = baseline(mutation(dual_source()))
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['generated_operations'] and files == args[-1]
+    assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_CANONICAL_DUAL_DECLARATION_REQUIRED'
