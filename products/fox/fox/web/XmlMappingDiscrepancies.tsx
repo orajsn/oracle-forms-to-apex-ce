@@ -1,11 +1,12 @@
 import React,{useMemo,useRef,useState} from 'react';
 import type {Discrepancies, GapRequirements, MappingGap, MappingRun} from './xmlMappingPresentation';
 import './xmlMappingDiscrepancies.css';
+import SupportingFileEvidence from './SupportingFileEvidence';
 
 const statuses={generated:'Generated or adapted',partial:'Partly connected',encoded_unwired:'Encoded, awaiting connection',unimplemented:'Not yet implemented'} as const;
 const partialReasons=new Set(['policy_rule_partial_draft_guard','item_lookup_partly_connected','item_entry_partly_connected','item_entry_draft_connected','approval_readiness_partly_connected','staged_query_partly_connected','delete_check_partly_connected','master_population_partly_connected',
  'master_query_helper_partly_connected','master_clear_partly_connected']);
-const kinds={database_object:'Database object',routine_reference:'Routine reference',forms_api:'Forms behavior',local_routine:'Local routine',report:'Report',source_link:'Source link'} as const;
+const kinds={database_object:'Database object',routine_reference:'Routine reference',forms_api:'Forms behavior',local_routine:'Local routine',report:'Report',source_link:'Source link',forms_library:'Attached Forms library',forms_menu:'Referenced Forms menu'} as const;
 function Requirements({value}:{value:GapRequirements}){
  const groups=[['Database routine calls',value.routines],['Referenced tables or views',value.tables],
   ['Report definitions to verify',value.reports],['Forms session values',value.forms_state],
@@ -75,6 +76,7 @@ export default function XmlMappingDiscrepancies({report,gaps,previous,initialVie
   <h4>Source behavior and conversion progress</h4>
   <p>Supported parts can be generated while these findings are reviewed. APEX runtime checks and business review are still pending.</p>
   <p>Generated or adapted: {counts.generated} · {counts.partial>0&&<>Partly connected: {counts.partial} · </>}Encoded, awaiting connection: {counts.encoded_unwired} · Not yet implemented: {counts.unimplemented} · Total source units: {report.summary.total_units}</p>
+  <SupportingFileEvidence report={report} gaps={gaps}/>
   {remaining>0&&<div className="xml-discrepancy-actions"><button type="button" onClick={()=>showUnits('remaining')}>Show remaining gaps ({remaining})</button>
    {wiredEntryIds.size>0&&<button type="button" className="secondary" onClick={()=>showUnits('wiring')}>Entry wiring ({wiredEntryIds.size})</button>}
    {externalIds.size>0&&<button type="button" className="secondary" onClick={()=>showUnits('external')}>External gaps ({externalIds.size})</button>}</div>}

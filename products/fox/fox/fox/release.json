@@ -1,10 +1,10 @@
 {
-  "version": "0.53.0",
+  "version": "0.54.0",
   "released_on": "2026-11-22",
-  "title": "Generate reference queries and more field-event code",
+  "title": "Save and reopen rows with linked choices",
   "changes": [
-    "Generate a broader set of source-defined lookup queries and preserve their selection and sorting rules.",
-    "Resolve a changed typed key on supported session drafts and emit callable procedures for complete scalar audit and validation triggers."
+    "Apply multiple source-defined choices to one row and reopen saved prototype values in a new session.",
+    "Review supporting file types, names and affected actions in the conversion UI."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

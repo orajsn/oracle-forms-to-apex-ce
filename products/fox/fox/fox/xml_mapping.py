@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 import hashlib
+from html import escape
 import json
 from pathlib import Path
 import re
@@ -169,6 +170,9 @@ def mapping_catalog():
          "Current record state, navigation side effects and whole-form commits require the recorded providers where applicable."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
+        ("fox.query.saved-row-workspace", "A source-bound row editor and validated companion lists belong to the same block.",
+         "Choose values on one row, save its mapped fields and reopen a durable synthetic record in a later session.",
+         "Saved records belong to an application and user. Source business-table writes and unrelated source events require separate mappings."),
         ("fox.event.scalar-procedure", "A complete scalar trigger assigns global or clock values, optionally guarded by record status or a numeric validation.",
          "Generate a PL/SQL procedure with explicit typed inputs and current-row outputs.",
          "The event host must supply the correct row, trusted Forms context and target field constraints. The procedure is available in scalar-events.sql."),
@@ -176,11 +180,12 @@ def mapping_catalog():
          "Recalculate the selected draft's companion fields when keeping a changed input.",
          "The generated editor uses the private synthetic lookup table. It validates a typed value on explicit submission."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 21,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 22,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
+                                "forms_rate_choices.py", "forms_rate_workspace.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -455,6 +460,8 @@ def _approval_interface_links(plans, inventory):
 
 
 def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns):
+    from .forms_rate_choices import compile_rate_choices
+    from .forms_rate_workspace import render_rate_workspace
     from .forms_route_lookup_native import render_row_lookup
     from .forms_route_lookup_plan import compile_row_lookups
 
@@ -464,10 +471,17 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
     lookup_pages = []
     if not contracts:
         return lookup_pages
+    # Plan against the original receipts before decorating pages or extending
+    # the schema. Every chooser for this block must share the same editor.
+    anchors = Counter((c['source_module_id'], c['source_block_id']) for c in contracts)
+    bundles = {c['contract_id']: compile_rate_choices(documents, packet, chunks, trace, files, groups, returns, c)
+               for c in contracts if anchors[(c['source_module_id'], c['source_block_id'])] == 1}
     queries = {op['operation_id']: op for op in groups['generated_operations']}
     occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
     page = 8900
     for contract in contracts:
+        bundle = bundles.get(contract['contract_id'])
+        choices = bundle['choices'] if bundle else []
         group = queries[contract['record_group_operation_id']]
         uid, lid = contract['source_unit_id'], contract['source_lov_id']
         matches = [g for g in returns['gaps'] if (g['source_unit_id'], g['source_lov_id']) == (uid, lid)]
@@ -475,11 +489,12 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                 or group['source_unit_sha256'] != contract['source_unit_sha256']
                 or contract['source_binding'] != packet['source_binding']):
             raise ValueError('Row lookup no longer matches the unresolved caller and source query.')
-        while page in occupied or page + 1 in occupied:
-            page += 2
-        if page + 1 >= 9900:
-            raise ValueError('No native page pair is available for the lookup editor.')
-        rendered = render_row_lookup(contract, page)
+        span = 2 + len(choices)
+        while occupied.intersection(range(page, page + span)):
+            page += 1
+        if page + span > 9900:
+            raise ValueError('No native page range is available for the lookup editor.')
+        rendered = render_rate_workspace(contract, bundle, page) if choices else render_row_lookup(contract, page)
         target = rendered['metadata']
         for component in rendered['pages']:
             if component['page_file'] in files or component['page_id'] in occupied:
@@ -491,7 +506,9 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         # appears on its normal source report, so a user can open the editor
         # while the original database interface remains disabled.
         entry_files = list(dict.fromkeys(group['report_files'] + [group['chooser_file'], group['page_file']]))
-        button = native_record_groups._button(page, page, 'Edit ' + contract['source_caller_name'] + ' choices')
+        label = ('Edit ' + contract['source_block_name'] + ' rows' if choices else
+                 'Edit ' + contract['source_caller_name'] + ' choices')
+        button = native_record_groups._button(page, page, label)
         for path in entry_files:
             text = files[path].decode()
             if '    region records (\n' not in text:
@@ -508,10 +525,60 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
               'entry_files': entry_files, 'contract': contract, 'native_target': target,
               'customer_table_writes': False, 'original_reads_enabled': False, 'session_draft_table_writes': True,
               'runtime_verified': False, 'business_accepted': False}
+        if choices:
+            op['durable_synthetic_save'] = True
+            tables = sorted({contract['caller_source_table'], contract['source_table'],
+                             *(choice['source_table'] for choice in choices)})
+            op['original_tables_to_verify'] = tables
+            html = ('<p>For a customer database connection, check the table or view definitions (DDL) '
+                    'for these source objects and provide any missing definitions to the project.</p><ul>'
+                    + ''.join(f'<li>{escape(name)}</li>' for name in tables)
+                    + '</ul><p>Save and Reopen here use private synthetic tables.</p>')
+            region = native_buffer._expand_groups(f'''    region source-definitions (
+        name: Supporting files for original data
+        type: staticContent
+        source {{ htmlCode: {json.dumps(html)} }}
+        layout {{ sequence: 95
+            slot: body }}
+        appearance {{ template: @/standard }}
+    )
+''')
+            editor = target['entry_page_file']
+            files[editor] = native_record_groups._append(files[editor].decode(), region).encode()
         returns['gaps'].remove(matches[0])
         returns['generated_operations'].append(op)
         lookup_pages.append(op)
-        page += 2
+        if choices:
+            links = {c['source_lov_id']: c for c in target['companion_choices']}
+            if len(links) != len(choices):
+                raise ValueError('Companion choice page bindings are incomplete.')
+            attached = set(entry_files)
+            for choice in choices:
+                cg = queries[choice['record_group_operation_id']]
+                cuid, clid = choice['source_unit_id'], choice['source_lov_id']
+                gaps = [g for g in returns['gaps'] if (g['source_unit_id'], g['source_lov_id']) == (cuid, clid)]
+                link = links[clid]
+                if (len(gaps) != 1 or gaps[0]['reason'] != 'LOV_RETURN_CALLER_BLOCK'
+                        or cg['source_unit_sha256'] != choice['source_unit_sha256']
+                        or choice['source_block_id'] != contract['source_block_id']
+                        or link['chooser_page_file'] not in files):
+                    raise ValueError('Companion list differs from its source unit or native editor.')
+                entries = list(dict.fromkeys(cg['report_files'] + [cg['chooser_file'], cg['page_file']]))
+                for path in entries:
+                    if path not in attached:
+                        files[path] = native_record_groups._append(files[path].decode(), button).encode()
+                        attached.add(path)
+                companion = {**op, 'kind': 'source_companion_row_lookup',
+                    'operation_id': choice['contract_id'], 'source_group_unit_id': cuid, 'source_unit_id': cuid,
+                    'source_unit_sha256': cg['source_unit_sha256'], 'source_group_unit_sha256': cg['source_unit_sha256'],
+                    'record_group_operation_id': cg['operation_id'], 'source_lov_id': clid,
+                    'source_caller_name': choice['source_caller_name'], 'source_caller_id': choice['source_caller_item_id'],
+                    'source_caller_item_id': choice['source_caller_item_id'], 'return_mappings': choice['returns'],
+                    'entry_files': entries, 'chooser_file': link['chooser_page_file'], 'contract': choice, 'native_target': link}
+                returns['gaps'].remove(gaps[0])
+                returns['generated_operations'].append(companion)
+                lookup_pages.append(companion)
+        page += span
     returns['session_draft_table_writes'] = True
     return lookup_pages
 
@@ -544,9 +611,11 @@ def _final_record_groups(groups, returns):
             connected += len(op["return_mappings"])
             lov.update(lov_return_implemented=True, caller=op["source_caller_name"],
                        caller_item_id=op["source_caller_item_id"], return_operation_id=op["operation_id"])
-            if op.get("kind") == "source_optional_row_lookup":
+            if op.get("kind") in {"source_optional_row_lookup", "source_companion_row_lookup"}:
                 lov.update(row_editor_page=op["page_file"], choice_catalog="synthetic",
                            return_scope="selected_session_draft")
+                if op.get("durable_synthetic_save"):
+                    lov["durable_synthetic_save"] = True
         if connected:
             pending = group["unimplemented_lov_return_mapping_count"] - connected
             group.update(kind="record_group_with_caller_returns", connected_return_count=connected,
@@ -1133,6 +1202,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         applied = sorted(set(applied) | {"fox.validation.saved-number-correction"})
     if row_lookups:
         applied = sorted(set(applied) | {"fox.query.row-lookup-draft"})
+    if any(op.get("durable_synthetic_save") for op in row_lookups):
+        applied = sorted(set(applied) | {"fox.query.saved-row-workspace"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
@@ -1160,7 +1231,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                                     "partial": len(partial_item_events),
                                     "encoded_only": len(item_review) - len(partial_item_events)},
         "lookup_summary": {"generated_lookup_handlers": len(looked), "original_reads_enabled": False},
-        "row_lookup_summary": {"editors": len(row_lookups), "mapped_returns": sum(len(op["return_mappings"]) for op in row_lookups)},
+        "row_lookup_summary": {"editors": len({op["page_file"] for op in row_lookups}), "mapped_returns": sum(len(op["return_mappings"]) for op in row_lookups)},
+        "saved_lookup_workspaces": [
+            {"page_file": op["page_file"], "source_block_id": op["source_block_id"],
+             "choices": 1 + len(op["native_target"]["companion_choices"]),
+             "saved_table": op["native_target"]["saved_table"], "customer_table_writes": False}
+            for op in row_lookups if op["kind"] == "source_optional_row_lookup" and op.get("durable_synthetic_save")],
         "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
             "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": original_reads},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",

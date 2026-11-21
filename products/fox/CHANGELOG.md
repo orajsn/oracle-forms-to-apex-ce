@@ -200,6 +200,31 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.54.0] - 2026-11-22
+
+### [feature] Save and reopen a row with multiple source-defined choices
+
+An eligible source block now has one editor for its related choices. Picking
+a list entry fills only the fields identified by its XML return mappings.
+The chooser can show additional text or numeric columns for reference.
+Save checks the row revision, required fields and list-validated values before
+persisting the mapped fields to private synthetic storage. The same user can
+reopen that row in a later session. Conflicting edits require a fresh selection.
+The original business save and other source events retain their own coverage.
+
+The conversion result groups supporting definitions by file type and shows
+the source location for each request. Registered Forms libraries are identified
+separately from screen references. The result identifies referenced menu
+modules absent from the supplied XML. The project workbench links to assessed
+outstanding requests from conversion and output.
+
+Both original packages passed SQLcl format validation. Eighteen local Oracle
+checks exercised two rows, durable saves and reopening across fresh connections,
+including stale updates and missing list values. The test supplied APEX
+identity values. Installed APEX browser acceptance remains open. The release
+regression suite passed 1,694 checks. A separate FOX browser and API test
+verified that supplying a missing package body clears its source request.
+
 ## [0.53.0] - 2026-11-22
 
 ### [feature] Generate more lookup queries and field-event code from Forms XML

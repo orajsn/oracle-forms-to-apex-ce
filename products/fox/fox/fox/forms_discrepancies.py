@@ -26,6 +26,7 @@ _SQL_CLAUSES = frozenset({"WHERE", "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "OU
 # Deliberately finite. An unlisted lexical candidate is not presumed external,
 # reachable, callable, or even a routine (the facts inventory is not a compiler).
 FORMS_APIS = frozenset({
+    "COPY",
     "CALL_FORM", "CLEAR_BLOCK", "CLEAR_FORM", "CLEAR_RECORD", "COMMIT_FORM",
     "CREATE_RECORD", "DELETE_RECORD", "DO_KEY", "DUPLICATE_RECORD",
     "EXECUTE_QUERY", "EXIT_FORM", "FIND_ALERT", "FIND_BLOCK", "FIND_ITEM",
@@ -301,6 +302,12 @@ def _evidence(packet, ledger, gap_report, catalog, *, chunks=None, dependency_ev
 
 
 def _reference_description(kind, name, status):
+    if kind == "forms_menu":
+        return ("The form references a menu module outside this mapping's supplied modules.",
+                "Provide the Forms menu (.mmb) or its readable menu XML to review its actions.")
+    if kind == "forms_library":
+        return ("The module registers an attached Forms library.",
+                "Check the project for the library source (.pll or readable .pld).")
     if kind == "forms_api":
         return ("Known Oracle Forms API name referenced in source; its APEX adaptation is not established by this inventory.",
                 "Review the original API semantics and implement or verify its target event and state adapter.")
@@ -350,6 +357,8 @@ def _lov_return_note(target, available):
             destination = ('the selected session draft from the synthetic catalog'
                            if lov.get("choice_catalog") == "synthetic" else 'the selected draft')
             notes.append(f'LOV {lov["source_lov_name"]}: caller {lov["caller"]} returns {fields} to {destination}.')
+            if lov.get("durable_synthetic_save"):
+                notes.append("Save in the shared editor keeps the mapped fields for this user to reopen in another session.")
         else:
             reason = lov.get("return_gap", "")
             if reason == "LOV_RETURN_EXISTING_ROW_UPDATE_DISABLED_NEW_DRAFT_INPUTS_AND_PERMISSIONS_UNPROVEN":
@@ -443,6 +452,7 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
             if obj["kind"] == "ProgramUnit" and obj["name"]:
                 local[(obj["module_id"], obj["name"].upper())].append(obj["id"])
         grouped = {}
+        supplied_menus = {(o["name"] or "").upper() for o, _ in objects.values() if o["kind"] == "MenuModule"}
         for collection, ref in references:
             owner, source = objects[ref["source_id"]]
             name = ref["target_name"] if collection == "links" else ref["name"]
@@ -460,6 +470,11 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
                         status = "source_definition_present"
                 else:
                     kind = "forms_api" if name.upper() in FORMS_APIS else "routine_reference"
+            elif (collection == "links" and ref["relation"] == "uses_menu"
+                  and ref["status"] == "unresolved" and name.upper() not in supplied_menus):
+                kind = "forms_menu"
+            elif collection == "dependencies" and ref["kind"] == "library" and ref["evidence"] == "registration" and owner["kind"] == "AttachedLibrary":
+                kind = "forms_library"
             elif collection == "dependencies" and ref["kind"] in {"database_object", "report"}:
                 kind = ref["kind"]
             key = (owner["module_id"], kind, name.upper())
@@ -655,6 +670,9 @@ def _validate_retained(report, ledger, gap_report, catalog, *, dependency_eviden
     dependency_references = (ledger["dependencies_and_links"] if dependency_evidence is None else
                              _retained_dependency_references(dependency_evidence, ledger, coverage, objects))
     expected_refs = Counter()
+    registered_libraries = set()
+    missing_menu_links = set()
+    supplied_menus = {(o['source_metadata'].get('Name') or '').upper() for o in objects.values() if o['kind'] == 'MenuModule'}
     for row in dependency_references:
         ref = row["evidence"]
         _require(row["code"] == "dependency_not_implemented" and row["source_object_id"] == ref["source_id"])
@@ -663,6 +681,12 @@ def _validate_retained(report, ledger, gap_report, catalog, *, dependency_eviden
         _require(collection in {"dependencies", "links"})
         name = ref["target_name"] if collection == "links" else ref["name"]
         original_kind = "source_link" if collection == "links" else ref["kind"]
+        if (collection == "links" and ref.get("relation") == "uses_menu"
+                and ref.get("status") == "unresolved" and name.upper() not in supplied_menus):
+            missing_menu_links.add((ref["source_id"],name.upper(),ref["location"]["line"]))
+        if (original_kind == "library" and owner["kind"] == "AttachedLibrary"
+                and ref.get("evidence") == "registration"):
+            registered_libraries.add((ref["source_id"], name.upper(), ref["location"]["line"]))
         if original_kind not in {"database_object", "routine", "report"}:
             original_kind = "source_link"
         # The ledger omits source_attribute. Its source_location binds the
@@ -676,7 +700,7 @@ def _validate_retained(report, ledger, gap_report, catalog, *, dependency_eviden
                  and group["id"] not in group_ids)
         group_ids.add(group["id"])
         kind = group["kind"]
-        _require(kind in {"database_object", "routine_reference", "forms_api", "local_routine", "report", "source_link"})
+        _require(kind in {"database_object", "routine_reference", "forms_api", "local_routine", "report", "source_link", "forms_library", "forms_menu"})
         _require(group["status"] in ({"unverified", "source_definition_present"} if kind == "local_routine" else {"unverified"}))
         for key in ("name", "message", "next_action"):
             _text(group[key], 256 if key == "name" else 4000)
@@ -694,6 +718,12 @@ def _validate_retained(report, ledger, gap_report, catalog, *, dependency_eviden
             _require(all(coverage[uid]["source_owner_id"] == owner_id and
                          coverage[uid]["source_location"]["line"] == occurrence["source_line"] for uid in ids))
             original_kind = "routine" if kind in {"routine_reference", "forms_api", "local_routine"} else kind
+            if kind == "forms_library":
+                _require((owner_id, group["name"].upper(), occurrence["source_line"]) in registered_libraries)
+                original_kind = "source_link"
+            if kind == "forms_menu":
+                _require((owner_id, group["name"].upper(), occurrence["source_line"]) in missing_menu_links)
+                original_kind = "source_link"
             actual_refs[(original_kind, group["name"].upper(), owner_id, occurrence["source_file"], occurrence["source_line"])] += 1
         _require(len(modules) == 1)
         key = (next(iter(modules)), kind, group["name"].upper())

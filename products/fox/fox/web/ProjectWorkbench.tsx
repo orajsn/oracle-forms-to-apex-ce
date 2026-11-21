@@ -5,6 +5,7 @@ import {actionContext,available,findingOwnerLabels,formReadinessLabels,presentPr
  type ActionCapability,type ProcessConfirmations,type ProjectActionContext,type ProjectConversionPlan,type ProjectDependency,type ProjectFinding,type ProjectForm,type ProjectRun,type RunPresentation,type SourceBinding,type SourceLocation,type WorkbenchStep} from './projectConversion';
 import './projectWorkbench.css';
 import SourceRequests from './SourceRequestPanel';
+import {readSourceRequests} from './sourceRequests';
 import PartialDraftPanel,{DraftScopeSummary} from './PartialDraftPanel';
 import PrototypeConversion from './PrototypeConversion';
 import HostedFormsPreparation from './HostedFormsPreparation';
@@ -180,6 +181,10 @@ export default function ProjectWorkbench(props:ProjectWorkbenchProps){
  const bindingValid=validSourceBinding(source)&&source.project_id===project.id&&!versionMismatch;
  const id=useId(),planResult=useMemo(()=>bindingValid?presentProjectPlan(props.plan,source):{plan:null,message:'The project and source binding do not match. Refresh before continuing.'},[props.plan,bindingValid,source.project_id,source.source_hash,source.selected_source_set_id]);
  const plan=planResult.plan;
+ const pendingFiles=useMemo(()=>{
+  if(!plan)return 0;
+  try{return readSourceRequests(props.sourceRequests,plan).counts?.requests??0;}catch{return 0;}
+ },[props.sourceRequests,plan]);
  const bindingKey=JSON.stringify([project.id,source.source_hash,source.selected_source_set_id,plan?.plan_sha256??null]);
  const currentBinding=useRef(bindingKey);currentBinding.current=bindingKey;
  const previousBinding=useRef(bindingKey);
@@ -280,6 +285,7 @@ export default function ProjectWorkbench(props:ProjectWorkbenchProps){
   </section>}
 
   {step==='review'&&plan&&<ReviewForms plan={plan} onResolve={()=>setStep('resolve')} onContinue={()=>setStep('convert')}/>}
+  {(step==='convert'||step==='output')&&pendingFiles>0&&<div className="fw-notice"><button type="button" className="fw-secondary" onClick={()=>setStep('resolve')}>Review outstanding source requests ({pendingFiles})</button></div>}
   {step==='resolve'&&plan&&<SourceRequests key={plan.plan_sha256} value={props.sourceRequests} plan={plan} onAddFiles={()=>setStep('upload')}/>}
   {step==='resolve'&&plan&&<section aria-label="Resolve project findings"><div className="fw-list-heading"><div><h2>What is needed before conversion</h2><p>Missing information and human decisions are separate from unsupported technical features.</p></div></div>{plan.state==='EMPTY'?<div className="fw-surface"><h3>Add your source files first</h3><p>An empty project is not ready to generate an application.</p><button type="button" onClick={()=>setStep('upload')}>Add source files <Upload size={16}/></button></div>:plan.summary.blocking_findings===0?<div className="fw-surface fw-clear"><CheckCircle2 size={26}/><h3>No blocking findings reported</h3><p>This source plan is ready. It is not yet a generated app or proof of business behavior.</p><button type="button" onClick={()=>setStep('convert')}>Review processing <ArrowRight size={16}/></button></div>:<>{plan.project_findings.map((item,index)=><Finding key={`project-${index}`} finding={item} onUpload={()=>setStep('upload')}/>)}{plan.forms.flatMap(form=>form.findings.map((item,index)=><Finding key={`${form.module_id}-${index}`} finding={item} moduleName={form.form_name} onUpload={()=>setStep('upload')}/>))}<p className="fw-small">Updating files creates a new source version and a new assessment. Previous results are retained; they do not certify changed sources.</p></>}</section>}
 

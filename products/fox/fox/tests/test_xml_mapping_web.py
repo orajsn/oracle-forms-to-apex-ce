@@ -136,6 +136,28 @@ def test_download_includes_the_typed_event_and_separate_callable_code(client):
     assert scalar["procedure_name"].encode() in files[scalar["code_member"]]
 
 
+def test_shared_row_workspace_and_choices_are_in_the_download(client):
+    from test_forms_rate_choices import SOURCE
+    c, _, _, _, run = finish(client, [('shipping.xml', SOURCE)])
+    download = c.get(run['download_url'])
+    assert download.status_code == 200 and jobs.sha(download.content) == run['package_sha256']
+    files = _members(download.content)
+    read = lambda n: json.loads(files['fox-package/' + n + '.json'])
+    lookups = read('lov-return-receipt')['generated_operations']
+    assert len(lookups) == 3 and len({op['page_file'] for op in lookups}) == 1
+    assert len({op['chooser_file'] for op in lookups}) == 3
+    meta = read('metadata')
+    workspace, = meta['saved_lookup_workspaces']
+    assert workspace['choices'] == 3 and workspace['saved_table'].encode() in files['fox-package/supporting-schema.sql']
+    editor = files[workspace['page_file']].decode()
+    assert 'Supporting files for original data' in editor
+    assert all(f'<li>{table}</li>' in editor for table in lookups[0]['original_tables_to_verify'])
+    assert meta['row_lookup_summary'] == {'editors':1,'mapped_returns':5}
+    assert all(op['durable_synthetic_save'] and op['page_file'] in files and op['chooser_file'] in files for op in lookups)
+    assert {op['source_group_unit_id'] for op in lookups} <= {u['source_unit_id'] for u in run['discrepancies']['units'] if u['status']=='generated'}
+    assert len([u for u in run['discrepancies']['units'] if 'reopen in another session' in u['message']]) == 3
+
+
 def test_queue_exact_source_consent_without_ai_approvals(client):
     c, root, pid, body, run = queue(client)
     assert run['conversion_profile'] == 'xml-mapping-v1'

@@ -89,9 +89,18 @@ test('actual UI and local API: add one missing body, retain both forms and rejec
   });
   await page.goto(origin);await page.getByLabel('Username',{exact:true}).fill('source-flow-test');await page.getByLabel('Password',{exact:true}).fill('synthetic-source-flow-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
   await page.getByRole('button',{name:'New project',exact:true}).click();await page.getByLabel('Customer / organization',{exact:true}).fill('Synthetic source QA');await page.getByLabel('Project name',{exact:true}).fill('Shared dependency flow');await page.getByRole('button',{name:'Create project',exact:true}).click();
-  await page.getByRole('heading',{name:'Add all the forms for this application',exact:true}).waitFor();
-  const upload=async files=>{await page.getByLabel('Readable files, without a preparation manifest',{exact:true}).check();await page.getByLabel('Choose project source files',{exact:true}).setInputFiles(files.map(f=>({name:f.name,mimeType:'text/plain',buffer:Buffer.from(f.text)})));await page.getByRole('button',{name:'Upload and assess',exact:true}).click();await page.getByRole('heading',{name:'Review every form',exact:true}).waitFor();};
-  await upload(fixture.missing.files);await page.getByRole('button',{name:'3 Resolve',exact:true}).click();
+  await page.getByRole('region',{name:'Upload project sources'}).waitFor();
+  const upload=async files=>{
+   const other=page.locator('details').filter({has:page.locator('summary',{hasText:'Other readable or prepared sources'})});
+   if(!await other.evaluate(e=>e.open))await other.locator('summary').first().click();
+   await page.getByLabel('Readable files, without a preparation manifest',{exact:true}).check();
+   await page.getByLabel('Choose project source files',{exact:true}).setInputFiles(files.map(f=>({name:f.name,mimeType:'text/plain',buffer:Buffer.from(f.text)})));
+   await page.getByRole('button',{name:'Upload and assess',exact:true}).click();
+   await page.getByRole('heading',{name:'Review every form',exact:true}).waitFor();
+  };
+  await upload(fixture.missing.files);
+  await page.getByRole('button',{name:'5 Output',exact:true}).click();
+  await page.getByRole('button',{name:'Review outstanding source requests (1)',exact:true}).click();
   const card=page.getByRole('article',{name:'Source request ORDER_API',exact:true});await card.getByText('Show all affected callers',{exact:true}).click();
   await card.getByText('ORDER_HISTORY',{exact:true}).waitFor();assert.equal(await card.getByText('ORDER_ENTRY',{exact:true}).count(),1);
   const projects=await (await context.request.get(origin+'/api/projects')).json();const id=projects[0].id;

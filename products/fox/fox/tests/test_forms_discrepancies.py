@@ -87,6 +87,23 @@ def test_candidates_are_grouped_and_known_source_apis_are_not_external_missing_f
     assert all("missing customer" not in g["message"] for g in report["dependencies"] if g["name"] != "DUAL")
 
 
+def test_only_a_registered_library_is_labeled_as_library_source():
+    form = ET.fromstring(source())
+    form.set('MenuModule','MAIN_MENU')
+    ET.SubElement(form, 'AttachedLibrary', Name='LOOKUPS', LibraryLocation='lookups.pll')
+    form.find('.//Item').set('CanvasName','PRICE_SCREEN')
+    packet, chunks, ledger, gaps, catalog, report = context([('choices.xml',ET.tostring(form))])
+    library, = [d for d in report['dependencies'] if d['kind']=='forms_library']
+    assert library['name'].upper()=='LOOKUPS' and '.pld' in library['next_action']
+    menu, = [d for d in report['dependencies'] if d['kind']=='forms_menu']
+    assert menu['name']=='MAIN_MENU' and '.mmb' in menu['next_action']
+    assert all(d['kind']=='source_link' for d in report['dependencies'] if d['name']=='PRICE_SCREEN')
+    assert validate_discrepancies(report,ledger,gaps,catalog,packet=packet,chunks=chunks)==report
+    docs=[('choices.xml',ET.tostring(form)),('menu.xml',b'<MenuModule Name="MAIN_MENU"/>')]
+    *_, supplied = context(docs)
+    assert not any(d['kind']=='forms_menu' and d['name']=='MAIN_MENU' for d in supplied['dependencies'])
+
+
 def test_renamed_sources_and_modules_do_not_resolve_across_modules():
     a = source("FIRST", helper="UNIQUE_HELPER")
     other = ET.fromstring(source("SECOND", helper="SECOND_HELPER"))

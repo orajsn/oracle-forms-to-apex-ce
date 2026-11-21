@@ -34,6 +34,11 @@ test('discrepancy report is validated and readable on desktop and mobile',{timeo
  await page.getByRole('button',{name:'External gaps (1)'}).click();
  await page.getByText('Showing 1 of 3 units.').waitFor();
  await page.getByText('Database routine calls',{exact:true}).waitFor();
+ const files=page.locator('.xml-supporting-files');
+ await files.getByText('Supporting files to check (1)',{exact:true}).click();
+ const routine=files.getByRole('region',{name:/Routine source/});
+ await routine.locator('summary').filter({hasText:'APP.VALIDATE'}).click();
+ await routine.getByText(/LINES \/ ACTION/).waitFor();
  await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('all');
  await page.evaluate(()=>{delete window.run.gaps_available;delete window.run.gap_summary;delete window.run.gaps;});await refresh();
  // A parser change may prevent new generation without invalidating the saved report.
