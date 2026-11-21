@@ -10,6 +10,17 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-21
 
+### [testing] Verify selected-record delete checks in Oracle APEX
+
+An isolated APEX 26.1.6 app generated from 0.49.0 passed seven browser stages
+using six existing synthetic records. The two manifests showed two and zero
+bags, each selected bag showed one consignment, and neither consignment
+had child rows. All four bag and consignment checks reported an unavailable
+external permission result. Oracle parsed 12 generated queries and the compiled
+export was verified. Full comparisons of all three business tables matched
+before and after the run. External permission, audit and deletion execution
+remain unverified.
+
 ### [testing] Verify saved weight correction and composite bag links in APEX
 
 An isolated APEX 26.1.6 app generated from 0.48.0 passed both bag-to-consignment
