@@ -8,6 +8,19 @@ Independently pinned deployment-only corrections have a separate
 [deployment-tool changelog](deployment/CHANGELOG.md); they do not change the
 application version or relabel existing images.
 
+## Documentation updates - 2026-11-21
+
+### [testing] Verify saved weight correction and composite bag links in APEX
+
+An isolated APEX 26.1.6 app generated from 0.48.0 passed both bag-to-consignment
+selections, Cancel, rejection and correction of a zero input, and return to the
+same manifest. One valid Save reduced the missing-weight count from two to one.
+Restoring the original weight and route returned all three synthetic tables to
+their verified starting state. The installed app used the saved project
+identity. Seventeen statements passed target parsing and the compiled export
+was verified. The broader approval transaction and concurrent editing remain
+outside this runtime result.
+
 ## Documentation updates - 2026-11-20
 
 ### [testing] Verify the corrected synthetic Save in installed APEX
