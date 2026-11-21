@@ -163,8 +163,12 @@ def parse_check_helper(text):
 
 def _fingerprint(fields, alias='p'):
     _need(fields, 'SNAPSHOT_FIELDS_REQUIRED')
-    return " || ':' || ".join("nvl(rawtohex(standard_hash(" + alias + '.' + f['column']
-                                 + ",'SHA256')),'N')" for f in fields)
+    framed = " || ':' || ".join("nvl(rawtohex(standard_hash(" + alias + '.' + f['column']
+                                   + ",'SHA256')),'N')" for f in fields)
+    # Keep existing one-field selections. Compound tokens must not expose the
+    # ':' frame separators to APEX f?p URLs, where they delimit URL arguments.
+    # Hash the ordered, null-framed digests to a bounded 64-character hex token.
+    return framed if len(fields) == 1 else "rawtohex(standard_hash(" + framed + ",'SHA256'))"
 
 
 def _bind(owner, parsed, objects, props, trace, files):

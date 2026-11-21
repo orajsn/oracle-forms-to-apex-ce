@@ -201,6 +201,98 @@ def test_emitted_parent_switch_selects_context_and_matching_children_without_wri
     assert ' OR ' in second['child_query_sql']
 
 
+@pytest.mark.parametrize('renamed', [False, True])
+def test_chooser_tokens_fit_apex_item_values_and_match_every_selection_gate(renamed):
+    b = seeded() if not renamed else SQLBoundary(source(renamed=True))
+    if renamed:
+        b.insert('JOBS', 1, JOB_CODE='A', PLANNED_ROUTE='R1')
+        b.insert('BOXES', 11, JOB_CODE='A', BOX_CODE='P1', STORED_ROUTE='R1')
+        b.insert('EVENTS', 111, JOB_REF='A', BOX_REF='P1', SCAN_TEXT='first')
+    expected_children = ([11], [111]) if renamed else ([11, 12], [111])
+    for op, row, children in zip(b.receipt['adapted_operations'], (1, 11), expected_children):
+        page = op['page_id']
+        binds = b.select(op, row)
+        token = binds[f'P{page}_TOKEN']
+        assert re.fullmatch('[0-9A-F]{64}', token)
+        # f?p item values are separated from other URL fields by colons.
+        url = f'f?p=100:{page}:123::NO::P{page}_PARENT_ID,P{page}_TOKEN:{row},{token}'
+        assert url.split(':')[7].split(',') == [str(row), token]
+        assert [r[0] for r in b.execute(op['parent_context_sql'], binds)] == [row]
+        assert [r[0] for r in b.execute(op['child_query_sql'], binds)] == children
+        assert op['parent_context_sql'] in op['population_process_code']
+        assert op['child_query_sql'] in op['population_process_code']
+        assert op['visible_child_query_sql'].startswith(op['child_query_sql'])
+        assert all(line in b.out[op['page_file']].decode() for line in op['chooser_query_sql'].splitlines())
+        if len(op['snapshot_fields']) == 1:
+            # Existing one-field links keep their exact pre-fix value.
+            assert token == hashlib.sha256(b'A').hexdigest().upper()
+        else:
+            legacy = ':'.join(hashlib.sha256(v).hexdigest().upper() for v in (b'A', b'P1'))
+            assert token == hashlib.sha256(legacy.encode()).hexdigest().upper()
+            for invalid in (legacy, legacy[:64], token[:-1], '0' * 64):
+                stale = {**binds, f'P{page}_TOKEN': invalid}
+                assert not b.execute(op['parent_context_sql'], stale)
+                assert not b.execute(op['child_query_sql'], stale)
+
+
+def test_compound_tokens_preserve_order_null_positions_and_wide_value_boundaries():
+    from fox.forms_master_detail import _fingerprint
+    b = SQLBoundary()
+    cases = [('AB', 'C'), ('A', 'BC'), ('A', 'B'), ('B', 'A'),
+             (None, 'N'), ('N', None), (None, None), ('N', 'N'),
+             ('A:B,C', 'D'), ('A', 'B,C:D'), ('x' * 4000, 'y' * 4000),
+             ('é' * 1000, 'z')]
+    for width in (2, 4, 8):
+        fields = [{'column': f'K{i}'} for i in range(width)]
+        query = 'select ' + _fingerprint(fields) + ' from (select ' + ','.join(f':K{i} as K{i}' for i in range(width)) + ') p'
+        tokens = []
+        for first, second in cases:
+            values = [first, second] + [None] * (width - 2)
+            token = b.execute(query, dict(zip((f'K{i}' for i in range(width)), values)))[0][0]
+            assert re.fullmatch('[0-9A-F]{64}', token)
+            framed = ':'.join('N' if value is None else hashlib.sha256(value.encode()).hexdigest().upper() for value in values)
+            assert token == hashlib.sha256(framed.encode()).hexdigest().upper()
+            tokens.append(token)
+        assert len(set(tokens)) == len(cases)
+
+
+@pytest.mark.parametrize('field', ['LOAD_REFERENCE', 'PIECE_CODE'])
+def test_compound_selection_rejects_stale_changes_to_either_field(field):
+    b = seeded()
+    op = b.receipt['adapted_operations'][1]
+    binds = b.select(op, 11)
+    parent = b.block('PIECES')
+    column = next(f['column'] for f in parent['items'] if f['source_name'] == field)
+    for changed in ('CHANGED', None):
+        b.db.execute(f'update {parent["table_name"]} set {column}=? where FOX_ROW_ID=11', (changed,))
+        assert not b.execute(op['parent_context_sql'], binds)
+        assert not b.execute(op['child_query_sql'], binds)
+
+
+def test_compound_selection_keeps_row_identity_and_null_safe_uniqueness_guards():
+    b = seeded()
+    op = b.receipt['adapted_operations'][1]
+    page = op['page_id']
+    valid = b.select(op, 11)
+    sibling = b.select(op, 21)
+    for row, token in ((21, valid[f'P{page}_TOKEN']), (11, sibling[f'P{page}_TOKEN']),
+                       (None, valid[f'P{page}_TOKEN']), (999, valid[f'P{page}_TOKEN'])):
+        binds = {f'P{page}_PARENT_ID': row, f'P{page}_TOKEN': token}
+        assert not b.execute(op['parent_context_sql'], binds)
+        assert not b.execute(op['child_query_sql'], binds)
+    b.insert('PIECES', 41, LOAD_REFERENCE='A', PIECE_CODE='P1', STORED_ROUTE='R1')
+    assert not b.execute(op['parent_context_sql'], valid)
+    assert not b.execute(op['child_query_sql'], valid)
+    b.insert('PIECES', 51, LOAD_REFERENCE=None, PIECE_CODE='NULL_PARENT')
+    nullable = b.select(op, 51)
+    assert [r[0] for r in b.execute(op['parent_context_sql'], nullable)] == [51]
+    b.insert('PIECES', 52, LOAD_REFERENCE=None, PIECE_CODE='NULL_PARENT')
+    assert not b.execute(op['parent_context_sql'], nullable)
+    assert not b.execute(op['child_query_sql'], nullable)
+    single = b.receipt['adapted_operations'][0]
+    assert b.select(single, 3)[f'P{single["page_id"]}_TOKEN'] == 'N'
+
+
 def test_null_missing_stale_and_nonunique_parent_never_select_default_or_sibling():
     b = seeded(); op = b.receipt['adapted_operations'][0]
     valid = b.select(op, 1)

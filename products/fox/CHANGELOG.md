@@ -150,6 +150,16 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.44.1] - 2026-11-21
+
+### [fix] Preserve composite master keys in APEX links
+
+APEX shortened the selection signature for a bag with two key fields. Both
+bags in the installed 0.44.0 test showed an empty context when selected.
+The generator now encodes the complete ordered tuple in one URL-safe digest.
+The receiving page still checks the current row and its key values before
+showing related records.
+
 ## [0.44.0] - 2026-11-20
 
 ### [feature] Coordinate selected masters and their related session drafts

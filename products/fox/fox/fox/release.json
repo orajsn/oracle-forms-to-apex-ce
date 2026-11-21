@@ -1,11 +1,9 @@
 {
-  "version": "0.44.0",
-  "released_on": "2026-11-20",
-  "title": "Refresh related records when the selected master changes",
+  "version": "0.44.1",
+  "released_on": "2026-11-21",
+  "title": "Keep the complete key when selecting a master record",
   "changes": [
-    "Show the selected master and matching child records together, using the source relation and its key checks.",
-    "Recognize retained child drafts before switching masters. Cancel keeps the selected master, and an explicit Discard clears only the supported session drafts.",
-    "The source discrepancy view distinguishes rules with connected effects from rules that still need their first connection."
+    "Generate a URL-safe signature for a master with multiple key fields so a selected bag can load its related consignments."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
