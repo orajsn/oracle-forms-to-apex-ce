@@ -10,6 +10,17 @@ application version or relabel existing images.
 
 ## Documentation updates - 2026-11-21
 
+### [testing] Verify field commands on an installed 0.50.0 APEX app
+
+In an isolated APEX 26.1.6 app, both source-directed focus moves worked by
+keyboard and button. All four empty query handlers consumed only their own
+field's command. A manifest without details kept its empty selection. A
+separate read-only session exercised the saved entry check and explicitly
+invoked the generated local routine. The routine focused its bound field and
+copied the saved summary to the session display. No original caller was
+inferred. Oracle parsed seven generated statements, the compiled export was
+verified, and full snapshots of all three synthetic business tables matched.
+
 ### [testing] Verify selected-record delete checks in Oracle APEX
 
 An isolated APEX 26.1.6 app generated from 0.49.0 passed seven browser stages
