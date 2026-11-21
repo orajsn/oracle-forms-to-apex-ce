@@ -223,3 +223,71 @@ def test_host_adapter_is_explicit_trusted_generation_seam_with_fail_closed_contr
     assert declarations in code and "return 'UNKNOWN'" not in code
     assert "l_outcome is null or l_outcome<>'COMMITTED'" in code
     assert 'STALE_AFTER_WHOLE_FORM_COMMIT' in code and 'STALE_AFTER_FINAL_FORM_STATUS' in code
+
+
+@pytest.mark.parametrize('renamed', [False, True])
+def test_explicit_native_return_carries_signed_parent_and_one_shot_result_without_changing_old_branch(renamed):
+    files, op, args = wired(renamed)
+    native = op['native_target']; page = op['page_id']; text = files[op['page_file']].decode()
+    branch = native['return_branch']
+    assert branch in text
+    assert 'point: afterProcessing' in branch and 'sequence: 5' in branch
+    assert 'value: FOX_BAG_ENTRY,FOX_BAG_ENTRY_FOCUS' in branch
+    assert f'P{page}_PARENT_ID: "&P{page}_PARENT_ID."' in branch
+    assert f'P{page}_BAG_RETURN: "&P{page}_BAG_RETURN."' in branch
+    # Rendering GET URLs receive exactly the protected parent and receipt token;
+    # outcome, cursor, revision and continuation nonce come from server receipt.
+    arguments = re.findall(r'(P\d+_[A-Z_]+): "&([^".]+)\."', branch)
+    post = {f'P{page}_PARENT_ID': '41', f'P{page}_BAG_RETURN': 'F'*32}
+    rendered_get = {key: post[value] for key, value in arguments}
+    assert rendered_get == post
+    for name in ('PARENT_ID', 'BAG_RETURN'):
+        item = re.search(r'    pageItem P'+str(page)+'_'+name+r' \(.*?\n    \)', text, re.S)[0]
+        assert 'sessionStateProtection: checksumRequiredSessionLevel' in item
+        assert 'storage: request' in item and 'valueProtected: false' not in item
+    old = re.search(r'    branch show-current-record \(.*?\n    \)', args[-1][op['page_file']].decode(), re.S)[0]
+    assert old in text
+
+
+def test_return_receipt_persists_post_action_outcome_then_consumes_before_exact_selection_recheck():
+    _, op, _ = wired(); native = op['native_target']; page = op['page_id']
+    capture, projection = native['return_capture_plsql'], native['projection_plsql']
+    assert f"p_c006=>:P{page}_BAG_STATE,p_c007=>:P{page}_BAG_NONCE" in capture
+    assert f"p_c004=>:P{page}_SEQ,p_c005=>:P{page}_REV" in capture
+    assert 'p_c008=>l_name,p_n001=>l_id' in capture
+    assert native['return_source_digest'] in capture and native['return_source_digest'] in projection
+    assert capture.index('if :REQUEST is null') < capture.index('l_ticket:=rawtohex(sys_guid())')
+    assert f':P{page}_BAG_RETURN:=l_ticket' in capture
+    assert projection.index(f':P{page}_BAG_STATE:=null') < projection.index('if l_ticket is not null')
+    assert projection.index('apex_collection.delete_member') < projection.index('if not context_ok')
+    assert projection.index('if not context_ok') < projection.index(f':P{page}_BAG_STATE:=l_return_state')
+    for guard in ('l_return_parent<>to_char(l_parent', 'l_return_row<>to_char(l_seq',
+                  'l_return_revision<>to_char(l_revision', 'l_return_name<>l_name',
+                  'decode(l_return_id,l_id,1,0)', 'l_return_nonce<>l_pending',
+                  'l_expected_hash<>l_destination_hash'):
+        assert projection.index(guard) < projection.index(f':P{page}_BAG_STATE:=l_return_state')
+    assert "if l_return_state='FOCUS_PENDING'" in projection
+    assert "elsif l_return_state='MARKER_CLEARED_AFTER_FOCUS'" in projection
+    assert "if l_code is not null or l_marker is not null or l_pending is not null then return" in projection
+    assert 'if :REQUEST is not null then return' in projection
+    # A new/empty draft can still render the focus continuation: no saved row
+    # produces a scalar NULL projection, rather than an early NO_DATA_FOUND.
+    assert re.search(r'select \(select c\.\w+ from \w+ c where c.FOX_ROW_ID=l_id\) into :P\d+_BAG_NEXT from dual;', projection)
+
+
+@pytest.mark.parametrize('change,found', [({}, True), ({'ticket': 'old'}, False),
+    ({'source': 'foreign'}, False), ({'collection': 'foreign'}, False), ({'created': 0}, False)])
+def test_actual_emitted_return_selection_query_rejects_wrong_expired_or_foreign_receipts(change, found):
+    _, op, _ = wired(); native = op['native_target']; projection = native['projection_plsql']
+    match = re.search(r'(select seq_id,c003,c004,c005,c006,c007,c008,n001)\s+into .*?\s+(from apex_collections where .*?);', projection, re.S)
+    query = (match[1] + ' ' + match[2]).replace('l_ticket', ':ticket').replace('sysdate', ':now')
+    db = sqlite3.connect(':memory:')
+    db.execute('create table apex_collections(collection_name text,seq_id integer,c001 text,c002 text,c003 text,c004 text,c005 text,c006 text,c007 text,c008 text,n001 numeric,d001 numeric)')
+    values = {'collection': native['return_collection'], 'ticket': 'current', 'source': native['return_source_digest'], 'created': 100}
+    values.update(change)
+    db.execute('insert into apex_collections values(?,1,?,?,\'41\',\'2\',\'5\',\'FOCUS_PENDING\',\'nonce\',\'draft-41\',11,?)',
+               (values['collection'], values['ticket'], values['source'], values['created']))
+    rows = db.execute(query, {'ticket': 'current', 'now': 100}).fetchall()
+    assert bool(rows) is found
+    if found:
+        assert rows == [(1, '41', '2', '5', 'FOCUS_PENDING', 'nonce', 'draft-41', 11)]

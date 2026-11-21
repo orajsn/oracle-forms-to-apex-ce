@@ -195,6 +195,7 @@ def _render_sql(buffer, contract, page, query, next_query, blocks, nonce_name, r
     declarations = f'''l_parent number; l_found number; l_name varchar2(255);l_seq number;l_rev number;
 l_sum number;l_branch varchar2(40);l_next number;l_nonce varchar2(64);l_selection varchar2(64);l_nonce_seq number;l_nonce_count number;
 l_form_status varchar2(30);l_commit_result varchar2(30);l_commit_started boolean:=false;l_continue boolean:=false;
+l_start_note number;l_start_token varchar2(4000);
 {native_buffer._value_declarations(buffer)}
 {host}
 procedure guard_context(p_write boolean:=false) is begin
@@ -225,7 +226,7 @@ end;'''
     init = f'''declare {declarations}
 begin
  :P{page}_NOTE_STATE:='UNAVAILABLE';
- if :REQUEST is null or :REQUEST not in ('{ENTRY_REQUEST}','{CALL_REQUEST}') then :P{page}_NOTE_RESULT:=null;end if;
+ :P{page}_NOTE_RESULT:=null;
  :P{page}_NOTE_LINK:=apex_page.get_url(p_page=>{c['draft_page_id']},p_items=>'P{c['draft_page_id']}_PARENT_ID',p_values=>:P{page}_ID0);
  guard_context;
  {fresh}
@@ -258,6 +259,7 @@ end;'''
     process = f'''declare {declarations}
 begin
  if :REQUEST is null or :REQUEST not in ('{ENTRY_REQUEST}','{CALL_REQUEST}') then return;end if;
+ l_start_note:=:P{page}_ID2;l_start_token:=:P{page}_TOKEN2;
  savepoint fox_note_entry;
  :P{page}_NOTE_RESULT:=null;
  if :P{page}_NOTE_SEQ is null or :P{page}_NOTE_REV is null or :P{page}_NOTE_NONCE is null
@@ -320,10 +322,97 @@ exception when others then
   apex_collection.update_member_attribute(p_collection_name=>'{nonce_name}',p_seq=>l_nonce_seq,p_attr_number=>3,p_attr_value=>'COMMIT_UNKNOWN');
   :P{page}_NOTE_RESULT:='WHOLE_FORM_COMMIT_OUTCOME_UNKNOWN';
  else rollback to fox_note_entry;:P{page}_NOTE_RESULT:='DRAFT_ASSIGNMENT_NOT_APPLIED';end if;
+ :P{page}_ID2:=l_start_note;:P{page}_TOKEN2:=l_start_token;
  :P{page}_NOTE_FOCUS:=null;
  apex_debug.error('Note entry stopped: %s',sqlerrm);
 end;'''
     return init, process
+
+
+def _return_transfer(buffer, c, page, query, blocks, nonce_name, source_proof):
+    """One-shot outcome across native POST/redirect/GET; no browser outcome input."""
+    name=nonce_name.replace('FOX_N_','FOX_NR_',1)
+    digest="rawtohex(standard_hash("+"||':'||".join(f":P{page}_{k}{i}" for i in range(3) for k in ('ID','TOKEN'))+",'SHA256'))"
+    marker=' from '+', '.join(f"{b['table_name']} r{i}" for i,b in enumerate(blocks))+' where '
+    fresh=query.replace(marker,' into l_sum,l_branch'+marker,1)+';'
+    read=native_buffer._read_parent(buffer,'l_found').replace(native_buffer._name(buffer),c['collection_namespace'])
+    declarations=f'''l_parent number;l_found number;l_name varchar2(255);l_seq number;l_rev number;l_sum number;
+l_branch varchar2(40);l_result varchar2(50);l_digest varchar2(64);l_ticket varchar2(64);l_member number;l_count number;
+{native_buffer._value_declarations(buffer)}'''
+    outcomes="'WHOLE_FORM_STATUS_REQUIRED','WHOLE_FORM_COMMIT_FAILED','WHOLE_FORM_COMMIT_OUTCOME_UNKNOWN','ASSIGNED_CURRENT_DRAFT','INVALID_FOCUS','NEXT_ITEM','NEXT_SAVED_RECORD','END_OF_SAVED_RECORDS','DRAFT_ASSIGNMENT_NOT_APPLIED'"
+    capture=f'''declare {declarations}
+begin
+ if :REQUEST is null or :REQUEST not in ('{ENTRY_REQUEST}','{CALL_REQUEST}') then return;end if;
+ :P{page}_NOTE_RETURN:=null;l_result:=:P{page}_NOTE_RESULT;
+ if l_result is null or l_result not in ({outcomes}) then return;end if;
+ {fresh}
+ select {digest} into l_digest from dual;
+ begin
+  l_parent:=:P{page}_ID0;{read}
+  select m.n002,m.n003 into l_seq,l_rev from apex_collections m,apex_collections d
+   where m.collection_name=l_name and m.seq_id=1 and m.c050='META' and m.n001=l_parent
+   and m.c049='{native_buffer._sha(native_buffer._json(buffer))}' and d.collection_name=l_name
+   and d.seq_id=m.n002 and d.c050='ROW' and d.n001=:P{page}_ID1;
+ exception when no_data_found then l_name:=null;l_seq:=null;l_rev:=null;end;
+ if l_result in ('INVALID_FOCUS','NEXT_ITEM') and (l_seq is null or l_rev is null) then return;end if;
+ if not apex_collection.collection_exists('{name}') then apex_collection.create_collection('{name}');end if;
+ for old in (select seq_id from apex_collections where collection_name='{name}' and d001<sysdate-1/144 and rownum<=100) loop
+  apex_collection.delete_member(p_collection_name=>'{name}',p_seq=>old.seq_id);end loop;
+ select count(*) into l_count from apex_collections where collection_name='{name}';
+ if l_count>=100 then return;end if;
+ l_ticket:=rawtohex(sys_guid());
+ apex_collection.add_member(p_collection_name=>'{name}',p_c001=>l_ticket,p_c002=>l_digest,
+  p_c003=>l_result,p_c004=>'{source_proof}',p_c005=>l_name,p_n001=>l_seq,p_n002=>l_rev,
+  p_n003=>:P{page}_ID1,p_d001=>sysdate);
+ :P{page}_NOTE_RETURN:=l_ticket;
+exception when others then :P{page}_NOTE_RETURN:=null;apex_debug.error('Note return capture: %s',sqlerrm);
+end;'''
+    consume=f'''declare {declarations}
+begin
+ :P{page}_NOTE_RESULT:=null;l_ticket:=:P{page}_NOTE_RETURN;:P{page}_NOTE_RETURN:=null;
+ if l_ticket is null or not regexp_like(l_ticket,'^[A-F0-9]{{32}}$') then return;end if;
+ {fresh}
+ select {digest} into l_digest from dual;
+ select seq_id,c003,c005,n001,n002 into l_member,l_result,l_name,l_seq,l_rev from apex_collections
+  where collection_name='{name}' and c001=l_ticket and c002=l_digest
+  and c004='{source_proof}' and n003=:P{page}_ID1 and d001>sysdate-1/144;
+ -- Consume only the exact selected return. Refresh or a different GET cannot
+ -- replay a focus, and a wrong target cannot consume another tab's receipt.
+ apex_collection.delete_member(p_collection_name=>'{name}',p_seq=>l_member);
+ if l_seq is not null or l_rev is not null then
+  if l_seq is null or l_rev is null then return;end if;
+  select count(*) into l_count from apex_collections m,apex_collections d
+   where m.collection_name=l_name and m.seq_id=1 and m.c050='META' and m.n001=:P{page}_ID0
+   and m.c049='{native_buffer._sha(native_buffer._json(buffer))}' and m.n002=l_seq and m.n003=l_rev
+   and d.collection_name=l_name and d.seq_id=l_seq and d.c050='ROW' and d.n001=:P{page}_ID1 and d.c045 is null;
+  if l_count<>1 then return;end if;
+ end if;
+ if l_result in ('INVALID_FOCUS','NEXT_ITEM') and
+  (:P{page}_NOTE_STATE is null or :P{page}_NOTE_STATE<>'READY' or l_seq is null or l_rev is null) then return;end if;
+ :P{page}_NOTE_RESULT:=l_result;
+exception when no_data_found then null;
+ when others then :P{page}_NOTE_RESULT:=null;apex_debug.error('Note return refused: %s',sqlerrm);
+end;'''
+    carry='\n'.join(f'                    P{page}_{k}{i}: "&P{page}_{k}{i}."' for i in range(3) for k in ('ID','TOKEN'))
+    branch=f'''    branch return-from-note-entry (
+        name: Return to exact selected consignment
+        execution {{ sequence: 5
+            point: afterProcessing }}
+        behavior {{ type: pageOrUrl
+            target: {{ page: {page}
+                clearCache: {page}
+                items: {{
+{carry}
+                    P{page}_NOTE_RETURN: "&P{page}_NOTE_RETURN."
+                }}
+            }}
+        }}
+        serverSideCondition {{ type: requestIsContainedInValue
+            value: {ENTRY_REQUEST},{CALL_REQUEST} }}
+    )
+'''
+    return dict(collection_name=name,source_proof=source_proof,capture_plsql=capture,consume_plsql=consume,
+                branch=branch,return_item=f'P{page}_NOTE_RETURN',scope='one_shot_exact_post_action_selection_and_source_bound_return')
 
 
 def apply_note_entry_wiring(documents, packet, chunks, trace, files, *, whole_form_adapter=None):
@@ -392,6 +481,8 @@ def apply_note_entry_wiring(documents, packet, chunks, trace, files, *, whole_fo
             text=text.replace(anchor,native_buffer._indent(script,8)+'\n'+anchor,1)
             addition=''.join(_hidden(page,'NOTE_'+name,restricted=name in ('STATE','LINK','BAG_ID','DRAFT_SEQ','DRAFT_REV'))
                              for name in ('STATE','LINK','NONCE','REV','SEQ','FOCUS','BAG_ID','DRAFT_SEQ','DRAFT_REV'))
+            return_item=_hidden(page,'NOTE_RETURN').replace('storage: session','storage: request')
+            addition+=return_item
             focus_hidden=_hidden(page,'NOTE_FOCUS')
             addition=addition.replace(focus_hidden,focus_hidden.replace('        type: hidden\n',
                 '        type: hidden\n        settings { valueProtected: false }\n').replace(
@@ -403,7 +494,7 @@ def apply_note_entry_wiring(documents, packet, chunks, trace, files, *, whole_fo
             region: @records
             slot: regionBody }}
         advanced {{ customAttributes: "readonly" }}
-        sessionState {{ storage: session
+        sessionState {{ storage: request
             dataType: varchar2 }}
         security {{ sessionStateProtection: restricted }}
     )
@@ -438,6 +529,10 @@ def apply_note_entry_wiring(documents, packet, chunks, trace, files, *, whole_fo
 '''
             addition += native_buffer._process('bind-current-note-draft',init,point='beforeHeader',sequence=35)
             addition += native_buffer._process('apply-current-note-entry',process,point='afterSubmit',sequence=10)
+            transfer=_return_transfer(buffer,c,page,query,blocks,nonce,_sha([packet['source_binding'],op['operation_id'],op['source_unit_sha256']]))
+            addition += native_buffer._process('capture-note-entry-return',transfer['capture_plsql'],point='afterSubmit',sequence=90)
+            addition += native_buffer._process('consume-note-entry-return',transfer['consume_plsql'],point='beforeHeader',sequence=40)
+            addition += transfer['branch']
             rendered=native_buffer._expand_groups(text[:-2]+addition+')\n')
             from .forms_item_validation import _check_capacity
             _check_capacity(rendered)
@@ -451,6 +546,7 @@ def apply_note_entry_wiring(documents, packet, chunks, trace, files, *, whole_fo
                         relative_next=relative_next,whole_form_provider=host_receipt,
                         server_draft_result_items={k:f'P{page}_NOTE_{k}' for k in ('COST','BAG_ID','DRAFT_SEQ','DRAFT_REV')},
                         nonce_collection=nonce,source_caller_installed=False,
+                        native_return=transfer,
                         effective_buffer_interface={'runtime_file':'fox-package/item-entry-runtime.py',
                             'callable':'execute_item_entry','provider_method':'summary(binding, context)',
                             'contract':'Existing trusted effective Forms detail-buffer provider interface is preserved; native saved-detail SQL does not claim unposted or external detail state.'},

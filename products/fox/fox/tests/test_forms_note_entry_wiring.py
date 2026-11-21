@@ -340,3 +340,149 @@ console.log('callable DOM model: four paths passed');
     target=tmp_path/'note.cjs';target.write_text(harness)
     result=subprocess.run([node,str(target)],capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
+
+
+@pytest.mark.parametrize('renamed',[False,True])
+def test_native_prg_return_branch_preserves_exact_server_selection_and_protected_ticket(renamed):
+    args=prepare(renamed);out,r=apply_note_entry_wiring(*args)
+    assert not r['gaps'];op=r['adapted_operations'][0];page=op['page_id'];transfer=op['native_return']
+    text=out[op['page_file']].decode();branch=transfer['branch']
+    assert 'point: afterProcessing' in branch and f'clearCache: {page}' in branch
+    assert f'value: FOX_NOTE_ENTRY,FOX_NOTE_CALLABLE' in branch
+    for i in range(3):
+        for kind in ('ID','TOKEN'):
+            assert f'P{page}_{kind}{i}: "&P{page}_{kind}{i}."' in branch
+    assert f'P{page}_NOTE_RETURN: "&P{page}_NOTE_RETURN."' in branch
+    item=re.search(rf'pageItem P{page}_NOTE_RETURN \((.*?)\n    \)',text,re.S)[1]
+    assert 'storage: request' in item and 'checksumRequiredSessionLevel' in item
+    assert 'valueProtected: false' not in item
+    result=re.search(rf'pageItem P{page}_NOTE_RESULT \((.*?)\n    \)',text,re.S)[1]
+    assert 'storage: request' in result and 'sessionStateProtection: restricted' in result
+    assert 'sequence: 90' in text[text.index('process capture-note-entry-return'):]
+    assert 'sequence: 40' in text[text.index('process consume-note-entry-return'):]
+    assert f":P{page}_NOTE_RESULT:=null;" in op['initialize_plsql']
+    assert ':REQUEST is null or :REQUEST not in' not in op['initialize_plsql']
+    action=op['process_plsql']
+    assert action.index('l_start_note:=')<action.index('savepoint fox_note_entry;')
+    assert f':P{page}_ID2:=l_start_note;:P{page}_TOKEN2:=l_start_token;' in action[action.index('exception when others then'):]
+    assert transfer['source_proof'] and 'c004=' in transfer['consume_plsql']
+    for code in (transfer['capture_plsql'],transfer['consume_plsql']):
+        assert len(code.encode())<=32767
+
+
+class ReturnSession(SQL):
+    """Execute generated receipt SELECTs across a modeled POST/redirect/GET.
+
+    The APEX native branch and collection API remain local control-flow models.
+    Every identity/fingerprint/receipt/revision query is emitted generator SQL.
+    """
+    def __init__(self):
+        super().__init__();self.p=self.params();self.page=self.op['page_id'];self.transfer=self.op['native_return']
+        self.db.execute('create table apex_collections(collection_name text,seq_id integer,'+
+                        ','.join(f'c{i:03} text' for i in range(1,51))+','+
+                        ','.join(f'n{i:03} numeric' for i in range(1,6))+',d001 numeric)')
+        self.draft='CURRENT_DRAFT'
+        self.proof=re.search(r"m.c049='([a-f0-9]{64})'",self.transfer['consume_plsql'])[1]
+        self.db.execute("insert into apex_collections(collection_name,seq_id,c049,c050,n001,n002,n003) values(?,1,?,'META',1,2,7)",[self.draft,self.proof])
+        self.db.execute("insert into apex_collections(collection_name,seq_id,c050,n001) values(?,2,'ROW',11)",[self.draft])
+    def select_note(self,rowid):
+        b=self.blocks['NOTES'];self.p[f'P{self.page}_ID2']=rowid
+        self.p[f'P{self.page}_TOKEN2']=self.db.execute('select '+_fingerprint(b['items'],'r')+' from '+b['table_name']+' r where FOX_ROW_ID=?',[rowid]).fetchone()[0]
+    def digest(self):
+        raw=re.search(r'\n select (rawtohex\(standard_hash\(.*?) into l_digest from dual;',self.transfer['capture_plsql'],re.S)[1]
+        return self.db.execute('select '+raw,self.p).fetchone()[0]
+    def capture(self,outcome):
+        assert self.db.execute(self.op['query_sql'],self.p).fetchone() is not None
+        ticket='A'*32
+        self.db.execute('insert into apex_collections(collection_name,seq_id,c001,c002,c003,c004,c005,n001,n002,n003,d001) values(?,1,?,?,?,?,?,2,7,11,1)',
+                        [self.transfer['collection_name'],ticket,self.digest(),outcome,self.transfer['source_proof'],self.draft])
+        return ticket
+    def consume(self,ticket=None,state='READY'):
+        # Request-storage return input is absent on an unrelated GET.
+        if ticket is None or not re.fullmatch('[A-F0-9]{32}',ticket):return None
+        if self.db.execute(self.op['query_sql'],self.p).fetchone() is None:return None
+        code=self.transfer['consume_plsql']
+        match=re.search(r'select seq_id,c003,c005,n001,n002 into l_member,l_result,l_name,l_seq,l_rev( from apex_collections.*?);',code,re.S)
+        query='select seq_id,c003,c005,n001,n002'+match[1]
+        query=query.replace('sysdate',':now').replace('1/144','1.0/144')
+        query=re.sub(r'\bl_ticket\b',':ticket',query);query=re.sub(r'\bl_digest\b',':digest',query)
+        found=self.db.execute(query,dict(self.p,ticket=ticket,digest=self.digest(),now=1)).fetchone()
+        if found is None:return None
+        member,result,name,seq,rev=found
+        self.db.execute('delete from apex_collections where collection_name=? and seq_id=?',[self.transfer['collection_name'],member])
+        match=re.search(r'select count\(\*\) into l_count( from apex_collections m,apex_collections d.*?);',code,re.S)
+        query='select count(*)'+match[1]
+        for local in ('l_name','l_seq','l_rev'):query=re.sub(r'\b'+local+r'\b',':'+local,query)
+        count=self.db.execute(query,dict(self.p,l_name=name,l_seq=seq,l_rev=rev)).fetchone()[0]
+        if count!=1:return None
+        if result in ('INVALID_FOCUS','NEXT_ITEM') and state!='READY':return None
+        return result
+
+
+@pytest.mark.parametrize('result',['WHOLE_FORM_STATUS_REQUIRED','ASSIGNED_CURRENT_DRAFT','INVALID_FOCUS','NEXT_ITEM',
+                                   'NEXT_SAVED_RECORD','END_OF_SAVED_RECORDS','DRAFT_ASSIGNMENT_NOT_APPLIED','WHOLE_FORM_COMMIT_OUTCOME_UNKNOWN'])
+def test_generated_return_receipt_survives_redirect_once_without_unrelated_get_leak(result):
+    s=ReturnSession()
+    if result=='NEXT_SAVED_RECORD':s.select_note(22)  # post-action target, not the old note.
+    token=s.capture(result)
+    assert s.consume() is None
+    assert s.consume(token)==result
+    assert s.consume(token) is None
+
+
+def test_return_to_different_note_cannot_show_or_consume_other_targets_focus():
+    s=ReturnSession();token=s.capture('INVALID_FOCUS')
+    s.select_note(22);assert s.consume(token) is None
+    s.select_note(21);assert s.consume(token)=='INVALID_FOCUS'
+
+
+@pytest.mark.parametrize('change',["c004='foreign-source'","d001=0","c002='foreign-selection'"])
+def test_return_refuses_wrong_source_expired_or_different_full_selection(change):
+    s=ReturnSession();token=s.capture('INVALID_FOCUS')
+    s.db.execute('update apex_collections set '+change+' where collection_name=?',[s.transfer['collection_name']])
+    assert s.consume(token) is None
+
+
+@pytest.mark.parametrize('change',["n002=3","n003=8"])
+def test_return_revision_or_cursor_changed_after_post_prevents_focus_and_consumes_ticket(change):
+    s=ReturnSession();token=s.capture('INVALID_FOCUS')
+    s.db.execute('update apex_collections set '+change+' where collection_name=? and seq_id=1',[s.draft])
+    assert s.consume(token) is None
+    assert s.db.execute('select count(*) from apex_collections where collection_name=?',[s.transfer['collection_name']]).fetchone()==(0,)
+
+
+def test_return_stale_note_signature_and_unavailable_current_draft_never_focus():
+    s=ReturnSession();token=s.capture('INVALID_FOCUS')
+    s.update('NOTES',21,CITY='CHANGED')
+    assert s.consume(token) is None
+    s=ReturnSession();token=s.capture('INVALID_FOCUS')
+    assert s.consume(token,state='DRAFT_UNAVAILABLE') is None
+
+
+def test_emitted_return_focus_runs_on_consumed_outcome_and_stays_quiet_on_unrelated_or_replayed_get(tmp_path):
+    node=shutil.which('node')
+    if not node:pytest.skip('Node runtime unavailable')
+    docs=source();root=ET.fromstring(docs[0][1])
+    next(i for i in root.iter('Item') if i.get('Name')=='STEP').set('NextNavigationItem','NOTE_CODE')
+    _,r=apply_note_entry_wiring(*prepare(docs=[(docs[0][0],ET.tostring(root))]))
+    op=r['adapted_operations'][0];config=op['runtime_config']
+    harness='''const vm=require('node:vm');const assert=require('node:assert/strict');
+const c=CONFIG;const code=CODE;
+function get(status){
+ const calls=[];const doc={activeElement:null};const fields={};
+ for(const id of [...c.identities,c.state,c.result,c.focus,c.invalid_focus,c.next_focus,c.focus_ack])fields[id]={value:'x',focus(){doc.activeElement=this;calls.push(id);}};
+ fields[c.state].value='READY';fields[c.result].value=status||'';
+ doc.getElementById=id=>fields[id]||null;
+ vm.runInNewContext(code,{document:doc,window:{},apex:{page:{isChanged:()=>false},submit(){throw new Error('Return GET must not submit');}}});
+ return calls;
+}
+assert.deepEqual(get('INVALID_FOCUS'),[c.invalid_focus]);
+assert.deepEqual(get('NEXT_ITEM'),[c.next_focus]);
+assert.deepEqual(get('ASSIGNED_CURRENT_DRAFT'),[]);
+assert.deepEqual(get('DRAFT_ASSIGNMENT_NOT_APPLIED'),[]);
+assert.deepEqual(get(''),[]);
+console.log('return focus DOM model: five GET outcomes passed');
+'''.replace('CONFIG',json.dumps(config)).replace('CODE',json.dumps(op['javascript']))
+    path=tmp_path/'return.cjs';path.write_text(harness)
+    result=subprocess.run([node,str(path)],capture_output=True,text=True)
+    assert result.returncode==0,result.stdout+result.stderr

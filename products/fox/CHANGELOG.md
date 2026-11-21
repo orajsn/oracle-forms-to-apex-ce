@@ -201,6 +201,10 @@ external dependencies. It keeps whole-form commit, unposted detail values and
 source lookup requirements visible. Saved-record navigation uses the synthetic
 row ID when the XML supplies no ordering. Draft changes are session-scoped.
 
+After an entry action submits, the generated page returns to the selected
+record with a signed link. A one-use result tied to that record and draft
+revision restores the focus or confirmation on the new page.
+
 ## [0.50.0] - 2026-11-21
 
 ### [feature] Run XML-defined field commands and inspect remaining gaps
