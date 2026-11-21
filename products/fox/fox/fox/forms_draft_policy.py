@@ -59,20 +59,27 @@ def _expression(node, fields):
     return "(" + left + " " + {"eq": "=", "ne": "<>", "and": "AND", "or": "OR"}[kind] + " " + right + ")"
 
 
-def _derive(op, buffer, trace, catalog):
+def _derive(op, buffer, trace, catalog, *, update_item=None):
     """Symbolically execute complete property/IF/local-call AST, in source order."""
     parent_id, child_id = buffer["relation"]["parent_block_id"], buffer["relation"]["child_block_id"]
     parent = next(b for b in trace["blocks"] if b["source_block_id"] == parent_id)
     _need(parent.get("table_name") == buffer["relation"]["parent"]["table"]
           and _IDENT.fullmatch(parent["table_name"]), "PARENT_TARGET")
     editable = {f["source_item_id"] for f in buffer["key_bindings"] if not f.get("parent_copy")}
+    block_properties = ("INSERT_ALLOWED", "UPDATE_ALLOWED")
+    if update_item is not None:
+        child = next(b for b in trace["blocks"] if b["source_block_id"] == child_id)
+        _need(any(f["source_item_id"] == update_item for f in child["items"]), "UPDATE_ITEM_NOT_IN_CHILD")
+        editable = {update_item}
+        block_properties = ("UPDATE_ALLOWED",)
+    item_properties = ("ENABLED", *block_properties)
 
     def relevant(node):
         target = op["property_targets"][node["target_id"]]
         return ((target["source_kind"] == "Block" and target["source_id"] == child_id
-                 and node["property"] in ("INSERT_ALLOWED", "UPDATE_ALLOWED"))
+                 and node["property"] in block_properties)
                 or (target["source_kind"] == "Item" and target["source_id"] in editable
-                    and node["property"] in ("ENABLED", "INSERT_ALLOWED", "UPDATE_ALLOWED")))
+                    and node["property"] in item_properties))
 
     def flatten(nodes):
         result = []
@@ -97,7 +104,7 @@ def _derive(op, buffer, trace, catalog):
     for item_id in {child_id} | editable:
         props = catalog[item_id]["metadata"]
         for name, prop in (("InsertAllowed", "INSERT_ALLOWED"), ("UpdateAllowed", "UPDATE_ALLOWED"), ("Enabled", "ENABLED")):
-            if name == "Enabled" and item_id == child_id:
+            if prop not in (block_properties if item_id == child_id else item_properties):
                 continue
             value = props.get(name, "").strip().lower()
             _need(value in ("", "true", "false"), "STATIC_PROPERTY_UNRESOLVED")
@@ -127,7 +134,7 @@ def _derive(op, buffer, trace, catalog):
             else:
                 raise ValueError("DRAFT_POLICY_COMPLETE_PROPERTY_BODY_REQUIRED")
     walk(op["body"])
-    _need(all((child_id, prop) in states for prop in ("INSERT_ALLOWED", "UPDATE_ALLOWED")),
+    _need(all((child_id, prop) in states for prop in block_properties),
           "COMPLETE_CHILD_CREATE_UPDATE_POLICY_REQUIRED")
     # Constant TRUE restrictions add no condition; retaining them would waste
     # the finite APEX source field and obscure an otherwise identical gate.

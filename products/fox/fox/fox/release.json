@@ -1,10 +1,10 @@
 {
-  "version": "0.47.0",
+  "version": "0.48.0",
   "released_on": "2026-11-21",
-  "title": "Refresh staged query rows by key",
+  "title": "Correct a saved bag weight before approval",
   "changes": [
-    "Recognize the Forms trigger that deletes staged rows for one key, reloads them from a source table and executes the block query.",
-    "Identify the source read and both staging-table operations separately in the interface register."
+    "Open the affected saved bag from the selected manifest, correct its actual weight and return to check readiness again.",
+    "Recheck the editable parent and bag, the source number restrictions and the before-update route assignment on an explicit synthetic Save."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

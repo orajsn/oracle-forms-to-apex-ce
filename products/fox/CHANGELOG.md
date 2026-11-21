@@ -150,6 +150,19 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.48.0] - 2026-11-21
+
+### [feature] Correct a blocking bag weight from approval readiness
+
+The generator connects a missing-weight result to the affected saved bags.
+The user can select a bag, enter its actual weight and explicitly save before
+checking the same manifest again. The correction uses synthetic tables and
+the source field validation, edit permissions and before-update assignment.
+It leaves the original approval transaction and external calls pending.
+
+The saved-row check also supports wide blocks: it hashes ordered groups of
+fields before concatenation would exceed Oracle's standard SQL string limit.
+
 ## [0.47.0] - 2026-11-21
 
 ### [feature] Refresh staged query rows for the entered key

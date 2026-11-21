@@ -46,9 +46,9 @@ def installed_compiler(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs, 'run_job', diagnostic_job)
 
 
-def prepare(client):
+def prepare(client, documents=None):
     c, root, pid = client
-    upload(c, pid, [('order.xml', source())])
+    upload(c, pid, [('order.xml', source())] if documents is None else documents)
     response = c.get(f'/api/projects/{pid}/xml-mapping')
     assert response.status_code == 200, response.text
     assessment = response.json()
@@ -66,15 +66,15 @@ def connection(root):
     return db
 
 
-def queue(client):
-    c, root, pid, assessment, body = prepare(client)
+def queue(client, documents=None):
+    c, root, pid, assessment, body = prepare(client, documents)
     response = c.post(f'/api/projects/{pid}/xml-mapping/runs', json=body)
     assert response.status_code == 202, response.text
     return c, root, pid, body, response.json()
 
 
-def finish(client):
-    c, root, pid, body, run = queue(client)
+def finish(client, documents=None):
+    c, root, pid, body, run = queue(client, documents)
     process_one(connection(root), root)
     completed = c.get(f"/api/projects/{pid}/xml-mapping/runs/{run['id']}").json()
     assert completed['state'] == 'GENERATED', completed
@@ -560,6 +560,8 @@ def test_approval_readiness_is_partial_and_links_both_external_call_sites(client
     files=_members(c.get(result['download_url']).content)
     ledger=json.loads(files['fox-package/mapping-ledger.json'])
     action,=ledger['approval_readiness']
+    # This fixture proves the approval checks but has no numeric field trigger.
+    assert not ledger['numeric_corrections']
     links=ledger['approval_interface_links']
     assert action['approval_flag_written'] is False and action['page_file'] in files
     assert [(link['stage_id'],link['supplied_argument_count']) for link in links]==[('external_1',2),('external_2',5)]
@@ -567,6 +569,25 @@ def test_approval_readiness_is_partial_and_links_both_external_call_sites(client
     unit=next(u for u in result['discrepancies']['units'] if u['source_unit_id']==action['source_unit_id'])
     assert unit['status']=='encoded_unwired'
     assert 'additional commit stages' in unit['message']
+
+
+def test_download_exposes_the_saved_number_correction_on_its_existing_source_rule(client):
+    from test_forms_numeric_correction import source as correction_source
+    c, _, _, _, run = finish(client, correction_source(renamed=True))
+    response = c.get(run['download_url'])
+    assert response.status_code == 200 and jobs.sha(response.content) == run['package_sha256']
+    files = _members(response.content)
+    ledger = json.loads(files['fox-package/mapping-ledger.json'])
+    link, = ledger['numeric_corrections']
+    ready, = ledger['approval_readiness']
+    assert link['entry_file'] == ready['page_file'] and link['approval_source_unit_id'] == ready['source_unit_id']
+    assert all(link[k] in files for k in ('entry_file', 'chooser_page_file', 'page_file'))
+    assert link['synthetic_table_writes'] and not link['customer_table_writes'] and not link['approval_flag_written']
+    units = run['discrepancies']['units']
+    unit, = [u for u in units if u['source_unit_id'] == link['source_unit_id']]
+    assert unit['status'] == 'generated' and 'separate Save action' in unit['message']
+    assert len(units) == len(ledger['code_units'])
+    assert run['business_behavior_accepted'] is False and run['runtime_verified'] is False
 
 
 def test_staging_refresh_retains_delete_insert_and_read_for_the_same_action(client):

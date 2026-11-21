@@ -163,12 +163,19 @@ def parse_check_helper(text):
 
 def _fingerprint(fields, alias='p'):
     _need(fields, 'SNAPSHOT_FIELDS_REQUIRED')
-    framed = " || ':' || ".join("nvl(rawtohex(standard_hash(" + alias + '.' + f['column']
-                                   + ",'SHA256')),'N')" for f in fields)
-    # Keep existing one-field selections. Compound tokens must not expose the
-    # ':' frame separators to APEX f?p URLs, where they delimit URL arguments.
-    # Hash the ordered, null-framed digests to a bounded 64-character hex token.
-    return framed if len(fields) == 1 else "rawtohex(standard_hash(" + framed + ",'SHA256'))"
+    frames = ["nvl(rawtohex(standard_hash(" + alias + '.' + f['column'] + ",'SHA256')),'N')" for f in fields]
+    if len(frames) == 1:
+        return frames[0]
+
+    def digest(group):
+        return "rawtohex(standard_hash(" + " || ':' || ".join(group) + ",'SHA256'))"
+
+    # A correction may snapshot a whole row. With Oracle's standard VARCHAR2
+    # limit, concatenating 62 hex digests already exceeds 4,000 bytes. Group
+    # wide rows before concatenation; existing short selection tokens are stable.
+    while len(frames) > 61:
+        frames = [digest(frames[i:i + 61]) for i in range(0, len(frames), 61)]
+    return digest(frames)
 
 
 def _bind(owner, parsed, objects, props, trace, files):

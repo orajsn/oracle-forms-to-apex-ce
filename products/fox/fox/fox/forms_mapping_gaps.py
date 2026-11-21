@@ -91,6 +91,18 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The approval button can check the selected saved manifest and its related rows. The source workflow has additional commit stages before the external calls.'
             action = 'Review the results on the readiness page, then bind whole-form state, each commit and both external routine interfaces before enabling business approval.'
+            if row.get('saved_weight_correction') == 'connected':
+                action = 'Use Correct saved bag weight to resolve a weight blocker and recheck this manifest. Whole-form state, commits and both external routines still need verified bindings.'
+            elif row.get('saved_weight_correction') == 'unavailable':
+                reason = row.get('saved_weight_correction_reason', '')
+                detail = {
+                    'NUMERIC_CORRECTION_EXPLICIT_DECIMAL_PICTURE_REQUIRED': 'The source has no supported number format for editing the weight.',
+                    'NUMERIC_CORRECTION_NUMERIC_SOURCE_GUARD_REQUIRED': 'The source weight field has no uniquely bound numeric validation trigger.',
+                    'NUMERIC_CORRECTION_FIELD_UPDATE_POLICY_DENIED': 'The source edit policy does not allow this field correction.',
+                    'NUMERIC_CORRECTION_EDITABLE_STORED_NUMERIC_FIELD_REQUIRED': 'The weight field could not be verified as an editable stored number.',
+                }.get(reason, 'A saved-weight correction is unavailable for this form.')
+                message += ' ' + detail
+                action += ' See the field and permission checks in the numeric correction receipt.'
         elif reason == 'approval_source_binding_pending':
             category = 'engine_context'
             message = 'The approval workflow is encoded in source order. Its selected-row inputs or button permission still need a native binding.'

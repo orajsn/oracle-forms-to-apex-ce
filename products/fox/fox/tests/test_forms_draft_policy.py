@@ -99,6 +99,31 @@ def test_policy_uses_current_selected_parent_and_binary_null_semantics(approved,
         assert db.execute(query, (1,)).fetchone() == (0,)
 
 
+@pytest.mark.parametrize("allow_field,expected", [(True, "1"), (False, "0")])
+def test_stored_field_update_permission_is_independent_of_record_creation(allow_field, expected):
+    from fox.forms_draft_policy import _derive
+    helper = ("PROCEDURE POLICY IS BEGIN "
+              "SET_BLOCK_PROPERTY('PIECES',INSERT_ALLOWED,PROPERTY_FALSE); "
+              "SET_BLOCK_PROPERTY('PIECES',UPDATE_ALLOWED,PROPERTY_TRUE); "
+              "SET_ITEM_PROPERTY('PIECES.MEASURED',UPDATE_ALLOWED,PROPERTY_"
+              + ("TRUE" if allow_field else "FALSE") + "); END;")
+    name, raw = source(helper=helper)[0]
+    root = ET.fromstring(raw)
+    ET.SubElement(root.find("Block[@Name='PIECES']"), "Item", Name="MEASURED", ItemType="Text Item",
+                  DataType="Number", DatabaseItem="true", InsertAllowed="false")
+    _, _, trace, files = prepare([(name, ET.tostring(root))])
+    plan = json.loads(files["fox-package/buffer-plan.json"])
+    buffer, = plan["operations"]
+    policy = json.loads(files["fox-package/policy-plan.json"])
+    entry, = [op for op in policy["operations"] if op["source_event"] == "WHEN-NEW-RECORD-INSTANCE"]
+    catalog = {o["id"]: o for o in plan["source_catalog"]["objects"]}
+    field, = [f for b in trace["blocks"] for f in b["items"] if f["source_name"] == "MEASURED"]
+    assert _derive(entry, buffer, trace, catalog)[0] == "0"
+    sql, effects, _, _ = _derive(entry, buffer, trace, catalog, update_item=field["source_item_id"])
+    assert sql == expected
+    assert {e["property"] for e in effects} == {"UPDATE_ALLOWED"}
+
+
 def test_all_four_contexts_and_initialization_lock_then_recheck_before_mutating():
     files, receipt, _ = apply()
     op, = receipt["adapted_operations"]

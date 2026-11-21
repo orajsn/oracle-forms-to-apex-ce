@@ -380,12 +380,15 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
         objects, units, coverage, gaps, rules, references = _evidence(packet, ledger, gap_report, catalog,
             chunks=chunks, dependency_evidence=dependency_evidence)
         output_units = []
+        saved_numbers = {op["source_unit_id"] for op in ledger.get("numeric_corrections", [])}
         for uid, (unit, source) in units.items():
             row, owner = coverage[uid], objects[unit["owner_id"]][0]
             if row["status"] == "generated_wired_adapted":
                 status = "generated"
                 message = "Generated with adaptations. " + rules[row["rule_id"]]["adaptations"]
                 message += _lov_return_note(row.get("target"), 4000 - len(message))
+                if uid in saved_numbers:
+                    message += " The readiness screen also provides a separate Save action to correct this field on the selected synthetic record."
                 action = "Verify target runtime and business behavior against the original source; neither is accepted here."
             else:
                 status = "encoded_unwired" if row.get("encoding_status") == "generated_unwired" else "unimplemented"

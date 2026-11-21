@@ -256,6 +256,30 @@ def test_compound_tokens_preserve_order_null_positions_and_wide_value_boundaries
         assert len(set(tokens)) == len(cases)
 
 
+@pytest.mark.parametrize('width', [61, 62, 100])
+def test_saved_numeric_row_snapshot_limits_intermediate_hash_inputs(width):
+    from fox.forms_master_detail import _fingerprint
+    db = sqlite3.connect(':memory:')
+    def bounded_hash(value, algorithm):
+        if value is None:
+            return None
+        encoded = value.encode()
+        assert len(encoded) <= 4000 and algorithm == 'SHA256'
+        return hashlib.sha256(encoded).digest()
+    db.create_function('standard_hash', 2, bounded_hash)
+    db.create_function('rawtohex', 1, lambda b: b.hex().upper() if b is not None else None)
+    db.create_function('nvl', 2, lambda a, b: a if a is not None else b)
+    columns = ['C' + str(i) for i in range(width)]
+    sql = ('select ' + _fingerprint([{'column': c} for c in columns]) +
+           ' from (select ' + ','.join('? as ' + c for c in columns) + ') p')
+    values = ['value'] * width
+    first = db.execute(sql, values).fetchone()[0]
+    assert re.fullmatch(r'[0-9A-F]{64}', first)
+    values[-1] = None
+    assert db.execute(sql, values).fetchone()[0] != first
+    db.close()
+
+
 @pytest.mark.parametrize('field', ['LOAD_REFERENCE', 'PIECE_CODE'])
 def test_compound_selection_rejects_stale_changes_to_either_field(field):
     b = seeded()

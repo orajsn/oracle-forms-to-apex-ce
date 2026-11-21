@@ -93,7 +93,7 @@ def mapping_catalog():
          "Bound native report calculation.", "Oracle NULL/error semantics retained; no implicit casts or divide-by-zero guards."),
         ("fox.behavior.numeric-nonzero-then-focus", "Complete supported KEY-NEXT-ITEM guard; distinct same-block focus item; first supported guard per report; within the 100-operation package bound.",
          "Linked native validation-only page with Continue action and focus request.",
-         "Existing synthetic row only; no save/DML/commit; repeated MESSAGE becomes one notification."),
+         "Continue validates the value on an existing synthetic record and moves focus. Repeated source messages appear as one notification."),
         ("fox.behavior.local-comparison-report-column", "Complete local equality helper call; same-row VARCHAR2 and proven control-session bindings.",
          "Numeric report CASE expression with native VARCHAR2 comparison and concatenation.", "Persisted rows/submitted control values; compatible USING_NLS_COMP collation/session settings required and unverified; original lifecycle separate."),
         ("fox.behavior.local-comparison-function-inlined", "Complete side-effect-free same-module VARCHAR2 equality function with at least one emitted caller.",
@@ -140,17 +140,21 @@ def mapping_catalog():
          "Retain ordered workflow stages and identify each stage's required provider.", "Actual form state, commit outcomes and external calls require separate bindings."),
         ("fox.approval.saved-readiness", "A source-bound approval button and its current permission are linked to a selected synthetic master and two proved related blocks.",
          "Check the saved master and its related rows for the conditions in the source.", "Later checks describe currently saved rows. The action leaves approval, source commit segments and external calls pending."),
+        ("fox.validation.saved-number-correction", "The readiness check identifies a numeric field with a source validation and a permitted, identified synthetic row.",
+         "Open the blocking record, correct its numeric value, save and recheck the selected master.",
+         "Explicit Save updates the selected synthetic record and applies its source before-update assignment. The approval transaction remains pending."),
         ("fox.query.staged-refresh", "A guarded query trigger deletes and repopulates rows for one key before executing the block query.",
          "Record the ordered source statements and link any generated session refresh page.", "Database staging visibility and the caller's transaction require target verification."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 15,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 16,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
-                                "forms_staged_query_plan.py", "forms_staged_query.py")}
+                                "forms_staged_query_plan.py", "forms_staged_query.py",
+                                "forms_numeric_correction.py", "forms_numeric_correction_page.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -246,6 +250,33 @@ def _approval_bindings(plan, receipt, chunks, files):
             raise ValueError("Approval-readiness evidence differs from its bound source stages.")
         connected[uid] = op
     return parsed, connected
+
+
+def _numeric_correction_links(receipt, approval_pages, behavior_plan, files):
+    rules = {op["source_unit_id"]: op for op in behavior_plan["operations"]
+             if op["kind"] == "numeric_nonzero_then_focus"}
+    links = []
+    seen = set()
+    for action in receipt["adapted_operations"]:
+        uid = action["source_unit_id"]
+        rule = rules.get(uid)
+        approval = approval_pages.get(action["approval_source_unit_id"])
+        identity = (uid, action["approval_source_unit_id"])
+        if (identity in seen or rule is None or approval is None
+                or action["source_unit_sha256"] != rule["source_unit_sha256"]
+                or rule["source_item_id"] != approval["contract"]["fields"]["weight"]["source_item_id"]
+                or action["entry_file"] != approval["page_file"] or action["entry_file"] not in files
+                or action["readiness_final_page_sha256"] != _sha(files[action["entry_file"]])
+                or action["readiness_query_sha256"] != _sha(approval["readiness_query_sql"].encode())
+                or action["chooser_page_file"] not in files or action["page_file"] not in files
+                or action["synthetic_table_writes"] is not True
+                or action["customer_table_writes"] is not False or action["approval_flag_written"] is not False):
+            raise ValueError("Numeric correction does not match the source field and readiness page.")
+        seen.add(identity)
+        links.append({k: action[k] for k in ("operation_id", "source_unit_id", "source_unit_sha256",
+                     "approval_source_unit_id", "entry_file", "chooser_page_file", "page_file", "synthetic_table_writes",
+                     "customer_table_writes", "approval_flag_written")})
+    return links
 
 
 def _staged_query_targets(plan, receipt, chunks, files):
@@ -531,6 +562,13 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files["fox-package/staged-query-receipt.json"] = _bytes(stage_receipt)
     stage_plan = json.loads(files["fox-package/staged-query-plan.json"])
     staged_units = _staged_query_targets(stage_plan, stage_receipt, chunks, files)
+    from .forms_numeric_correction_page import apply_numeric_corrections
+    files, correction_receipt = apply_numeric_corrections(documents, packet, chunks, trace, files)
+    files["fox-package/numeric-correction-receipt.json"] = _bytes(correction_receipt)
+    numeric_corrections = _numeric_correction_links(correction_receipt, approval_pages, behavior_plan, files)
+    correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
+    correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
+                       for gap in correction_receipt["gaps"]}
     for save in save_receipt["generated_operations"]:
         uid = save["source_unit_id"]
         review = encoded.pop(uid, None)
@@ -643,6 +681,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                 raise ValueError("Two adapters claim the same approval trigger.")
             row.update(encoding_status="generated_unwired", reason=(
                 "approval_readiness_partly_connected" if uid in approval_pages else "approval_source_binding_pending"))
+            if uid in correctable_approvals:
+                row["saved_weight_correction"] = "connected"
+            elif uid in correction_gaps:
+                row["saved_weight_correction"] = "unavailable"
+                row["saved_weight_correction_reason"] = correction_gaps[uid]
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -758,6 +801,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "session_defaults": defaults_receipt["generated_operations"],
         "guarded_queries": query_receipt["generated_operations"],
         "staged_queries": list(staged_units.values()),
+        "numeric_corrections": numeric_corrections,
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -776,6 +820,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     if context_summary["relations_generated"]:
         applied = sorted(set(applied) | {"fox.relation.read-context"})
     applied = sorted(set(applied) | {e["rule_id"] for r in coordination.values() for e in r["effects"]})
+    if numeric_corrections:
+        applied = sorted(set(applied) | {"fox.validation.saved-number-correction"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
