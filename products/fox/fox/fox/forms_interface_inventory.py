@@ -367,6 +367,17 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
             if error.endswith("limit"):
                 limits[error] += 1
             add(owner, unit, None, "unresolved_syntax", "unresolved", limitation=error)
+        # Only the immediately following SELECT is proved unreachable. A
+        # subsequent label, branch or exception handler can have its own entry.
+        skipped_select = set()
+        in_skipped_select = False
+        for j, t in enumerate(tokens):
+            if t[0] == "word" and t[1].upper() == "SELECT" and j >= 3:
+                in_skipped_select |= [v[1].upper() for v in tokens[j-3:j]] == ["RAISE", "FORM_TRIGGER_FAILURE", ";"]
+            if in_skipped_select:
+                skipped_select.add(j)
+            if t[1] == ";":
+                in_skipped_select = False
         database_starts = set()
         # Static target scanning is token-based, preserving full qualified names.
         for index, token in enumerate(tokens):
@@ -493,6 +504,17 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
                 position=_position(positions, token[2], finish), arguments=args, limitation=limitation, nested=enclosing)
             if row is not None:
                 row["bound_local_unit_id"] = bound
+                if index in skipped_select:
+                    row["control_flow"] = "select_after_unconditional_form_trigger_failure"
+                if (upper == "FIND_REPORT_OBJECT" and classification == "forms_platform_api" and not definitions
+                        and paren and parts and len(parts) == len(parts[0]) == 1 and parts[0][0][0] == "literal"):
+                    literal = semantic[parts[0][0][2]:parts[0][0][3]]
+                    if re.fullmatch(r"'[A-Za-z][A-Za-z0-9_$#]{0,127}'", literal):
+                        matches = [obj for obj in objects.values() if obj["kind"] == "Report"
+                                   and obj["module_id"] == owner["module_id"]
+                                   and (obj["name"] or "").upper() == literal[1:-1].upper()]
+                        if len(matches) == 1:
+                            row["registered_report"] = matches[0]["name"]
                 if upper == "FORMS_DDL" and classification == "forms_platform_api" and not definitions:
                     # Record only the two closed transaction commands. Other
                     # dynamic text can contain credentials or arbitrary SQL.
@@ -630,7 +652,7 @@ def interface_inventory_csv(register):
         "argument_line", "argument_column", "argument_character_offset", "bind_name", "bind_kind", "bind_source_item_id",
         "bind_source_declared_type", "bind_line", "bind_column", "bind_character_offset", "bind_data_flow",
         "formal_parameter_direction", "affected_owner", "affected_unit_id", "unit_path", "via_call_site_ids", "relationship", "limitation",
-        "transaction_effect"]
+        "transaction_effect", "control_flow"]
     writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
     writer.writeheader()
     written_bytes, written_rows = len(output.getvalue().encode("utf-8")), 0
@@ -665,7 +687,7 @@ def interface_inventory_csv(register):
                     "unit_path": " > ".join(action["unit_path"]) if action else None,
                     "via_call_site_ids": " > ".join(action["via_call_site_ids"]) if action else None,
                     "relationship": action["relationship"] if action else None, "limitation": row["limitation"],
-                    "transaction_effect": row.get("transaction_effect")}
+                    "transaction_effect": row.get("transaction_effect"), "control_flow": row.get("control_flow")}
                 safe = {key: "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value
                         for key, value in cells.items()}
                 buffer = io.StringIO(newline="")

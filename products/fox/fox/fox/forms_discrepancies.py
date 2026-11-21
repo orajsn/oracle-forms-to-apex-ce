@@ -387,6 +387,13 @@ def build_discrepancies(packet, ledger, gap_report, catalog, *, chunks=None, dep
                 status = "generated"
                 message = "Generated with adaptations. " + rules[row["rule_id"]]["adaptations"]
                 message += _lov_return_note(row.get("target"), 4000 - len(message))
+                if row["rule_id"] in ("fox.item.literal-focus-command","fox.item.null-query-command"):
+                    command = row["target"]
+                    owner_name = command["owner_item"]["source_item_name"]
+                    if row["rule_id"] == "fox.item.literal-focus-command":
+                        message += " Next moves from " + owner_name + " to " + command["target_item"]["source_item_name"] + "."
+                    else:
+                        message += " On " + owner_name + ", " + command["source_event"] + " performs no query."
                 if uid in saved_numbers:
                     message += " The readiness screen also provides a separate Save action to correct this field on the selected synthetic record."
                 action = "Verify target runtime and business behavior against the original source; neither is accepted here."

@@ -1,10 +1,10 @@
 {
-  "version": "0.49.0",
+  "version": "0.50.0",
   "released_on": "2026-11-21",
-  "title": "Check deletion rules for a selected record",
+  "title": "Navigate saved fields and review remaining conversion gaps",
   "changes": [
-    "Check a selected master for linked detail records and inspect the source deletion rules for bags and consignments.",
-    "Trace an external permission or audit call to its source action and distinguish the database commit inside posting from the form-wide commit."
+    "Follow source-defined field navigation and retain the source behavior of field-specific empty query commands.",
+    "Inspect the remaining work by source field, database routine, lookup table, report and session value."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

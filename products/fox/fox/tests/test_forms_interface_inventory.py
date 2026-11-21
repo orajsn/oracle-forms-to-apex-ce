@@ -159,6 +159,26 @@ def test_pre_delete_dependency_is_linked_to_posting_sites_in_the_same_block():
         build_interface_inventory(packet, chunks, ledger, documents=docs)
 
 
+def test_gap_requirements_separate_skipped_queries_and_bind_registered_report():
+    from fox.forms_gap_requirements import add_gap_requirements, valid_gap_requirements
+    body = """BEGIN
+        IF :GLOBAL.USERNAME IS NULL THEN RAISE FORM_TRIGGER_FAILURE;
+          SELECT EXAMPLE.SKIP_CHECK(:LINES.CODE) INTO v FROM DUAL;
+        ELSE SELECT EXAMPLE.CHECK_CODE(:LINES.CODE) INTO v FROM EXAMPLE.DATA; END IF;
+        x := FIND_REPORT_OBJECT('SLIP');
+        -- FIND_REPORT_OBJECT('HIDDEN') and EXAMPLE.OLD_CHECK(:SYSTEM.OLD)
+        END;"""
+    packet, chunks, _, _, register = context(body)
+    uid, = [r['source']['source_unit_id'] for r in calls(register,'EXAMPLE.SKIP_CHECK')]
+    gaps = {'gaps':[{'source_unit_id':uid}]}
+    add_gap_requirements(gaps,packet,chunks,register)
+    req = gaps['gaps'][0]['requirements']
+    assert req['routines'] == ['EXAMPLE.CHECK_CODE'] and req['unreached_calls'] == ['EXAMPLE.SKIP_CHECK']
+    assert req['tables'] == ['EXAMPLE.DATA'] and req['reports'] == ['SLIP']
+    assert req['forms_state'] == ['GLOBAL.USERNAME'] and req['owner_path'].endswith('ACTION / WHEN-BUTTON-PRESSED')
+    assert valid_gap_requirements(req) and not valid_gap_requirements({**req, 'forms_state':'forged'})
+
+
 def test_static_local_paths_module_isolation_cycles_and_nested_effects():
     helpers = [("HELPER", "PROCEDURE HELPER IS BEGIN APP.API.DELETE_ROW(:LINES.CODE); OTHER; END HELPER;"),
                ("OTHER", "PROCEDURE OTHER IS BEGIN HELPER; END OTHER;")]

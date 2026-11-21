@@ -571,6 +571,31 @@ def test_approval_readiness_is_partial_and_links_both_external_call_sites(client
     assert 'additional commit stages' in unit['message']
 
 
+def test_saved_xml_commands_and_report_dependency_are_visible_after_download(client):
+    from xml.etree import ElementTree as ET
+    from test_forms_item_commands import source as command_source
+
+    def add_report(root):
+        ET.SubElement(root, 'Report', Name='DISPATCH_SLIP', Filename='slip.rdf')
+        ET.SubElement(root, 'Trigger', Name='KEY-PRINT', TriggerText=(
+            "BEGIN r:=FIND_REPORT_OBJECT('DISPATCH_SLIP'); SELECT endpoint INTO v FROM APP.REPORT_HOSTS; "
+            "APP.PRINT_REQUEST(:GLOBAL.BRANCH); END;"))
+    c, _, _, _, run = finish(client, command_source(renamed=True,mutate=add_report))
+    response = c.get(run['download_url'])
+    assert response.status_code == 200
+    files = _members(response.content)
+    receipt = json.loads(files['fox-package/item-command-receipt.json'])
+    assert len(receipt['generated_operations']) == 6
+    ids = {r['source_unit_id'] for r in receipt['generated_operations']}
+    assert all(u['status']=='generated' for u in run['discrepancies']['units'] if u['source_unit_id'] in ids)
+    gap, = [g for g in run['gaps'] if g['source_name']=='KEY-PRINT']
+    assert gap['requirements']['reports']==['DELIVERY_SLIP']
+    assert gap['requirements']['tables']==['APP.REPORT_HOSTS'] and gap['requirements']['routines']==['APP.PRINT_REQUEST']
+    assert gap['requirements']['forms_state']==['GLOBAL.BRANCH']
+    assert gap in json.loads(files['fox-package/mapping-gaps.json'])['gaps']
+    assert 'report layout' in gap['requirements']['next_check']
+
+
 def test_download_exposes_the_saved_number_correction_on_its_existing_source_rule(client):
     from test_forms_numeric_correction import source as correction_source
     c, _, _, _, run = finish(client, correction_source(renamed=True))

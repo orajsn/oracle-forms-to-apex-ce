@@ -25,7 +25,9 @@ test('discrepancy report is validated and readable on desktop and mobile',{timeo
  await page.getByText(/Partly connected: 1 · Encoded, awaiting connection: 0/).waitFor();
  await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('partial');
  await page.getByText('Showing 1 of 3 units.').waitFor();
- await page.getByText('Partly connected: Behavior note').waitFor();
+ await page.getByText('Partly connected · Behavior note').waitFor();
+ await page.getByRole('button',{name:'Show remaining gaps (2)'}).click();
+ await page.getByText('Showing 2 of 3 units.').waitFor();
  await page.getByRole('region',{name:'Source discrepancies'}).getByRole('combobox').selectOption('all');
  await page.evaluate(()=>{delete window.run.gaps_available;delete window.run.gap_summary;delete window.run.gaps;});await refresh();
  // A parser change may prevent new generation without invalidating the saved report.

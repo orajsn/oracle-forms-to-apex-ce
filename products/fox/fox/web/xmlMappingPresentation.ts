@@ -1,6 +1,7 @@
 import type {SourceBinding} from './projectConversion';
 export type GapCategory = 'engine_mapping'|'engine_context'|'missing_source'|'review_required';
-export type MappingGap = {source_unit_id:string;source_name:string;source_file:string;source_line:number;category:GapCategory;reason:string;message:string;next_action:string;owner:'FOX_ENGINE'|'SOURCE_OWNER'|'REVIEWER'};
+export type GapRequirements = {owner_path:string;routines:string[];tables:string[];reports:string[];forms_state:string[];unreached_calls:string[];limited:boolean;next_check:string};
+export type MappingGap = {source_unit_id:string;source_name:string;source_file:string;source_line:number;category:GapCategory;reason:string;message:string;next_action:string;owner:'FOX_ENGINE'|'SOURCE_OWNER'|'REVIEWER';requirements?:GapRequirements};
 export type DiscrepancyUnit = {source_unit_id:string;source_unit_sha256:string;source_name:string;source_file:string;source_line:number;status:'generated'|'encoded_unwired'|'unimplemented';message:string;next_action:string};
 export type DiscrepancyDependency = {id:string;kind:'database_object'|'routine_reference'|'forms_api'|'local_routine'|'report'|'source_link';name:string;status:'unverified'|'source_definition_present';message:string;next_action:string;occurrences:{source_object_id:string;source_file:string;source_line:number;source_unit_ids:string[]}[]};
 export type Discrepancies = {schema_version:1;scope:'fox-source-discrepancies-v1';source_binding:string;summary:{total_units:number;generated_units:number;encoded_unwired_units:number;unimplemented_units:number;dependency_groups:number;dependency_references:number};units:DiscrepancyUnit[];dependencies:DiscrepancyDependency[];runtime_verified:false;business_behavior_accepted:false};
@@ -15,6 +16,11 @@ const count=(v:unknown):v is number|null=>v===null||(typeof v==='number'&&Number
 const stamp=(v:unknown):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
 const exactKeys=(v:Record<string,unknown>,keys:string[])=>Object.keys(v).length===keys.length&&keys.every(k=>Object.prototype.hasOwnProperty.call(v,k));
 const nonempty=(v:unknown):v is string=>text(v)&&v.trim().length>0;
+function validRequirements(v:unknown):v is GapRequirements {
+ if(!record(v)||!exactKeys(v,['owner_path','routines','tables','reports','forms_state','unreached_calls','limited','next_check'])
+    ||typeof v.owner_path!=='string'||v.owner_path.length>1000||typeof v.limited!=='boolean'||typeof v.next_check!=='string'||v.next_check.length>500)return false;
+ return [v.routines,v.tables,v.reports,v.forms_state,v.unreached_calls].every(a=>Array.isArray(a)&&a.length<=24&&a.every(n=>nonempty(n)&&n.length<=256));
+}
 const integer=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=10000;
 const line=(v:unknown):v is number=>typeof v==='number'&&Number.isSafeInteger(v)&&v>0;
 function parseDiscrepancies(v:unknown,run:Record<string,unknown>):v is Discrepancies {
@@ -91,6 +97,7 @@ export function parseRun(value:unknown,source:SourceBinding,expectedId?:string,e
    const totals:Record<GapCategory,number>={engine_mapping:0,engine_context:0,missing_source:0,review_required:0};
    for(const gap of value.gaps){
     if(!record(gap)||!categories.includes(gap.category as GapCategory)||!['source_unit_id','source_name','source_file','reason','message','next_action'].every(k=>text(gap[k])&&(gap[k] as string).length>0)||!Number.isSafeInteger(gap.source_line)||(gap.source_line as number)<1||gap.owner!==owners[gap.category as GapCategory])return null;
+    if(gap.requirements!==undefined&&!validRequirements(gap.requirements))return null;
     totals[gap.category as GapCategory]++;
    }
    if(categories.some(k=>totals[k]!==summary[k])||value.gaps.length!==value.unsupported_units)return null;

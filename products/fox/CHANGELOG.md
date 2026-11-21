@@ -174,6 +174,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.50.0] - 2026-11-21
+
+### [feature] Run XML-defined field commands and inspect remaining gaps
+
+On selected saved records, Next follows a literal source field target. Enter
+Query and Execute Query respect explicit empty handlers on their owning fields.
+The compiler also records complete local item-entry and navigation procedures
+with their field assignments, summary calculations and transaction boundaries.
+
+**Show remaining gaps** opens the unfinished source actions together. The
+review identifies each owning field or routine and lists referenced database
+interfaces, report definitions and Forms session values. An immediately skipped
+query after a trigger failure is distinguished from a live branch. Historical
+packages retain the classifications recorded when they were generated.
+
 ## [0.49.0] - 2026-11-21
 
 ### [feature] Check delete requirements for a saved record

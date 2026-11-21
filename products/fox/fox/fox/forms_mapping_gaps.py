@@ -79,6 +79,21 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
             action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
+        elif reason in ('item_entry_partly_connected','item_entry_provider_pending'):
+            category = 'engine_context'
+            bounds = row.get('item_entry_boundaries', ())
+            if row.get('item_entry_caller_absent') or 'original_caller_absent_from_supplied_source' in bounds:
+                message = ('The routine has a callable target on the saved-record screen.'
+                           if row.get('item_entry_native_callable') else 'The local routine is encoded in source order.')
+                message += ' No active caller was identified in the supplied module.'
+                action = 'Identify a real invocation and supply its current record, field navigation and effective detail-buffer total.'
+            else:
+                message = 'The XML defines the ordered field-entry branches. The live form status and effective record buffer determine which branch runs.'
+                action = 'Bind the current item and record, and verify validation, posting and commit of all changed blocks when the dirty-form branch runs.'
+            if reason == 'item_entry_partly_connected':
+                message += ' The saved-record screen can evaluate the snapshot branch, show the detail total and focus the bound field.'
+            elif row.get('item_entry_binding_gap'):
+                message += ' ' + row['item_entry_binding_gap']
         elif reason == 'delete_check_partly_connected':
             category = 'engine_context'
             if row['delete_event'] == 'ON-CHECK-DELETE-MASTER':

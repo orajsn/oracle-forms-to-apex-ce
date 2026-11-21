@@ -31,6 +31,7 @@ from .forms_draft_policy import apply_draft_policies
 from .forms_synthetic_save import apply_synthetic_saves
 from .forms_item_validation import apply_item_validations
 from .forms_interface_inventory import build_interface_inventory, interface_inventory_csv
+from .forms_gap_requirements import add_gap_requirements
 from .forms_lov_return import apply_lov_returns
 from .forms_master_detail import apply_master_details
 from .forms_detail_clear import apply_detail_clear
@@ -48,6 +49,8 @@ _FALSE = ("schema_prepared", "import_verified", "runtime_verified",
           "clean_schema_install_passed", "package_reimport_passed",
           "technically_verified", "business_behavior_accepted")
 _BEHAVIOR_RULES = {
+    "literal_item_focus": "fox.item.literal-focus-command",
+    "item_null_query_override": "fox.item.null-query-command",
     "cross_block_item_lookup_validation": "fox.validation.draft-item-lookup",
     "record_group_with_caller_returns": "fox.query.record-group-caller-returns",
     "synthetic_parent_copy_write": "fox.assignment.synthetic-record-save",
@@ -148,17 +151,27 @@ def mapping_catalog():
         ("fox.delete.source-workflow", "A complete block-owned delete trigger is linked to its source fields, relation and posting stages.",
          "Record the source checks, calls and transaction order; attach the selected-record check when its inputs are proved.",
          "The source unit keeps its remaining deletion, transaction or external-provider requirements."),
+        ("fox.item.literal-focus-command", "The complete item-owned Next trigger names a uniquely bound focus destination.",
+         "Next moves focus to the XML target field in the selected record context.",
+         "Field commands use explicitly selected saved synthetic records. Validation, record creation and form-wide commits have separate bindings."),
+        ("fox.item.null-query-command", "The complete item-owned Enter Query or Execute Query handler contains only NULL.",
+         "Consume that query command on its owning field and retain the current record.",
+         "FOX supplies explicit query commands and browser shortcuts on the saved-record navigation screen."),
+        ("fox.workflow.xml-item-entry", "A complete local entry event or navigation-and-assignment routine has been parsed and bound to its fields.",
+         "Preserve ordered navigation, conditions, assignments and applicable commit boundaries in a reusable callable.",
+         "Current record state, navigation side effects and whole-form commits require the recorded providers where applicable."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 17,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 18,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
-                                "forms_delete_plan.py", "forms_delete_action.py")}
+                                "forms_delete_plan.py", "forms_delete_action.py", "forms_item_commands.py",
+                                "forms_item_entry_workflow.py", "forms_gap_requirements.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -634,6 +647,40 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files["fox-package/delete-action-receipt.json"] = _bytes(delete_receipt)
     delete_plan = json.loads(files["fox-package/delete-plan.json"])
     delete_targets, delete_pairs = _delete_targets(delete_plan, delete_receipt, chunks, files)
+    from .forms_item_commands import apply_item_commands
+    from .forms_item_entry_workflow import apply_item_entry_workflows
+    files, commands = apply_item_commands(documents, packet, chunks, trace, files)
+    files["fox-package/item-command-receipt.json"] = _bytes(commands)
+    for command in commands['generated_operations']:
+        if command['page_file'] not in files or command.get('source_event') not in ('KEY-NEXT-ITEM','KEY-ENTQRY','KEY-EXEQRY'):
+            raise ValueError('Item command lacks its source event or target page.')
+    files, entry_work = apply_item_entry_workflows(documents, packet, chunks, trace, files)
+    files["fox-package/item-entry-receipt.json"] = _bytes(entry_work)
+    entry_targets = {}
+    for status in ('encoded_operations', 'adapted_operations'):
+        for op in entry_work[status]:
+            uid = op['source_unit_id']
+            if uid in entry_targets:
+                raise ValueError('Item-entry workflow was counted twice.')
+            target = op['target']
+            if target['runtime_file'] not in files or target['plan_file'] not in files:
+                raise ValueError('Item-entry workflow lacks its packaged callable or source plan.')
+            if status == 'adapted_operations' and op.get('page_file') not in files:
+                raise ValueError('Connected item-entry workflow lacks its native page.')
+            entry_targets[uid] = {k: op[k] for k in ('source_unit_id','source_unit_sha256','source_event','operation_id')}
+            entry_targets[uid].update(plan_file=target['plan_file'], runtime_file=target['runtime_file'],
+                                      callable=target['callable'], connection=status, page_file=op.get('page_file'),
+                                      connected_effects=op.get('connected_effects',[]),
+                                      required_boundaries=op.get('remaining_boundaries',op.get('required_boundaries',[])),
+                                      caller_evidence=op.get('caller_evidence'))
+            callable_target = op.get('native_callable_target')
+            if callable_target:
+                if callable_target['page_file'] not in files:
+                    raise ValueError('Item-entry routine lacks its native callable page.')
+                entry_targets[uid]['native_callable'] = {k: callable_target[k] for k in
+                    ('page_file','callable','operation_id_argument','scope','source_caller_installed')}
+            if op.get('integration_boundary_evidence'):
+                entry_targets[uid]['binding_gap'] = op['integration_boundary_evidence'].get('reason')
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -672,6 +719,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             raise ValueError("Record entry requires the exact encoded source policy.")
     source_adapters = {}
     for receipt, reason in (
+        (commands, "item_command_generated"),
         (item_validation, "item_lookup_validation_wired_to_draft"),
         (save_receipt, "parent_copy_wired_to_synthetic_write"),
         (entry_receipt, "selected_record_entry_generated"),
@@ -762,6 +810,16 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                        reason="delete_check_partly_connected" if target["native_page"] else "delete_posting_binding_pending")
             row["delete_requirements"] = {k: target[k] for k in ("interfaces", "delete_tables", "requests_database_commit")}
             row["delete_requirements"]["posting_interfaces"] = target.get("posting_interfaces", [])
+        if uid in entry_targets:
+            op = entry_targets[uid]
+            if (op['source_unit_sha256'] != row['source_unit_sha256'] or row["status"] == "generated_wired_adapted"
+                    or row.get("encoding_status") == "generated_unwired"):
+                raise ValueError("Item-entry workflow overlaps another source rule or has a different source hash.")
+            row.update(encoding_status="generated_unwired", item_entry_boundaries=op["required_boundaries"],
+                       item_entry_caller_absent=bool(op["caller_evidence"] and not op["caller_evidence"]["original_caller_proven"]),
+                       item_entry_native_callable=bool(op.get('native_callable')),
+                       item_entry_binding_gap=op.get('binding_gap'),
+                       reason="item_entry_partly_connected" if op["connection"]=="adapted_operations" else "item_entry_provider_pending")
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -830,6 +888,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in entry_targets:
+            row.update(rule_id='fox.workflow.xml-item-entry',target=entry_targets[uid])
         if uid in delete_targets:
             row.update(rule_id="fox.delete.source-workflow", target=delete_targets[uid])
         if uid in staged_units:
@@ -881,6 +941,9 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "staged_queries": list(staged_units.values()),
         "numeric_corrections": numeric_corrections,
         "delete_workflows": list(delete_targets.values()),
+        "item_commands": [{k: op[k] for k in ('source_unit_id','operation_id','page_file','source_event','kind')}
+                          for op in commands['generated_operations']],
+        "item_entry_workflows": list(entry_targets.values()),
         "delete_posting_pairs": delete_pairs,
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
@@ -892,6 +955,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         dependency_evidence=dependency_evidence)
     interface_register = build_interface_inventory(packet, chunks, ledger, dependency_evidence=dependency_evidence,
                                                    discrepancies=discrepancies, documents=documents)
+    add_gap_requirements(gap_report, packet, chunks, interface_register)
     ledger["approval_interface_links"] = _approval_interface_links(approval_units, interface_register)
     ledger["staged_query_interfaces"] = _staged_query_interfaces(stage_plan, interface_register)
     ledger["delete_interface_links"] = _delete_interface_links(delete_plan, interface_register)

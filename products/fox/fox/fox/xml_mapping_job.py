@@ -16,6 +16,7 @@ from .prototype_export_only import _sqlcl_path
 from .xml_mapping_retained import verify_retained_package
 from .forms_mapping_gaps import CATEGORIES
 from .forms_discrepancies import validate_discrepancies
+from .forms_gap_requirements import valid_gap_requirements
 
 PROFILE = 'xml-mapping-v1'
 APPROVAL = 'xml_mapping_local_consent:'
@@ -412,7 +413,9 @@ def _gap_fields(report, ledger, source_binding):
     fields = {'source_unit_id', 'source_name', 'source_file', 'source_line',
               'category', 'reason', 'message', 'next_action', 'owner'}
     for row in rows:
-        if (set(row) != fields or row['category'] not in owners or row['owner'] != owners[row['category']]
+        if (set(row) not in (fields, fields | {'requirements'})
+                or ('requirements' in row and not valid_gap_requirements(row['requirements']))
+                or row['category'] not in owners or row['owner'] != owners[row['category']]
                 or type(row['source_line']) is not int or row['source_line'] < 1
                 or any(type(row[k]) is not str or not 0 < len(row[k]) <= 4000 for k in fields - {'source_line'})):
             raise ValueError('Saved mapping gap fields are invalid.')
