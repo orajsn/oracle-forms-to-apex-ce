@@ -279,13 +279,57 @@ def test_failure_retains_attempt_and_never_replays(client, monkeypatch):
     assert c.post(f'/api/projects/{pid}/xml-mapping/runs', json=body).status_code == 409
 
 
-def test_complete_set_rejects_non_xml_and_missing_compiler(client, monkeypatch):
+def test_complete_set_requires_fresh_consent_for_support_and_an_installed_compiler(client, monkeypatch):
     c, root, pid, _, body = prepare(client)
     upload(c, pid, [('order.xml', source()), ('schema.sql', b'CREATE TABLE FOX_TEST (ID NUMBER);')])
-    assert c.get(f'/api/projects/{pid}/xml-mapping').json()['available'] is False
+    assert c.get(f'/api/projects/{pid}/xml-mapping').json()['available'] is True
     assert c.post(f'/api/projects/{pid}/xml-mapping/runs', json=body).status_code == 409
     monkeypatch.setenv('FOX_EXPORT_SQLCL_PATH', 'nonexistent-synthetic-sqlcl')
     assert c.get(f'/api/projects/{pid}/xml-mapping').json()['available'] is False
+
+
+def test_supporting_sources_improve_declaration_evidence_and_keep_prior_download(client):
+    from test_dependency_guidance import spec, body, ddl, form
+    first = form()['text'].replace('Block Name="ORDERS"', 'Block Name="ORDERS" DatabaseBlock="true"')
+    first = first.replace('<Item Name="ID"/>','<Item Name="ID" ItemType="Text Item" DataType="Number" DatabaseItem="true"/>')
+    c,root,pid,_,prior = finish(client,[('orders.xml',first.encode())])
+    old_package=c.get(prior['download_url']).content
+    base=f'/api/projects/{pid}/xml-mapping'
+    def add_run(files):
+        upload(c,pid,[(f['name'],f['text'].encode()) for f in files])
+        view=c.get(base).json()
+        assert view['available'] and view['source_binding']==prior['saved_source_binding']
+        request={k:view[k] for k in ('source_hash','selected_source_set_id','source_binding','catalog_sha256')}
+        request.update(approved_local_source_processing=True,approved_synthetic_scope=True,request_id=str(uuid.uuid4()))
+        response=c.post(base+'/runs',json=request)
+        assert response.status_code==202,response.text
+        process_one(connection(root),root)
+        run=c.get(base+'/runs/'+response.json()['id']).json()
+        assert run['state']=='GENERATED',run
+        return run
+    partial=add_run([ddl(),spec()])
+    assert partial['supporting_inputs']['source_execution'] is False
+    partial_changes=partial['supporting_inputs']['declaration_changes']
+    pkg=next(d for d in partial_changes if d['target']=='ORDER_API')
+    assert pkg['after']=='source_missing' and pkg['missing_parts']==['package_body']
+    latest=add_run([body()])
+    assert {f['name'] for f in latest['supporting_inputs']['files']}=={'orders.sql','order_api.pks','order_api.pkb'}
+    assert any(d['target']=='ORDER_API' and d['after']=='declaration_found' for d in latest['supporting_inputs']['declaration_changes'])
+    assert latest['source_hash']!=partial['source_hash']!=prior['source_hash']
+    assert latest['generated_units']==prior['generated_units'] and latest['total_units']==prior['total_units']
+    members=_members(c.get(latest['download_url']).content)
+    evidence=json.loads(members['fox-package/supporting-inputs.json'])
+    assert all(r['member'].endswith('.txt') for r in evidence['files'])
+    assert [members[r['member']] for r in evidence['files']]==[f['text'].encode() for f in sorted([ddl(),spec(),body()],key=lambda row:row['name'])]
+    original=_members(old_package)
+    assert {n:v for n,v in members.items() if n.endswith('.apx') or n.endswith('.sql')}=={n:v for n,v in original.items() if n.endswith('.apx') or n.endswith('.sql')}
+    assert c.get(prior['download_url']).content==old_package
+
+
+def test_non_supported_attachment_is_never_dropped(client):
+    c,_,pid=client
+    upload(c,pid,[('orders.xml',source()),('instructions.txt',b'This is not a declared supporting SQL file.')])
+    assert not c.get(f'/api/projects/{pid}/xml-mapping').json()['available']
 
 
 def test_historical_attention_preserved_but_active_work_blocks(client):

@@ -49,7 +49,7 @@ def attach_xml_mapping_routes(app, *, root, db, project, fresh=False):
                 active = c.execute("SELECT 1 FROM runs WHERE state IN ('QUEUED','PROCESSING') LIMIT 1").fetchone()
                 value.update(available=not active, reason='Another run is active. Wait for its retained outcome.' if active else None)
         except (ValueError, OSError, RuntimeError):
-            value['reason'] = 'A complete supported Forms XML set and installed offline SQLcl compiler are required. No source was transmitted.'
+            value['reason'] = 'Select supported Forms XML with optional SQL, PKS, PKB or PLD evidence and check the installed offline SQLcl compiler.'
         value['runs'] = [jobs.public_run(c, root, dict(row), value['source_hash'], value['selected_source_set_id'])
             for row in c.execute('SELECT * FROM runs WHERE project=? ORDER BY created DESC', (pid,))
             if jobs.is_mapping_run(c, row)]
@@ -87,7 +87,7 @@ def attach_xml_mapping_routes(app, *, root, db, project, fresh=False):
                 current_hash, current_sid = selected(c, pid)
                 return jobs.public_run(c, root, dict(existing), current_hash, current_sid)
             if not body.approved_synthetic_scope or not body.approved_local_source_processing:
-                raise HTTPException(422, 'Confirm synthetic scope and local processing of the complete original XML, including unredacted source.', headers={'X-FOX-Admission': 'not-admitted'})
+                raise HTTPException(422, 'Confirm synthetic scope and local processing of the complete selection, including original XML and supporting sources.', headers={'X-FOX-Admission': 'not-admitted'})
             try:
                 state, sources, documents = jobs.source_state(c, pid)
                 if any(content[key] != state[key] for key in ('source_hash', 'selected_source_set_id', 'source_binding', 'catalog_sha256')):
@@ -110,6 +110,8 @@ def attach_xml_mapping_routes(app, *, root, db, project, fresh=False):
                 'request': content, 'scope_notice': jobs.SCOPE_NOTICE,
                 'implementation_sources': jobs.xml_mapping.mapping_catalog()['implementation_sources']}
             raw = jobs.encoded(snapshot)
+            if len(raw) > jobs.MAX_SNAPSHOT_BYTES:
+                raise HTTPException(413, 'The complete source snapshot exceeds the mapping storage limit.', headers={'X-FOX-Admission': 'not-admitted'})
             job = jobs.job_path(root, rid)
             # A prior crash before the SQLite commit is uncertain, never overwritten/replayed.
             try:

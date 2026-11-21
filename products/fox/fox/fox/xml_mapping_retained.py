@@ -13,6 +13,7 @@ import re
 
 from .forms_native_plan import POLICY_ID
 from .prototype_export_only import _members, _validated_log
+from . import xml_supporting_inputs
 
 _FALSE = ('schema_prepared', 'import_verified', 'runtime_verified',
           'clean_schema_install_passed', 'package_reimport_passed',
@@ -48,7 +49,7 @@ def _apex(files):
             if name.endswith('.apx') or name.startswith('.apex/')}
 
 
-def _sources(files, manifest, snapshot, documents):
+def _sources(files, metadata, manifest, snapshot, documents):
     """Check original bytes, not a reinterpretation by the installed XML parser."""
     _need(type(documents) is list and bool(documents)
           and type(snapshot['files']) is list and len(snapshot['files']) == len(documents))
@@ -59,12 +60,18 @@ def _sources(files, manifest, snapshot, documents):
         originals[name] = raw
     expected = [{'name': name, 'sha256': _sha(raw), 'bytes': len(raw)}
                 for name, raw in sorted(originals.items())]
-    _need(len({row['sha256'] for row in expected}) == len(expected))
     saved = snapshot['files']
     _need(all(type(row) is dict and type(row.get('name')) is str
               and type(row.get('bytes')) is int for row in saved))
     _need(sorted(({key: row[key] for key in ('name', 'sha256', 'bytes')} for row in saved),
                  key=lambda row: row['name']) == expected)
+    supporting = xml_supporting_inputs.retained(files,metadata,originals)
+    if supporting:
+        _need(supporting['selected_source_hash'] == snapshot['source_hash'])
+        expected = [r for r in expected if r['name'].lower().endswith('.xml')]
+        originals = {n:v for n,v in originals.items() if n.lower().endswith('.xml')}
+    _need(bool(originals) and all(n.lower().endswith('.xml') for n in originals))
+    _need(len({row['sha256'] for row in expected}) == len(expected))
     _need(manifest['files'] == expected
           and all(type(row['bytes']) is int for row in manifest['files']))
     _need({name for name in files if name.startswith('fox-package/sources/')} ==
@@ -116,7 +123,7 @@ def verify_retained_package(candidate, package, proof, snapshot, documents, vali
           and re.fullmatch(r'[a-f0-9]{64}', snapshot['source_binding'])
           and snapshot['source_binding'] == metadata['source_binding']
           == manifest['source_binding'] == ledger['source_binding'])
-    _sources(before, manifest, snapshot, documents)
+    _sources(before, metadata, manifest, snapshot, documents)
     chunks = manifest['selected_chunk_hashes']
     _need(type(chunks) is dict and all(type(key) is str and bool(key)
           and type(value) is str and re.fullmatch(r'[a-f0-9]{64}', value)

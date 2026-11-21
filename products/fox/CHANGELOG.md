@@ -200,6 +200,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.55.0] - 2026-11-22
+
+### [feature] Continue mapping after adding supporting source
+
+A project can now generate a package after an operator adds readable SQL, a
+package specification or body, or a Forms library source alongside its Forms
+XML. The package preserves the supporting bytes as text evidence and records
+the complete selected-source hash. The saved result shows which declaration
+requests changed compared with the same Forms XML alone. Supporting scripts
+are never installed or executed by this workflow.
+
+An earlier package stays bound to its own selection. A changed selection
+requires a new request. On completion the workbench refreshes availability
+and directs the operator back to the saved mapping result.
+
 ## [0.54.0] - 2026-11-22
 
 ### [feature] Save and reopen a row with multiple source-defined choices

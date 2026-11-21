@@ -42,6 +42,7 @@ from .forms_approval_action import apply_approval_actions
 from .forms_staged_query import apply_staged_queries
 from .forms_behavior_plan import build_behavior_plan
 from .forms_native_plan import POLICY_ID, build_native_prototype_plan
+from . import xml_supporting_inputs
 from .forms_understanding_packet import _build, generation_sources
 from .prototype_export_only import (MAX_ZIP, _compatibility, _members, _validated_log,
                                     _zip, validate_offline)
@@ -180,12 +181,12 @@ def mapping_catalog():
          "Recalculate the selected draft's companion fields when keeping a changed input.",
          "The generated editor uses the private synthetic lookup table. It validates a typed value on explicit submission."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 22,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 23,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
-                                "forms_rate_choices.py", "forms_rate_workspace.py",
+                                "forms_rate_choices.py", "forms_rate_workspace.py", "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -667,11 +668,12 @@ def generate_xml_package(documents, project_id, project_name, approved_policy_id
     user business acceptance, AI review, external transfer or database authority.
     Existing packet, native planner and renderer bounds remain in force.
     """
-    with generation_sources(documents):
-        return _generate_xml_package(documents, project_id, project_name, approved_policy_id)
+    xml, supporting = xml_supporting_inputs.split_inputs(documents)
+    with generation_sources(xml):
+        return _generate_xml_package(xml, project_id, project_name, approved_policy_id, supporting=supporting)
 
 
-def _generate_xml_package(documents, project_id, project_name, approved_policy_id):
+def _generate_xml_package(documents, project_id, project_name, approved_policy_id, *, supporting=()):
     packet, chunks = _build(documents)
     # Same metadata-only inventory state as local_packet(); this records no
     # external content selection or processing approval.
@@ -1305,6 +1307,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "before a format-validated handoff. Import/schema changes require separate authorization.\n"
     ).encode("utf-8")
     metadata["apex_members"] = _apex_members(files)
+    extra = xml_supporting_inputs.attach(files, metadata, documents, supporting)
+    if extra:
+        files['fox-package/README.md'] += (
+            b'\n## Supporting inputs\n\nsupporting-inputs.json lists the accompanying source files, their hashes '
+            b'and declaration changes compared with the Forms XML alone. The supporting-inputs directory '
+            b'preserves their original bytes as text evidence. No supporting script is installed or executed.\n')
     files["fox-package/metadata.json"] = _bytes(metadata)
     _attach_interface_inventory(files, metadata, interface_register)
     candidate = _zip(files)
@@ -1326,6 +1334,9 @@ def _check_candidate(candidate):
         metadata = json.loads(files["fox-package/metadata.json"])
         manifest = json.loads(files["fox-package/source-manifest.json"])
         docs = [(row["name"], files["fox-package/sources/" + row["name"]]) for row in manifest["files"]]
+        if xml_supporting_inputs.MEMBER in files:
+            supporting = json.loads(files[xml_supporting_inputs.MEMBER])
+            docs.extend((row["name"],files[row["member"]]) for row in supporting["files"])
         expected, _ = generate_xml_package(docs, metadata["project_id"], metadata["project_name"],
                                            metadata["approved_policy_id"])
     except (KeyError, TypeError, json.JSONDecodeError, UnicodeError):

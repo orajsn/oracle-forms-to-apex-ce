@@ -17,11 +17,14 @@ from .xml_mapping_retained import verify_retained_package
 from .forms_mapping_gaps import CATEGORIES
 from .forms_discrepancies import validate_discrepancies
 from .forms_gap_requirements import valid_gap_requirements
+from . import xml_supporting_inputs
 
 PROFILE = 'xml-mapping-v1'
 APPROVAL = 'xml_mapping_local_consent:'
 RESULT = 'xml_mapping_result:'
-SCOPE_NOTICE = ('FOX processes the original XML on this server and generates one synthetic APEX application. '
+MAX_SNAPSHOT_BYTES = 20_000_000
+SCOPE_NOTICE = ('FOX processes Forms XML locally and generates one synthetic APEX application. '
+    'Selected SQL, package and PLD sources are retained as declaration evidence. They are never installed or executed. '
     'The package can include reports, session drafts and current-row saves to its generated test tables. '
     'Source-unit notes identify the behavior each screen supports. Generation uses no AI calls or database imports.')
 
@@ -73,10 +76,9 @@ def read_file(root, path, maximum=20_000_000):
 
 def source_state(c, pid):
     sources = source_history.selected_sources(c, pid)
-    if not sources or any(not row['name'].lower().endswith('.xml') for row in sources):
-        raise ValueError('Select a complete supported Forms XML source set. Other files cannot be silently omitted.')
     documents = [(row['name'], source_history.readable_source_bytes(row)) for row in sources]
-    packet, chunks = _build(documents)
+    xml, _ = xml_supporting_inputs.split_inputs(documents)
+    packet, chunks = _build(xml)
     if not any(obj['kind'] == 'Block' and obj['classification'] in {'database', 'control'}
                for entry in packet['sources'] for obj in entry['facts']['objects']):
         raise ValueError('This XML set has no supported source block for a synthetic application.')
@@ -88,7 +90,7 @@ def source_state(c, pid):
 
 
 def load_snapshot(c, root, run):
-    raw = read_file(root, job_path(root, run['id']) / 'source-snapshot.json')
+    raw = read_file(root, job_path(root, run['id']) / 'source-snapshot.json', MAX_SNAPSHOT_BYTES)
     snapshot = json.loads(raw)
     if type(snapshot) is not dict or type(snapshot.get('request')) is not dict:
         raise ValueError('XML mapping snapshot is invalid.')
@@ -146,6 +148,13 @@ def checked_output(c, root, run, *, interface_csv=False):
     details['lookup_summary'] = _lookup_fields(metadata, ledger)
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     details['interface_summary'] = _interface_fields(metadata, files)
+    if 'supporting_inputs' in metadata:
+        evidence = json.loads(files[xml_supporting_inputs.MEMBER])
+        changes = [r for r in evidence['declaration_changes'] if all(len(r[k]) <= 1000 for k in ('kind','target','routine','source'))]
+        details['supporting_inputs'] = {
+            'files': [{key: entry[key] for key in ('name','role')} for entry in evidence['files']],
+            'declaration_changes': changes[:100], 'limited': len(changes[:100]) != len(evidence['declaration_changes']),
+            'source_execution': False}
     payload = files.get('fox-package/interface-register.csv') if interface_csv else package
     if interface_csv and not (details['interface_summary'] and details['interface_summary']['csv_available']):
         payload = None
