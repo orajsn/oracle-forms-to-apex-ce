@@ -205,6 +205,10 @@ After an entry action submits, the generated page returns to the selected
 record with a signed link. A one-use result tied to that record and draft
 revision restores the focus or confirmation on the new page.
 
+Bag entry applies source-directed focus after APEX finishes page initialization.
+The reset checks that the destination still holds focus before it acknowledges
+the move and clears the marker. Ordinary visits keep their normal cursor behavior.
+
 ## [0.50.0] - 2026-11-21
 
 ### [feature] Run XML-defined field commands and inspect remaining gaps

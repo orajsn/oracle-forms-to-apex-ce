@@ -203,9 +203,58 @@ def test_emitted_browser_continuation_checks_actual_focus_and_unkept_input():
     assert 'fields.every((e,i)=>e&&e.value===baseline[i])' in js
     assert js.index('if(!unchanged())') < js.index('request:c.request')
     assert 'document.activeElement===element' in js and 'element.focus()' in js
-    assert js.index('const result=move(focus)') < js.index('ack.value=result') < js.index('request:c.ack_request')
+    assert js.index('const result=move(element)') < js.index('ack.value=result') < js.index('request:c.ack_request')
     assert 'result==="FOCUSED"||result==="ALREADY_ACTIVE"' in js
     assert 'marker retained' in js and 'Whole-form commit is never replaced with a single-row Save' in js
+
+
+def test_source_focus_runs_once_after_apex_initialization_and_observes_focus_before_ack():
+    _, op, _ = wired()
+    js = op['native_target']['javascript']
+    assert 'one("apexreadyend.foxBagEntry"' in js
+    assert 'window.setTimeout(complete,0)' in js
+    assert '["FOCUS_PENDING","NEXT_PENDING","MARKER_CLEARED_AFTER_FOCUS"].includes(outcome)' in js
+    assert 'if(handled)return;handled=true;' in js
+    assert 'window.requestAnimationFrame(function(){' in js
+    held = js.index('const held=')
+    ack = js.index('ack.value=result')
+    assert held < js.index('if(!held)') < ack
+    assert 'unchanged()&&document.activeElement===element' in js[held:ack]
+    assert 'if(event.isTrusted){interrupted=true;cleanup();' in js
+    assert 'document.removeEventListener("pointerdown",interrupt,true)' in js
+    assert 'document.removeEventListener("keydown",interrupt,true)' in js
+    assert 'submitted=true;ack.value=result;apex.submit' in js
+    # Ordinary loads keep the existing APEX/native navigation policy. Only the
+    # source-result continuation registers the ready handler; there is no retry
+    # timer or document-wide focus lock to steal a later deliberate user focus.
+    assert 'setInterval' not in js and 'cursorFocus' not in js
+
+
+@pytest.mark.parametrize('renamed', [False, True])
+@pytest.mark.parametrize('destination,code,status,expected', [
+    (None, 'UNSAVED', 'INSERT', 1), (None, 'UNSAVED', 'CHANGED', 1),
+    (None, 'UNSAVED', 'QUERY', 0), ('CITY', 'UNSAVED', 'INSERT', 0),
+    (None, None, 'INSERT', 0),
+])
+def test_native_keep_can_establish_reset_marker_from_real_validation_condition(
+        renamed, destination, code, status, expected):
+    from fox.forms_item_validation import _effect_body
+    _, op, args = wired(renamed)
+    validation, = json.loads(args[-1]['fox-package/item-validation-receipt.json'])['generated_operations']
+    body = _effect_body(validation['parsed'], validation['contract'])
+    condition, warning = re.match(r'if (.*?) then\n(.*?)\nelse', body, re.S).groups()
+    db = sqlite3.connect(':memory:')
+    for name in ('l_destination', 'l_code', 'l_status'):
+        condition = condition.replace(name, ':' + name)
+    assert db.execute('select case when ' + condition + ' then 1 else 0 end',
+                      {'l_destination': destination, 'l_code': code, 'l_status': status}).fetchone() == (expected,)
+    assert "l_marker:='X';" in warning and 'l_failed:=' not in warning and 'l_code:=' not in warning
+    text = args[-1][op['page_file']].decode()
+    process = re.search(r'process validate-edited-item \(.*?```plsql\n(.*?)\n\s*```', text, re.S)[1]
+    assert "'FOX_DRAFT_KEEP'" in process and "'FOX_DRAFT_NEW'" in process
+    assert "l_status:=case when l_id is null then 'INSERT' else 'CHANGED' end;" in process
+    compact = lambda value: re.sub(r'\s+', '', value)
+    assert compact(process).index(compact(body)) < compact(process).index('p_attr_number=>42,p_attr_value=>l_marker')
 
 
 def test_host_adapter_is_explicit_trusted_generation_seam_with_fail_closed_contract():

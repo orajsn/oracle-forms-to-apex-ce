@@ -269,6 +269,7 @@ const state=get(c.state_item), focus=get(c.destination_item), next=c.next_item&&
 const status=get(c.status_id), fields=c.draft_items.map(get);
 const baseline=fields.map(e=>e&&e.value);
 const say=value=>{if(status)status.textContent=value;};
+let submitted=false, interrupted=false, handled=false;
 if(focus)focus.readOnly=true;if(next)next.readOnly=true;
 function unchanged(){return fields.every((e,i)=>e&&e.value===baseline[i]);}
 function move(element){
@@ -278,24 +279,53 @@ function move(element){
  return document.activeElement===element?(already?"ALREADY_ACTIVE":"FOCUSED"):"FAILED";
 }
 function enter(){
+ if(submitted)return false;
  if(!unchanged()){say("Keep the edited draft before entering this source action.");return false;}
- apex.submit({request:c.request,validate:false});return true;
+ submitted=true;apex.submit({request:c.request,validate:false});return true;
 }
 const button=get(c.button_id);if(button)button.addEventListener("click",enter);
-if(state&&state.value==="FOCUS_PENDING"){
- const result=move(focus);say("Header destination focus: "+result+". The original lookup is unavailable.");
- if(result==="FOCUSED"||result==="ALREADY_ACTIVE"){
+const outcome=state&&state.value;
+function cleanup(){
+ document.removeEventListener("pointerdown",interrupt,true);
+ document.removeEventListener("keydown",interrupt,true);
+}
+function interrupt(event){
+ if(event.isTrusted){interrupted=true;cleanup();
+  say("Source focus continuation cancelled by user input; no focus acknowledgment was sent.");}
+}
+function complete(){
+ if(handled)return;handled=true;
+ if(interrupted||submitted){cleanup();return;}
+ if(!state||state.value!==outcome||!unchanged()){
+  cleanup();say("The draft or continuation changed; no focus acknowledgment was sent; marker retained.");return;
+ }
+ const element=outcome==="NEXT_PENDING"?next:focus;
+ const result=move(element);
+ // APEX's ready event includes delayed components. Yield once more so other
+ // ready handlers finish, then observe focus across a frame before any ACK.
+ window.requestAnimationFrame(function(){
+  cleanup();if(interrupted||submitted)return;
+  const held=(result==="FOCUSED"||result==="ALREADY_ACTIVE")&&document.activeElement===element;
+  if(outcome==="NEXT_PENDING"){
+   say("Source Next: "+(held?result:"FAILED")+". This control displays the saved value only.");return;
+  }
+  if(outcome==="MARKER_CLEARED_AFTER_FOCUS"){
+   say(held?"Code cleared; destination focus confirmed; marker cleared. Original lookup remains unavailable.":
+    "Code and marker were cleared; destination focus was not retained on this page. Original lookup remains unavailable.");return;
+  }
+  if(!held){say("Destination focus failed or was not retained; code remains cleared and marker retained. Reopen before continuing.");return;}
   const nonce=get(c.nonce_item), ack=get(c.focus_item);
-  if(nonce&&nonce.value&&ack&&unchanged()){
-   ack.value=result;apex.submit({request:c.ack_request,validate:false});
+  if(nonce&&nonce.value&&ack&&state.value===outcome&&unchanged()&&document.activeElement===element){
+   say("Header destination focus: "+result+". The original lookup is unavailable.");
+   submitted=true;ack.value=result;apex.submit({request:c.ack_request,validate:false});
   }else say("Focus succeeded, but the continuation is missing or the draft changed; marker retained.");
- }else say("Destination focus failed; code remains cleared and marker retained. Reopen before continuing.");
-}else if(state&&state.value==="NEXT_PENDING"){
- say("Source Next: "+move(next)+". This control displays the saved value only.");
-}else if(state&&state.value==="MARKER_CLEARED_AFTER_FOCUS"){
- say("Code cleared; destination focus confirmed; marker cleared. Original lookup remains unavailable.");
- move(focus);
-}else if(state&&state.value)say("Bag entry stopped: "+state.value+". Whole-form commit is never replaced with a single-row Save.");
+ });
+}
+if(["FOCUS_PENDING","NEXT_PENDING","MARKER_CLEARED_AFTER_FOCUS"].includes(outcome)){
+ document.addEventListener("pointerdown",interrupt,true);
+ document.addEventListener("keydown",interrupt,true);
+ apex.jQuery(apex.gPageContext$).one("apexreadyend.foxBagEntry",function(){window.setTimeout(complete,0);});
+}else if(outcome)say("Bag entry stopped: "+outcome+". Whole-form commit is never replaced with a single-row Save.");
 window.foxBagEntry=Object.freeze({enter,move,config:c});
 })();'''.replace('CONFIG', literal)
 
