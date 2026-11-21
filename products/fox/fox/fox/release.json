@@ -1,10 +1,10 @@
 {
-  "version": "0.50.0",
+  "version": "0.51.0",
   "released_on": "2026-11-21",
-  "title": "Navigate saved fields and review remaining conversion gaps",
+  "title": "Connect item-entry actions to the current bag draft",
   "changes": [
-    "Follow source-defined field navigation and retain the source behavior of field-specific empty query commands.",
-    "Inspect the remaining work by source field, database routine, lookup table, report and session value."
+    "Follow the source reset and focus order on the current bag draft and use the selected bag's related detail total for supported entry assignments.",
+    "Inspect unimplemented actions with external references together in the conversion review."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

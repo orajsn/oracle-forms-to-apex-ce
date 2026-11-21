@@ -185,6 +185,22 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.51.0] - 2026-11-21
+
+### [feature] Connect XML entry actions to the selected session draft
+
+The generated bag editor can clear the current bag code, move focus to the
+header destination, and clear its marker after focus succeeds. Consignment
+entry can assign the sum of individually rounded saved detail weights to the
+selected bag draft's cost weight. An explicit local procedure can make that
+assignment after focusing its source field. The generator records that the
+source supplies no caller for this procedure.
+
+The conversion review has separate filters for entry wiring and outstanding
+external dependencies. It keeps whole-form commit, unposted detail values and
+source lookup requirements visible. Saved-record navigation uses the synthetic
+row ID when the XML supplies no ordering. Draft changes are session-scoped.
+
 ## [0.50.0] - 2026-11-21
 
 ### [feature] Run XML-defined field commands and inspect remaining gaps

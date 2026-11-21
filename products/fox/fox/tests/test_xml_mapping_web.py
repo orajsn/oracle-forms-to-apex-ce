@@ -596,6 +596,33 @@ def test_saved_xml_commands_and_report_dependency_are_visible_after_download(cli
     assert 'report layout' in gap['requirements']['next_check']
 
 
+@pytest.mark.parametrize('scope', ['bag','note'])
+def test_entry_wiring_is_reported_on_the_existing_source_unit(client, scope):
+    from test_forms_bag_entry_wiring import source as bag_source
+    from test_forms_note_entry_wiring import source as note_source
+    c, _, _, _, run = finish(client, (bag_source if scope == 'bag' else note_source)(renamed=True))
+    download = c.get(run['download_url'])
+    assert download.status_code == 200 and jobs.sha(download.content) == run['package_sha256']
+    members = _members(download.content)
+    receipt = json.loads(members[f'fox-package/{scope}-entry-wiring-receipt.json'])
+    links = {t['source_unit_id']: t for t in json.loads(members['fox-package/mapping-ledger.json'])['item_entry_workflows']}
+    gaps = {g['source_unit_id']: g for g in run['gaps']}
+    assert len(receipt['adapted_operations']) == (1 if scope == 'bag' else 2)
+    for action in receipt['adapted_operations']:
+        uid = action['source_unit_id']
+        target = links[uid]
+        assert target['page_file'] in members and target['source_unit_sha256'] == action['source_unit_sha256']
+        assert target['connected_effects'] == action['connected_effects']
+        assert target['required_boundaries'] == action['remaining_boundaries']
+        is_routine = target['source_event'] == 'ProgramUnit'
+        if is_routine:
+            assert target['native_callable']['callable'] == 'window.foxNoteEntryBridge.invoke'
+            assert target['native_callable']['operation_id_argument'] == target['operation_id']
+            assert target['native_callable']['source_caller_installed'] is False
+        assert target['draft_wiring'] == ('routine' if is_routine else scope)
+        assert gaps[uid]['reason'] == ('item_entry_draft_callable' if is_routine else 'item_entry_draft_connected')
+
+
 def test_download_exposes_the_saved_number_correction_on_its_existing_source_rule(client):
     from test_forms_numeric_correction import source as correction_source
     c, _, _, _, run = finish(client, correction_source(renamed=True))

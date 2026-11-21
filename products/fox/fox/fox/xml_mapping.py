@@ -163,7 +163,7 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 18,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 19,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
@@ -171,7 +171,8 @@ def mapping_catalog():
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
                                 "forms_delete_plan.py", "forms_delete_action.py", "forms_item_commands.py",
-                                "forms_item_entry_workflow.py", "forms_gap_requirements.py")}
+                                "forms_item_entry_workflow.py", "forms_gap_requirements.py",
+                                "forms_bag_entry_wiring.py", "forms_note_entry_wiring.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -267,6 +268,33 @@ def _approval_bindings(plan, receipt, chunks, files):
             raise ValueError("Approval-readiness evidence differs from its bound source stages.")
         connected[uid] = op
     return parsed, connected
+
+
+def _connect_entry_drafts(entry_targets, receipt, files, scope):
+    """Attach a proved session action to its existing unit, without counting it twice."""
+    for action in receipt['adapted_operations']:
+        uid = action['source_unit_id']
+        target = entry_targets.get(uid)
+        if (target is None or 'draft_wiring' in target
+                or any(action[key] != target[key] for key in ('source_unit_sha256', 'source_event', 'operation_id'))
+                or receipt['customer_table_writes'] is not False
+                or action['page_file'] not in files or not action['connected_effects']):
+            raise ValueError("Draft entry wiring differs from its source unit or target page.")
+        routine = target['source_event'] == 'ProgramUnit'
+        if routine and action.get('source_caller_installed') is not False:
+            raise ValueError("A callable entry procedure cannot acquire an implicit source caller.")
+        target.update(draft_wiring='routine' if routine else scope, page_file=action['page_file'],
+                      connected_effects=list(action['connected_effects']),
+                      required_boundaries=list(action['remaining_boundaries']))
+        target.pop('binding_gap', None)
+        if routine:
+            if action['callable_argument'] != target['operation_id']:
+                raise ValueError("Draft procedure argument differs from its source operation.")
+            target['native_callable'] = dict(page_file=action['page_file'], callable=action['callable'],
+                                             operation_id_argument=action['callable_argument'],
+                                             scope=receipt['scope'], source_caller_installed=False)
+        else:
+            target['connection'] = 'adapted_operations'
 
 
 def _numeric_correction_links(receipt, approval_pages, behavior_plan, files):
@@ -681,6 +709,14 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                     ('page_file','callable','operation_id_argument','scope','source_caller_installed')}
             if op.get('integration_boundary_evidence'):
                 entry_targets[uid]['binding_gap'] = op['integration_boundary_evidence'].get('reason')
+    from .forms_bag_entry_wiring import apply_bag_entry_wiring
+    from .forms_note_entry_wiring import apply_note_entry_wiring
+    for scope, apply_wiring in (('bag',apply_bag_entry_wiring), ('note',apply_note_entry_wiring)):
+        files, wiring = apply_wiring(documents, packet, chunks, trace, files)
+        if wiring['source_binding'] != packet['source_binding']:
+            raise ValueError("Entry wiring receipt is for a different source.")
+        files[f'fox-package/{scope}-entry-wiring-receipt.json'] = _bytes(wiring)
+        _connect_entry_drafts(entry_targets, wiring, files, scope)
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -816,10 +852,14 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                     or row.get("encoding_status") == "generated_unwired"):
                 raise ValueError("Item-entry workflow overlaps another source rule or has a different source hash.")
             row.update(encoding_status="generated_unwired", item_entry_boundaries=op["required_boundaries"],
+                       item_entry_draft_wiring=op.get('draft_wiring'),
                        item_entry_caller_absent=bool(op["caller_evidence"] and not op["caller_evidence"]["original_caller_proven"]),
                        item_entry_native_callable=bool(op.get('native_callable')),
                        item_entry_binding_gap=op.get('binding_gap'),
                        reason="item_entry_partly_connected" if op["connection"]=="adapted_operations" else "item_entry_provider_pending")
+            if op.get('draft_wiring'):
+                row['reason'] = ('item_entry_draft_callable' if op['draft_wiring']=='routine'
+                                 else 'item_entry_draft_connected')
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -1050,6 +1090,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "Initial source report ordering is generated when every sort column is directly mapped; users may change the saved-report sort. "
         "Draft edits use a source-bound parent context and current-record validation before navigation; no customer-table save, source transaction or full Forms lifecycle is implied. "
         "item-validation-receipt.json identifies changed-field events, the selected parent inputs and any additional synthetic write fields they bind. "
+        "bag-entry-wiring-receipt.json and note-entry-wiring-receipt.json describe subsequent session-draft actions and the remaining whole-form and caller boundaries. "
         "The current row's validation state is maintained separately from its loaded baseline. Later navigation and whole-form commits remain separate events. "
         "approval-plan.json retains each proved approval stage and commit in source order. approval-action-receipt.json identifies connected readiness checks and pending target operations. "
         "lookup-activation.md lists native source SELECT-INTO handlers and restricted readiness items. Original reads are disabled by default and require verified target interfaces and separate activation authority. POST-CHANGE is adapted to Apply lookup; POST-QUERY runs after selecting a record. These pages do not save records. "

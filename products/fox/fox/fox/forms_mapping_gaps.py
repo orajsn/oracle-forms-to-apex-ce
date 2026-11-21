@@ -79,10 +79,22 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
             action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
-        elif reason in ('item_entry_partly_connected','item_entry_provider_pending'):
+        elif reason in ('item_entry_partly_connected','item_entry_provider_pending',
+                        'item_entry_draft_connected','item_entry_draft_callable'):
             category = 'engine_context'
             bounds = row.get('item_entry_boundaries', ())
-            if row.get('item_entry_caller_absent') or 'original_caller_absent_from_supplied_source' in bounds:
+            wiring = row.get('item_entry_draft_wiring')
+            if wiring == 'bag':
+                message = 'Enter current bag runs the XML rule on the selected draft. The reset clears the bag code, focuses the header destination and clears the navigation marker after focus succeeds.'
+                action = 'Use the bag draft entry action. A branch requiring the original whole-form commit needs verified form status, validation and posting across changed blocks.'
+            elif wiring == 'note':
+                message = 'Enter selected consignment runs the XML rule on the selected saved record. On the assignment branch it rounds each saved consignment weight up and adds the results to calculate the current bag draft cost weight.'
+                action = 'Review the draft and its related details. Original transient lookups, unposted detail changes and a required whole-form commit need their respective providers.'
+            elif wiring == 'routine':
+                message = 'The local routine is callable with the current saved selection and bag draft. It focuses the source field before applying the detail total to that draft.'
+                action = ('No active invocation was identified in the supplied module. Bind a verified caller if this routine is needed.'
+                          if row.get('item_entry_caller_absent') else 'Connect the identified caller to the bound current record and verify its runtime behavior.')
+            elif row.get('item_entry_caller_absent') or 'original_caller_absent_from_supplied_source' in bounds:
                 message = ('The routine has a callable target on the saved-record screen.'
                            if row.get('item_entry_native_callable') else 'The local routine is encoded in source order.')
                 message += ' No active caller was identified in the supplied module.'
@@ -90,7 +102,7 @@ def classify_gaps(packet, chunks, coverage):
             else:
                 message = 'The XML defines the ordered field-entry branches. The live form status and effective record buffer determine which branch runs.'
                 action = 'Bind the current item and record, and verify validation, posting and commit of all changed blocks when the dirty-form branch runs.'
-            if reason == 'item_entry_partly_connected':
+            if not wiring and reason == 'item_entry_partly_connected':
                 message += ' The saved-record screen can evaluate the snapshot branch, show the detail total and focus the bound field.'
             elif row.get('item_entry_binding_gap'):
                 message += ' ' + row['item_entry_binding_gap']

@@ -3,6 +3,7 @@
 .xml-discrepancies summary { cursor: pointer; font-weight: 600; }
 .xml-discrepancies li { margin: .75rem 0; }
 .xml-discrepancies li p { margin: .3rem 0; }
+.xml-discrepancy-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .xml-discrepancy-filters { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .75rem; }
 .xml-discrepancy-filters label { display: grid; gap: .25rem; max-width: 100%; }
 .xml-discrepancy-filters input, .xml-discrepancy-filters select { max-width: 100%; }
