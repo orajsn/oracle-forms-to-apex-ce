@@ -10,6 +10,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules, native_buffer, record_buffer, native_lookups, source_lookup, native_record_groups
 from forms2apex.native_behavior import render_behavior_package
@@ -53,6 +54,7 @@ _BEHAVIOR_RULES = {
     "item_null_query_override": "fox.item.null-query-command",
     "cross_block_item_lookup_validation": "fox.validation.draft-item-lookup",
     "record_group_with_caller_returns": "fox.query.record-group-caller-returns",
+    "record_group_with_draft_catalog": "fox.query.row-lookup-draft",
     "synthetic_parent_copy_write": "fox.assignment.synthetic-record-save",
     "selected_record_entry_assignment": "fox.policy.selected-record-entry",
     "source_filtered_block_query": "fox.query.source-block-filter",
@@ -121,6 +123,9 @@ def mapping_catalog():
          "Native reference choices report linked from the synthetic source row chooser.", "Original database and session inputs require trusted configuration. Read-only selection view. LOV return to the calling field remains pending."),
         ("fox.query.record-group-caller-returns", "The query has an explicit source calling item and complete typed return bindings on a supported record.",
          "Choose a reference row and apply its values to the calling field and its declared companion fields.", "The caller editor uses the selected synthetic row and its session draft. Applying a choice requires a verified source interface and a permitted current row."),
+        ("fox.query.row-lookup-draft", "An optional list on an otherwise omitted caller block has an eligible source query and complete typed return mappings within that block.",
+         "Select a synthetic choice and apply every mapped value to one identified draft row.",
+         "The generated editor uses private test tables for the reference catalog and session-owned drafts. Other original events and business persistence remain separate."),
         ("fox.query.guarded-related-query", "Complete item KEY-EXEQRY guard using non-null keys on the selected parent in a proven incoming relation.",
          "Manual Execute query action refreshes the related synthetic report after checking its parent keys.", "Uses the selected persisted row. The related view can also query on initial entry. Automatic coordination and dirty record buffers remain separate."),
         ("fox.session.source-default", "Complete form initialization loads one global from a single-row NVL lookup and preserves it on error.",
@@ -163,10 +168,11 @@ def mapping_catalog():
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 19,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 20,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
+                                "forms_route_lookup_plan.py", "forms_route_lookup_native.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -440,6 +446,68 @@ def _approval_interface_links(plans, inventory):
     return links
 
 
+def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns):
+    from .forms_route_lookup_native import render_row_lookup
+    from .forms_route_lookup_plan import compile_row_lookups
+
+    if not any(gap['reason'] == 'LOV_RETURN_CALLER_BLOCK' for gap in returns['gaps']):
+        return []
+    contracts = compile_row_lookups(documents, packet, chunks, trace, files, groups, returns)
+    lookup_pages = []
+    if not contracts:
+        return lookup_pages
+    queries = {op['operation_id']: op for op in groups['generated_operations']}
+    occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
+    page = 8900
+    for contract in contracts:
+        group = queries[contract['record_group_operation_id']]
+        uid, lid = contract['source_unit_id'], contract['source_lov_id']
+        matches = [g for g in returns['gaps'] if (g['source_unit_id'], g['source_lov_id']) == (uid, lid)]
+        if (len(matches) != 1 or matches[0]['reason'] != 'LOV_RETURN_CALLER_BLOCK'
+                or group['source_unit_sha256'] != contract['source_unit_sha256']
+                or contract['source_binding'] != packet['source_binding']):
+            raise ValueError('Row lookup no longer matches the unresolved caller and source query.')
+        while page in occupied or page + 1 in occupied:
+            page += 2
+        if page + 1 >= 9900:
+            raise ValueError('No native page pair is available for the lookup editor.')
+        rendered = render_row_lookup(contract, page)
+        target = rendered['metadata']
+        for component in rendered['pages']:
+            if component['page_file'] in files or component['page_id'] in occupied:
+                raise ValueError('Lookup page conflicts with an existing source screen.')
+            files[component['page_file']] = component['text']
+            occupied.add(component['page_id'])
+        files['fox-package/supporting-schema.sql'] += b'\n' + rendered['supporting_sql']
+        # Retain the complete underlying reference report. The entry button also
+        # appears on its normal source report, so a user can open the editor
+        # while the original database interface remains disabled.
+        entry_files = list(dict.fromkeys(group['report_files'] + [group['chooser_file'], group['page_file']]))
+        button = native_record_groups._button(page, page, 'Edit ' + contract['source_caller_name'] + ' choices')
+        for path in entry_files:
+            text = files[path].decode()
+            if '    region records (\n' not in text:
+                raise ValueError('The declared lookup entry point has no report region.')
+            files[path] = native_record_groups._append(text, button).encode()
+        op = {'kind': 'source_optional_row_lookup', 'operation_id': contract['contract_id'],
+              'source_group_unit_id': uid, 'source_unit_id': uid, 'source_unit_sha256': group['source_unit_sha256'],
+              'source_group_unit_sha256': group['source_unit_sha256'], 'record_group_operation_id': group['operation_id'],
+              'source_lov_id': lid, 'source_caller_name': contract['source_caller_name'],
+              'source_caller_item_id': contract['source_caller_item_id'], 'source_caller_id': contract['source_caller_item_id'],
+              'source_block_id': contract['source_block_id'], 'return_mappings': contract['returns'],
+              'page_id': page, 'page_file': target['entry_page_file'], 'chooser_file': target['chooser_page_file'],
+              'lov_return_implemented': True, 'native_event_wired': True, 'query_already_counted': True,
+              'entry_files': entry_files, 'contract': contract, 'native_target': target,
+              'customer_table_writes': False, 'original_reads_enabled': False, 'session_draft_table_writes': True,
+              'runtime_verified': False, 'business_accepted': False}
+        returns['gaps'].remove(matches[0])
+        returns['generated_operations'].append(op)
+        lookup_pages.append(op)
+        page += 2
+    returns['session_draft_table_writes'] = True
+    return lookup_pages
+
+
 def _final_record_groups(groups, returns):
     """Keep query and return evidence together and count the query unit once."""
     by_lov = {}
@@ -468,6 +536,9 @@ def _final_record_groups(groups, returns):
             connected += len(op["return_mappings"])
             lov.update(lov_return_implemented=True, caller=op["source_caller_name"],
                        caller_item_id=op["source_caller_item_id"], return_operation_id=op["operation_id"])
+            if op.get("kind") == "source_optional_row_lookup":
+                lov.update(row_editor_page=op["page_file"], choice_catalog="synthetic",
+                           return_scope="selected_session_draft")
         if connected:
             pending = group["unimplemented_lov_return_mapping_count"] - connected
             group.update(kind="record_group_with_caller_returns", connected_return_count=connected,
@@ -652,7 +723,6 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             raise ValueError("Generated item validation lacks its source-bound field event.")
     files, lov_receipt = apply_lov_returns(documents, packet, chunks, trace, files)
     files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
-    final_groups = _final_record_groups(group_receipt, lov_receipt)
     files, population = apply_master_details(documents, packet, chunks, trace, files)
     files["fox-package/master-detail-receipt.json"] = _bytes(population)
     files, clearing = apply_detail_clear(documents, packet, chunks, trace, files)
@@ -717,6 +787,26 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             raise ValueError("Entry wiring receipt is for a different source.")
         files[f'fox-package/{scope}-entry-wiring-receipt.json'] = _bytes(wiring)
         _connect_entry_drafts(entry_targets, wiring, files, scope)
+    row_lookups = _attach_row_lookups(documents, packet, chunks, trace, files, group_receipt, lov_receipt)
+    files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
+    final_groups = _final_record_groups(group_receipt, lov_receipt)
+    for group in final_groups:
+        projected = [lov for lov in group['associated_lovs'] if lov.get('row_editor_page')]
+        if projected:
+            group['kind'] = 'record_group_with_draft_catalog'
+            for path in (group['page_file'], group['chooser_file']):
+                text = files[path].decode()
+                text = text.replace('LOV field selection and return remain unimplemented.',
+                                    'Open the linked row editor to use a supported synthetic lookup.')
+                text = re.sub(r'\d+ explicit source LOV return mappings remain unimplemented\.',
+                              f"{group['connected_return_count']} field returns connected; "
+                              f"{group['unimplemented_lov_return_mapping_count']} pending.", text)
+                files[path] = text.encode()
+    if row_lookups:
+        trace["lookup_draft_pages"] = [
+            {k: op[k] for k in ('source_block_id', 'source_caller_item_id', 'page_file', 'chooser_file')}
+            for op in row_lookups]
+        files['fox-package/source-to-page.json'] = _bytes(trace)
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -1007,6 +1097,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     applied = sorted(set(applied) | {e["rule_id"] for r in coordination.values() for e in r["effects"]})
     if numeric_corrections:
         applied = sorted(set(applied) | {"fox.validation.saved-number-correction"})
+    if row_lookups:
+        applied = sorted(set(applied) | {"fox.query.row-lookup-draft"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
@@ -1034,6 +1126,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                                     "partial": len(partial_item_events),
                                     "encoded_only": len(item_review) - len(partial_item_events)},
         "lookup_summary": {"generated_lookup_handlers": len(looked), "original_reads_enabled": False},
+        "row_lookup_summary": {"editors": len(row_lookups), "mapped_returns": sum(len(op["return_mappings"]) for op in row_lookups)},
         "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
             "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": original_reads},
         "gap_summary": gap_report["summary"], "gap_report_path": "fox-package/mapping-gaps.json",
@@ -1058,6 +1151,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "prerequisites": ["Matching APEXlang-capable SQLcl/Java for offline format validation.",
             "Separate authority and compatible isolated APEX workspace/schema before any import.",
             "Review synthetic supporting-schema.sql, unresolved behavior and lifecycle adaptations."]
+            + (["Install the private draft and empty lookup catalog tables from supporting-schema.sql in the test schema. Load synthetic choices into the catalog for the row editor; original business tables and Forms events have separate requirements."] if row_lookups else [])
             + (["Comparison inputs require target VARCHAR2 collation compatible with USING_NLS_COMP and matching source comparison session settings; format validation does not establish this."]
                if any(op["kind"] == "local_comparison_report_column" for op in behavior_plan["operations"]) else []),
         "provider_calls": 0, "database_imports": 0, **{name: False for name in _FALSE}}

@@ -1,10 +1,10 @@
 {
-  "version": "0.51.0",
+  "version": "0.52.0",
   "released_on": "2026-11-21",
-  "title": "Connect item-entry actions to the current bag draft",
+  "title": "Apply an optional lookup to the selected draft row",
   "changes": [
-    "Follow the source reset and focus order on the current bag draft and use the selected bag's related detail total for supported entry assignments.",
-    "Inspect unimplemented actions with external references together in the conversion review."
+    "Select a catalog choice to fill the calling field and its declared display fields together on the same draft row.",
+    "Switch between session-owned rows and recheck the selected choice and revision before applying changes."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

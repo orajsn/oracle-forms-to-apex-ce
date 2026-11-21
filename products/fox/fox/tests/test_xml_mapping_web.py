@@ -94,6 +94,28 @@ def test_auth_origin_and_cross_owner(client):
     assert c.get(f'/api/projects/{pid}/xml-mapping').status_code == 401
 
 
+def test_optional_lookup_reaches_the_downloaded_caller_and_preserves_coverage(client):
+    from test_forms_route_lookup_plan import SOURCE
+    c, _, _, _, run = finish(client, [('shipping.xml', SOURCE)])
+    downloaded = c.get(run['download_url'])
+    assert downloaded.status_code == 200 and jobs.sha(downloaded.content) == run['package_sha256']
+    files = _members(downloaded.content)
+    read = lambda n: json.loads(files['fox-package/' + n + '.json'])
+    ledger = read('mapping-ledger')
+    op, = ledger['lov_returns']
+    assert op['kind'] == 'source_optional_row_lookup' and not ledger['lov_return_gaps']
+    group, = ledger['record_group_reports']
+    assert len(ledger['code_units']) == run['total_units']
+    assert op['source_group_unit_id'] == group['source_unit_id'] and group['connected_return_count'] == 3
+    assert op['source_unit_sha256'] == group['source_unit_sha256']
+    assert op['native_target']['entry_page_file'] in files and op['chooser_file'] in files
+    assert all(f"page: {op['page_id']}" in files[p].decode() for p in op['entry_files'])
+    assert op['native_target']['draft_table'].encode() in files['fox-package/supporting-schema.sql']
+    assert read('source-to-page')['lookup_draft_pages'][0]['source_block_id'] == op['source_block_id']
+    assert read('metadata')['row_lookup_summary'] == {'editors': 1, 'mapped_returns': 3}
+    assert any('selected session draft from the synthetic catalog' in u['message'] for u in run['discrepancies']['units'])
+
+
 def test_queue_exact_source_consent_without_ai_approvals(client):
     c, root, pid, body, run = queue(client)
     assert run['conversion_profile'] == 'xml-mapping-v1'

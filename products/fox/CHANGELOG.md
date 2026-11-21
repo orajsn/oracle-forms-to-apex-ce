@@ -200,6 +200,28 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.52.0] - 2026-11-21
+
+### [feature] Return a lookup choice to the selected draft row
+
+For an optional list of values on a source block with no existing editor, FOX
+can now generate a row editor and a choice page from the XML. Each draft has
+its own identity. Applying a choice fills the calling field and its mapped
+companion fields together. Display fields receive their source values and
+remain read-only in the editor.
+
+The generated choice list uses a private synthetic catalog and applies the
+source query's filter. The editor rechecks the selected row, its revision and
+the full choice before updating the session draft. Cancel preserves the draft.
+The package includes supporting SQL for both tables. It records other Forms
+events and the original business save as separate work.
+
+Two original XML inputs passed SQLcl format validation. On local Oracle AI
+Database Free, the packaged SQL and PL/SQL applied different three-field
+choices to two rows and rejected stale, duplicated, inactive and wrong-row
+choices. The test supplied application identity values locally. Installed APEX
+browser verification is separate. All 1,491 release regression checks passed.
+
 ## [0.51.0] - 2026-11-21
 
 ### [feature] Connect XML entry actions to the selected session draft

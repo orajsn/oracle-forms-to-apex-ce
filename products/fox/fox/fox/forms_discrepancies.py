@@ -337,7 +337,7 @@ def _reference_description(kind, name, status):
 def _lov_return_note(target, available):
     """Explain checked record-group returns without changing historical reports."""
     if not isinstance(target, dict) or target.get("kind") not in {
-            "record_group_reference_report", "record_group_with_caller_returns"}:
+            "record_group_reference_report", "record_group_with_caller_returns", "record_group_with_draft_catalog"}:
         return ""
     lovs = target.get("associated_lovs", [])
     notes = []
@@ -347,7 +347,9 @@ def _lov_return_note(target, available):
             continue
         fields = ", ".join(f'{m["source_column_name"]} to {m["return_item"]}' for m in mappings)
         if lov.get("lov_return_implemented"):
-            notes.append(f'LOV {lov["source_lov_name"]}: caller {lov["caller"]} returns {fields} to the selected draft.')
+            destination = ('the selected session draft from the synthetic catalog'
+                           if lov.get("choice_catalog") == "synthetic" else 'the selected draft')
+            notes.append(f'LOV {lov["source_lov_name"]}: caller {lov["caller"]} returns {fields} to {destination}.')
         else:
             reason = lov.get("return_gap", "")
             if reason == "LOV_RETURN_EXISTING_ROW_UPDATE_DISABLED_NEW_DRAFT_INPUTS_AND_PERMISSIONS_UNPROVEN":
