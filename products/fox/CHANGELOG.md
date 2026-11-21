@@ -163,6 +163,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.49.0] - 2026-11-21
+
+### [feature] Check delete requirements for a saved record
+
+FOX recognizes the source check for a master with matching detail rows and
+the delete workflows for bags and consignments. The generated checks show
+which saved record is selected, which related rows match, and which permission
+or audit interface the original form uses. Original routines and row deletion
+remain disabled in these pages.
+
+The interface register links an audit call to the key action that marks its
+record and later requests posting. A literal database commit requested during
+posting is recorded separately from the form-wide commit. The packaged
+source plan preserves both boundaries and the composite keys of the child delete.
+
 ## [0.48.0] - 2026-11-21
 
 ### [feature] Correct a blocking bag weight from approval readiness

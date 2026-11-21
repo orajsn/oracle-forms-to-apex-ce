@@ -590,6 +590,31 @@ def test_download_exposes_the_saved_number_correction_on_its_existing_source_rul
     assert run['business_behavior_accepted'] is False and run['runtime_verified'] is False
 
 
+def test_delete_review_binds_permission_and_posting_dependencies_to_the_selected_action(client):
+    from test_forms_delete_plan import source as delete_source
+    c, _, _, _, run = finish(client, delete_source(renamed=True))
+    response = c.get(run['download_url'])
+    assert response.status_code == 200 and jobs.sha(response.content) == run['package_sha256']
+    files = _members(response.content)
+    get = lambda name: json.loads(files['fox-package/' + name + '.json'])
+    ledger = get('mapping-ledger')
+    assert len(ledger['delete_workflows']) == 5 and len(ledger['delete_posting_pairs']) == 2
+    sites = ledger['delete_interface_links']
+    assert sorted(s['supplied_argument_count'] for s in sites) == [1, 1, 5, 5]
+    assert all(s['binding'] == 'same_source_span' and not s['target_interface_verified'] for s in sites)
+    records = {r['id']: r for r in get('interface-register')['records']}
+    for site in sites:
+        assert records[site['interface_record_id']]['name'].upper() == site['callee'].upper()
+    for work in ledger['delete_workflows']:
+        unit, = [u for u in run['discrepancies']['units'] if u['source_unit_id'] == work['source_unit_id']]
+        assert unit['status'] == 'encoded_unwired'
+        if work['source_event'] == 'PRE-DELETE':
+            assert work['native_page'] is None and work['interfaces'][0] in unit['next_action']
+        else:
+            assert work['entry_file'] in files and work['native_page'] in files
+    assert not get('delete-action-receipt')['synthetic_table_writes']
+
+
 def test_staging_refresh_retains_delete_insert_and_read_for_the_same_action(client):
     from test_forms_manifest_filter import source
     action = ('IF :TRACKING IS NOT NULL THEN DELETE APP.QUERY_ROWS WHERE TRACKING=:TRACKING; '

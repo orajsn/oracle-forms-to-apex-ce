@@ -145,16 +145,20 @@ def mapping_catalog():
          "Explicit Save updates the selected synthetic record and applies its source before-update assignment. The approval transaction remains pending."),
         ("fox.query.staged-refresh", "A guarded query trigger deletes and repopulates rows for one key before executing the block query.",
          "Record the ordered source statements and link any generated session refresh page.", "Database staging visibility and the caller's transaction require target verification."),
+        ("fox.delete.source-workflow", "A complete block-owned delete trigger is linked to its source fields, relation and posting stages.",
+         "Record the source checks, calls and transaction order; attach the selected-record check when its inputs are proved.",
+         "The source unit keeps its remaining deletion, transaction or external-provider requirements."),
         ("fox.behavior.unresolved-unit", "Complete source unit does not satisfy a supported mapping and all bindings.",
          "Unsupported or missing-input coverage with exact unit hash.", "No partial execution or invented business logic."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 16,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 17,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
-                                "forms_numeric_correction.py", "forms_numeric_correction_page.py")}
+                                "forms_numeric_correction.py", "forms_numeric_correction_page.py",
+                                "forms_delete_plan.py", "forms_delete_action.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
@@ -279,6 +283,43 @@ def _numeric_correction_links(receipt, approval_pages, behavior_plan, files):
     return links
 
 
+def _delete_targets(plan, receipt, chunks, files):
+    sources = {chunk["code_unit_id"]: chunk["sha256"] for chunk in chunks}
+    targets, pairs = {}, []
+    for op in plan["operations"]:
+        uid = op["source_unit_id"]
+        if uid in targets or sources.get(uid) != op["source_unit_sha256"]:
+            raise ValueError("Delete workflow differs from its original source unit.")
+        targets[uid] = {k: op[k] for k in ("source_unit_id", "source_unit_sha256", "source_event",
+                                            "source_block_id", "kind", "operation_id")}
+        parsed = op["parsed"]
+        targets[uid]["interfaces"] = [parsed[k]["callee"] for k in ("permission_call", "audit_call") if k in parsed]
+        targets[uid]["delete_tables"] = [parsed[k]["table"] for k in ("flag_delete", "cascade_delete") if parsed.get(k)]
+        targets[uid]["requests_database_commit"] = parsed.get("forms_ddl_commit") is True
+        targets[uid].update(plan_member="fox-package/delete-plan.json", native_page=None,
+                            whole_source_unit_converted=False)
+    for op in plan["operations"]:
+        paired = op.get("paired_pre_delete_unit_id")
+        if paired:
+            pre = targets.get(paired)
+            if (op["source_event"] != "KEY-DELREC" or pre is None or pre["source_event"] != "PRE-DELETE"
+                    or pre["source_block_id"] != op["source_block_id"]
+                    or pre["source_unit_sha256"] != op["paired_pre_delete_sha256"]):
+                raise ValueError("Delete key and posting trigger belong to different source workflows.")
+            pairs.append({"key_source_unit_id": op["source_unit_id"], "key_source_unit_sha256": op["source_unit_sha256"],
+                          "pre_delete_source_unit_id": paired, "pre_delete_source_unit_sha256": pre["source_unit_sha256"]})
+            targets[op["source_unit_id"]]["posting_interfaces"] = list(pre["interfaces"])
+    for action in receipt["adapted_operations"]:
+        target = targets.get(action["source_unit_id"])
+        if (not target or target["native_page"] or target["source_unit_sha256"] != action["source_unit_sha256"]
+                or action["page_file"] not in files or action["entry_file"] not in files
+                or action["whole_source_unit_converted"] is not False or receipt["customer_table_writes"] is not False
+                or receipt["synthetic_table_writes"] is not False):
+            raise ValueError("Delete preflight differs from its bound source and read-only page.")
+        target.update(native_page=action["page_file"], entry_file=action["entry_file"])
+    return targets, pairs
+
+
 def _staged_query_targets(plan, receipt, chunks, files):
     sources = {chunk["code_unit_id"]: chunk["sha256"] for chunk in chunks}
     targets = {}
@@ -299,6 +340,28 @@ def _staged_query_targets(plan, receipt, chunks, files):
             raise ValueError("Staged query page differs from its source plan.")
         target["native_page"] = action["page_file"]
     return targets
+
+
+def _delete_interface_links(plan, register):
+    sites = {(r["source"]["source_unit_id"], r["position"]["character_offset"]): r
+             for r in register["records"] if r["role"] == "routine_invocation" and r["position"]}
+    links = []
+    for op in plan["operations"]:
+        for role in ("permission_call", "audit_call"):
+            call = op["parsed"].get(role)
+            if not call:
+                continue
+            position = call["position"]
+            site = sites.get((op["source_unit_id"], position["character_offset"]))
+            matched = (site is not None and site["name"].upper() == call["callee"].upper()
+                       and site["position"]["end_character_offset"] == position["end_character_offset"]
+                       and site["argument_count"] == call["arity"])
+            links.append({"source_unit_id": op["source_unit_id"], "role": role, "callee": call["callee"],
+                          "call_site_id": call["call_site_id"], "supplied_argument_count": call["arity"],
+                          "position": position, "interface_record_id": site["id"] if matched else None,
+                          "binding": "same_source_span" if matched else "see_delete_plan",
+                          "target_interface_verified": False})
+    return links
 
 
 def _staged_query_interfaces(plan, register):
@@ -566,6 +629,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files, correction_receipt = apply_numeric_corrections(documents, packet, chunks, trace, files)
     files["fox-package/numeric-correction-receipt.json"] = _bytes(correction_receipt)
     numeric_corrections = _numeric_correction_links(correction_receipt, approval_pages, behavior_plan, files)
+    from .forms_delete_action import apply_delete_actions
+    files, delete_receipt = apply_delete_actions(documents, packet, chunks, trace, files)
+    files["fox-package/delete-action-receipt.json"] = _bytes(delete_receipt)
+    delete_plan = json.loads(files["fox-package/delete-plan.json"])
+    delete_targets, delete_pairs = _delete_targets(delete_plan, delete_receipt, chunks, files)
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -686,6 +754,14 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             elif uid in correction_gaps:
                 row["saved_weight_correction"] = "unavailable"
                 row["saved_weight_correction_reason"] = correction_gaps[uid]
+        if uid in delete_targets:
+            if row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired":
+                raise ValueError("Two mappings claim the same delete trigger.")
+            target = delete_targets[uid]
+            row.update(encoding_status="generated_unwired", delete_event=target["source_event"],
+                       reason="delete_check_partly_connected" if target["native_page"] else "delete_posting_binding_pending")
+            row["delete_requirements"] = {k: target[k] for k in ("interfaces", "delete_tables", "requests_database_commit")}
+            row["delete_requirements"]["posting_interfaces"] = target.get("posting_interfaces", [])
     context_summary = {"relations_generated": len(relation_receipt["generated_operations"]) if relation_receipt else 0,
         "relations_not_converted": sum(row["status"] != "read_navigation_generated" for row in relation_coverage),
         "assignments_generated_unwired": len(encoded)}
@@ -754,6 +830,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in delete_targets:
+            row.update(rule_id="fox.delete.source-workflow", target=delete_targets[uid])
         if uid in staged_units:
             row.update(rule_id="fox.query.staged-refresh", target=staged_units[uid])
         if uid in approval_units:
@@ -802,6 +880,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "guarded_queries": query_receipt["generated_operations"],
         "staged_queries": list(staged_units.values()),
         "numeric_corrections": numeric_corrections,
+        "delete_workflows": list(delete_targets.values()),
+        "delete_posting_pairs": delete_pairs,
         "dependencies_and_links": [deepcopy(row) for row in remediation if row["code"] == "dependency_not_implemented"],
         "structural_objects_are_business_conversion": False,
         "runtime_verified": False, "business_behavior_accepted": False}
@@ -814,6 +894,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                                                    discrepancies=discrepancies, documents=documents)
     ledger["approval_interface_links"] = _approval_interface_links(approval_units, interface_register)
     ledger["staged_query_interfaces"] = _staged_query_interfaces(stage_plan, interface_register)
+    ledger["delete_interface_links"] = _delete_interface_links(delete_plan, interface_register)
     files["fox-package/discrepancy-evidence.json"] = _bytes(dependency_evidence)
     files["fox-package/discrepancies.json"] = _bytes(discrepancies)
     applied = sorted({row["rule_id"] for row in ledger_objects + ledger_units})

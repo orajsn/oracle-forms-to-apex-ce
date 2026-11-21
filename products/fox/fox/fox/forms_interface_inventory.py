@@ -493,6 +493,17 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
                 position=_position(positions, token[2], finish), arguments=args, limitation=limitation, nested=enclosing)
             if row is not None:
                 row["bound_local_unit_id"] = bound
+                if upper == "FORMS_DDL" and classification == "forms_platform_api" and not definitions:
+                    # Record only the two closed transaction commands. Other
+                    # dynamic text can contain credentials or arbitrary SQL.
+                    effect = "unresolved_dynamic_command"
+                    if paren and parts is not None and len(parts) == 1 and len(parts[0]) == 1:
+                        arg = parts[0][0]
+                        literal = semantic[arg[2]:arg[3]]
+                        command = re.fullmatch(r"'\s*(COMMIT|ROLLBACK)\s*'", literal, re.I)
+                        if arg[0] == "literal" and command:
+                            effect = "requests_database_" + command[1].lower()
+                    row["transaction_effect"] = effect
         for index, token in enumerate(tokens):
             if token[1].upper() == "EXECUTE" and index + 1 < len(tokens) and tokens[index + 1][1].upper() == "IMMEDIATE":
                 add(owner, unit, None, "dynamic_sql", "unresolved", position=_position(positions, token[2], tokens[index + 1][3]),
@@ -521,7 +532,25 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
     incoming = defaultdict(list)
     for row in records:
         if row["bound_local_unit_id"] and not row["lexical_enclosing_routine"]:
-            incoming[row["bound_local_unit_id"]].append(row)
+            incoming[row["bound_local_unit_id"]].append((row["source"], [row["id"]], False))
+    # DELETE_RECORD marks a record. PRE-DELETE runs only if a later post
+    # actually reaches that deletion. Bind both source call sites to the
+    # uniquely compiled key and pre-delete triggers on the same block.
+    for pair in ledger.get("delete_posting_pairs", []):
+        caller, posted = (units[pair[k]] for k in ("key_source_unit_id", "pre_delete_source_unit_id"))
+        key_owner, pre_owner = objects[caller["owner_id"]], objects[posted["owner_id"]]
+        if (caller["sha256"] != pair["key_source_unit_sha256"] or posted["sha256"] != pair["pre_delete_source_unit_sha256"]
+                or (key_owner["name"] or "").upper() != "KEY-DELREC" or (pre_owner["name"] or "").upper() != "PRE-DELETE"
+                or key_owner["kind"] != "Trigger" or pre_owner["kind"] != "Trigger"
+                or key_owner["module_id"] != pre_owner["module_id"]
+                or not key_owner["block_id"] or key_owner["block_id"] != pre_owner["block_id"]
+                or key_owner["parent_id"] != pre_owner["parent_id"] or pre_owner["parent_id"] != pre_owner["block_id"]):
+            raise ValueError("Delete posting link differs from its block-owned source triggers.")
+        sites = [r for r in records if r["source"]["source_unit_id"] == caller["id"] and
+                 r["classification"] == "forms_platform_api" and r["role"] == "routine_invocation"
+                 and (r["name"] or "").upper() in {"DELETE_RECORD", "COMMIT_FORM"} and r["argument_count"] == 0]
+        if [r["name"].upper() for r in sites] == ["DELETE_RECORD", "COMMIT_FORM"]:
+            incoming[posted["id"]].append((source_ref(key_owner, caller), [r["id"] for r in sites], True))
     for row in records:
         uid = row["source"]["source_unit_id"]
         if not uid:
@@ -536,16 +565,18 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
         row["affected_actions"].append(direct)
         if row["lexical_enclosing_routine"]:
             continue
-        queue = [(uid, [], [uid])]
+        queue = [(uid, [], [uid], False)]
         while queue:
-            current, sites, path = queue.pop(0)
-            for caller in incoming[current]:
-                parent = caller["source"]["source_unit_id"]
+            current, sites, path, after_post = queue.pop(0)
+            for caller, call_sites, posting_edge in incoming[current]:
+                parent = caller["source_unit_id"]
                 if parent in path:
                     continue
-                next_sites, next_path = [caller["id"]] + sites, [parent] + path
-                action = {"action": deepcopy(caller["source"]), "via_call_site_ids": next_sites,
-                    "unit_path": next_path, "relationship": "static_local_body_call_chain_execution_unproved"}
+                next_sites, next_path = call_sites + sites, [parent] + path
+                conditional = after_post or posting_edge
+                action = {"action": deepcopy(caller), "via_call_site_ids": next_sites,
+                    "unit_path": next_path, "relationship": ("conditional_pre_delete_during_post"
+                        if conditional else "static_local_body_call_chain_execution_unproved")}
                 action_bytes = len(_canonical(action))
                 if budget["detail_bytes"] + action_bytes > MAX_DETAIL_BYTES:
                     limits["action_byte_limit"] += 1
@@ -559,7 +590,7 @@ def build_interface_inventory(packet, chunks, ledger, *, dependency_evidence=Non
                     queue = []
                     break
                 if len(next_path) < MAX_PATH_DEPTH:
-                    queue.append((parent, next_sites, next_path))
+                    queue.append((parent, next_sites, next_path, conditional))
                 elif incoming[parent]:
                     limits["records_with_path_depth_limit"] += 1
     retained_units = {r["source"]["source_unit_id"] for r in records}
@@ -598,7 +629,8 @@ def interface_inventory_csv(register):
         "argument_count", "argument_ordinal", "named_parameter", "actual_kind", "source_declared_type",
         "argument_line", "argument_column", "argument_character_offset", "bind_name", "bind_kind", "bind_source_item_id",
         "bind_source_declared_type", "bind_line", "bind_column", "bind_character_offset", "bind_data_flow",
-        "formal_parameter_direction", "affected_owner", "affected_unit_id", "unit_path", "via_call_site_ids", "relationship", "limitation"]
+        "formal_parameter_direction", "affected_owner", "affected_unit_id", "unit_path", "via_call_site_ids", "relationship", "limitation",
+        "transaction_effect"]
     writer = csv.DictWriter(output, fieldnames=fields, lineterminator="\n")
     writer.writeheader()
     written_bytes, written_rows = len(output.getvalue().encode("utf-8")), 0
@@ -632,7 +664,8 @@ def interface_inventory_csv(register):
                     "affected_unit_id": action["action"]["source_unit_id"] if action else None,
                     "unit_path": " > ".join(action["unit_path"]) if action else None,
                     "via_call_site_ids": " > ".join(action["via_call_site_ids"]) if action else None,
-                    "relationship": action["relationship"] if action else None, "limitation": row["limitation"]}
+                    "relationship": action["relationship"] if action else None, "limitation": row["limitation"],
+                    "transaction_effect": row.get("transaction_effect")}
                 safe = {key: "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value
                         for key, value in cells.items()}
                 buffer = io.StringIO(newline="")

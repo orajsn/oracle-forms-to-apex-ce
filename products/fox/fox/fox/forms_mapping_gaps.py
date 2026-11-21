@@ -79,6 +79,26 @@ def classify_gaps(packet, chunks, coverage):
             category = 'engine_context'
             message = 'The item rule is encoded with its single-row lookup and ordered field assignments. Its required native bindings remain incomplete.'
             action = 'Inspect the item-validation receipt for the unresolved field, source table or draft binding.'
+        elif reason == 'delete_check_partly_connected':
+            category = 'engine_context'
+            if row['delete_event'] == 'ON-CHECK-DELETE-MASTER':
+                message = 'The selected master can be checked for matching detail rows using its source relation. Delete permission is checked separately.'
+                action = 'Inspect the selected record and its linked details. Verify the original delete event and transaction before enabling removal.'
+            else:
+                message = 'The selected record has a delete check. Its source permission, posting actions and transaction still need verified providers.'
+                requirements = row['delete_requirements']
+                routines = requirements['interfaces'] + requirements['posting_interfaces']
+                action = 'Verify ' + ', '.join(routines) + ' and the form-wide commit before enabling deletion.'
+        elif reason == 'delete_posting_binding_pending':
+            category = 'engine_context'
+            message = 'The source delete workflow is encoded in execution order. Its event still needs verified runtime bindings.'
+            requirements = row['delete_requirements']
+            action = ('Verify the source interface ' + ', '.join(requirements['interfaces']) + ' before enabling this action.'
+                      if requirements['interfaces'] else 'Verify the source record, detail relation and delete event binding.')
+            if requirements['delete_tables']:
+                action += ' Verify the scoped deletes on ' + ' and '.join(requirements['delete_tables']) + '.'
+            if requirements['requests_database_commit']:
+                message += ' The trigger requests a database commit before it deletes matching child rows.'
         elif reason == 'staged_query_partly_connected':
             category = 'engine_context'
             message = 'Execute query can refresh staged rows for the entered key in the APEX session. Other database callers may depend on the original staging table and transaction.'

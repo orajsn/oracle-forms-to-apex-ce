@@ -118,6 +118,47 @@ def test_bare_delete_alone_identifies_the_affected_database_object_in_discrepanc
     assert any(r["evidence"].get("name") == deletion["name"] for r in evidence["references"])
 
 
+def test_forms_ddl_exposes_exact_transaction_command_without_exporting_other_literals():
+    *_, register = context("""BEGIN
+        FORMS_DDL(' commit '); FORMS_DDL('rollback'); FORMS_DDL('ROLLBACK TO private_name');
+        FORMS_DDL(:GLOBAL.CMD); FORMS_DDL('COM' || 'MIT'); END;""")
+    records = calls(register, "FORMS_DDL")
+    assert [r["transaction_effect"] for r in records] == [
+        "requests_database_commit", "requests_database_rollback", *["unresolved_dynamic_command"] * 3]
+    csv_rows = list(csv.DictReader(io.StringIO(interface_inventory_csv(register))))
+    assert [r["transaction_effect"] for r in csv_rows if r["name"] == "FORMS_DDL"] == [
+        r["transaction_effect"] for r in records]
+    assert "private_name" not in json.dumps(register) and "private_name" not in interface_inventory_csv(register)
+    raw = document("BEGIN FORMS_DDL('COMMIT'); END;",
+                   helper=[("FORMS_DDL", "PROCEDURE FORMS_DDL(x varchar2) IS BEGIN NULL; END;")])
+    *_, shadowed = context(documents=[("x.xml", raw)])
+    assert all("transaction_effect" not in r for r in calls(shadowed, "FORMS_DDL"))
+
+
+def test_pre_delete_dependency_is_linked_to_posting_sites_in_the_same_block():
+    root = ET.fromstring(document("NULL;"))
+    block = root.find("Block")
+    ET.SubElement(block, "Trigger", Name="KEY-DELREC", TriggerText="DELETE_RECORD; COMMIT_FORM;")
+    ET.SubElement(block, "Trigger", Name="PRE-DELETE", TriggerText="BEGIN APP.AUDIT_ROW(:LINES.CODE); END;")
+    packet, chunks, ledger, docs, initial = context(documents=[("posting.xml", ET.tostring(root))])
+    mark, = calls(initial, "DELETE_RECORD")
+    commit, = calls(initial, "COMMIT_FORM")
+    audit, = calls(initial, "APP.AUDIT_ROW")
+    pair = {role + "_source_unit_" + key: record["source"]["source_unit_" + key]
+            for role, record in (("key", mark), ("pre_delete", audit)) for key in ("id", "sha256")}
+    ledger["delete_posting_pairs"] = [pair]
+    register = build_interface_inventory(packet, chunks, ledger, documents=docs)
+    audit, = calls(register, "APP.AUDIT_ROW")
+    direct, posted = audit["affected_actions"]
+    assert direct["relationship"] == "direct_source_reference"
+    assert posted["relationship"] == "conditional_pre_delete_during_post"
+    assert posted["via_call_site_ids"] == [mark["id"], commit["id"]]
+    assert posted["unit_path"] == [mark["source"]["source_unit_id"], audit["source"]["source_unit_id"]]
+    pair["key_source_unit_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="posting link"):
+        build_interface_inventory(packet, chunks, ledger, documents=docs)
+
+
 def test_static_local_paths_module_isolation_cycles_and_nested_effects():
     helpers = [("HELPER", "PROCEDURE HELPER IS BEGIN APP.API.DELETE_ROW(:LINES.CODE); OTHER; END HELPER;"),
                ("OTHER", "PROCEDURE OTHER IS BEGIN HELPER; END OTHER;")]

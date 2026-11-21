@@ -1,10 +1,10 @@
 {
-  "version": "0.48.0",
+  "version": "0.49.0",
   "released_on": "2026-11-21",
-  "title": "Correct a saved bag weight before approval",
+  "title": "Check deletion rules for a selected record",
   "changes": [
-    "Open the affected saved bag from the selected manifest, correct its actual weight and return to check readiness again.",
-    "Recheck the editable parent and bag, the source number restrictions and the before-update route assignment on an explicit synthetic Save."
+    "Check a selected master for linked detail records and inspect the source deletion rules for bags and consignments.",
+    "Trace an external permission or audit call to its source action and distinguish the database commit inside posting from the form-wide commit."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
