@@ -468,9 +468,9 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
     from .forms_rate_choices import compile_rate_choices
     from .forms_rate_workspace import render_rate_workspace
     from .forms_route_lookup_native import render_row_lookup
-    from .forms_route_lookup_plan import compile_row_lookups
+    from .forms_route_lookup_plan import OPTIONAL_CALLER_GAPS, compile_row_lookups
 
-    if not any(gap['reason'] == 'LOV_RETURN_CALLER_BLOCK' for gap in returns['gaps']):
+    if not any(gap['reason'] in OPTIONAL_CALLER_GAPS for gap in returns['gaps']):
         return []
     contracts = compile_row_lookups(documents, packet, chunks, trace, files, groups, returns)
     lookup_pages = []
@@ -490,7 +490,7 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         group = queries[contract['record_group_operation_id']]
         uid, lid = contract['source_unit_id'], contract['source_lov_id']
         matches = [g for g in returns['gaps'] if (g['source_unit_id'], g['source_lov_id']) == (uid, lid)]
-        if (len(matches) != 1 or matches[0]['reason'] != 'LOV_RETURN_CALLER_BLOCK'
+        if (len(matches) != 1 or matches[0]['reason'] not in OPTIONAL_CALLER_GAPS
                 or group['source_unit_sha256'] != contract['source_unit_sha256']
                 or contract['source_binding'] != packet['source_binding']):
             raise ValueError('Row lookup no longer matches the unresolved caller and source query.')
@@ -562,8 +562,16 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                 cg = queries[choice['record_group_operation_id']]
                 cuid, clid = choice['source_unit_id'], choice['source_lov_id']
                 gaps = [g for g in returns['gaps'] if (g['source_unit_id'], g['source_lov_id']) == (cuid, clid)]
+                existing = [g for g in returns['generated_operations']
+                            if (g['source_group_unit_id'], g['source_lov_id']) == (cuid, clid)]
+                pending = len(gaps) == 1 and gaps[0]['reason'] == 'LOV_RETURN_CALLER_BLOCK' and not existing
+                also_connected = (not gaps and len(existing) == 1 and existing[0]['kind'] == 'source_caller_lov_return'
+                                  and existing[0]['source_caller_item_id'] == choice['source_caller_item_id']
+                                  and existing[0]['source_group_unit_sha256'] == choice['source_unit_sha256']
+                                  and [(f['source_item_id'], f['source_column']) for f in existing[0]['return_mappings']]
+                                  == [(f['source_item_id'], f['source_column']) for f in choice['returns']])
                 link = links[clid]
-                if (len(gaps) != 1 or gaps[0]['reason'] != 'LOV_RETURN_CALLER_BLOCK'
+                if (not (pending or also_connected)
                         or cg['source_unit_sha256'] != choice['source_unit_sha256']
                         or choice['source_block_id'] != contract['source_block_id']
                         or link['chooser_page_file'] not in files):
@@ -580,8 +588,12 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                     'source_caller_name': choice['source_caller_name'], 'source_caller_id': choice['source_caller_item_id'],
                     'source_caller_item_id': choice['source_caller_item_id'], 'return_mappings': choice['returns'],
                     'entry_files': entries, 'chooser_file': link['chooser_page_file'], 'contract': choice, 'native_target': link}
-                returns['gaps'].remove(gaps[0])
-                returns['generated_operations'].append(companion)
+                if pending:
+                    returns['gaps'].remove(gaps[0])
+                    returns['generated_operations'].append(companion)
+                else:
+                    existing[0]['shared_editor'] = {'page_file': op['page_file'], 'chooser_file': companion['chooser_file'],
+                                                    'operation_id': companion['operation_id']}
                 lookup_pages.append(companion)
         page += span
     returns['session_draft_table_writes'] = True
@@ -621,6 +633,9 @@ def _final_record_groups(groups, returns):
                            return_scope="selected_session_draft")
                 if op.get("durable_synthetic_save"):
                     lov["durable_synthetic_save"] = True
+            elif op.get("shared_editor"):
+                lov.update(row_editor_page=op["shared_editor"]["page_file"], choice_catalog="synthetic",
+                           return_scope="selected_session_draft", durable_synthetic_save=True)
         if connected:
             pending = group["unimplemented_lov_return_mapping_count"] - connected
             group.update(kind="record_group_with_caller_returns", connected_return_count=connected,

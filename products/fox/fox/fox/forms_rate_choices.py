@@ -261,6 +261,13 @@ def compile_rate_choices(documents, packet, chunks, trace, files, group_receipt,
                     continue
                 try:
                     caller = _one(callers, 'CALLER_NOT_UNIQUE')
+                    key = group['source_unit_id'], lov['source_lov_id']
+                    omitted = any((g['source_unit_id'], g['source_lov_id']) == key
+                                  and g['reason'] == 'LOV_RETURN_CALLER_BLOCK' for g in lov_receipt['gaps'])
+                    existing = any((g['source_group_unit_id'], g['source_lov_id']) == key
+                                   and g['source_caller_item_id'] == caller['id']
+                                   for g in lov_receipt['generated_operations'])
+                    _need(omitted or existing, 'EXISTING_CALLER_BINDING_REQUIRED')
                     c = _contract(group, lov, caller, route_contract, objects, props, units, texts,
                                   1, lov_columns[lov['source_lov_id']])
                     _need(not seen & {f['source_item_id'] for f in c['fields']}, 'OVERLAPPING_RETURN_TARGET')

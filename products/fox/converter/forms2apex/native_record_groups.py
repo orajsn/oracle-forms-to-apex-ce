@@ -444,6 +444,28 @@ def apply_record_groups(documents, packet, chunks, trace, members):
             context = bindings[0] if bindings else None
             if context is None:
                 candidates = [b for b in trace['blocks'] if b.get('classification') == 'database' and b.get('source_module_id') == owner['module_id'] and b.get('report_file') in files]
+                if len(candidates) != 1:
+                    # An unbound/global-only query needs navigation, not a
+                    # guessed filter row. Richer Forms metadata may expose
+                    # several database blocks. Resolve every associated LOV's
+                    # callers to one rendered source block instead of choosing
+                    # the first report or discarding the extra metadata.
+                    lov_names = [(lov['name'] or '').upper() for lov in associated_lovs]
+                    _need(lov_names and all(lov_names) and len(set(lov_names)) == len(lov_names),
+                          'NAVIGATION_CONTEXT_NOT_UNIQUE')
+                    caller_sets = [[obj for obj in objects.values() if obj['kind'] == 'Item'
+                        and obj['module_id'] == owner['module_id']
+                        and (properties[obj['id']].get('LovName') or '').strip().upper() == name]
+                        for name in lov_names]
+                    _need(all(caller_sets), 'NAVIGATION_CONTEXT_NOT_UNIQUE')
+                    callers = [obj for caller_set in caller_sets for obj in caller_set]
+                    caller_blocks = {obj['block_id'] for obj in callers}
+                    _need(len(caller_blocks) == 1, 'NAVIGATION_CONTEXT_NOT_UNIQUE')
+                    candidates = [b for b in candidates if b['source_block_id'] in caller_blocks]
+                    _need(len(candidates) == 1 and all(
+                        objects[obj['block_id']].get('classification') == 'database'
+                        and sum(f['source_item_id'] == obj['id'] for f in candidates[0].get('items', [])) == 1
+                        for obj in callers), 'NAVIGATION_CONTEXT_NOT_UNIQUE')
                 _need(len(candidates) == 1, 'NAVIGATION_CONTEXT_NOT_UNIQUE')
                 context = candidates[0]
             children = [o for o in objects.values() if o['kind'] == 'RecordGroupColumn' and o['parent_id'] == owner['id']]

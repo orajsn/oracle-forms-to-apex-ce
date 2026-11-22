@@ -326,6 +326,110 @@ def test_unfiltered_query_cannot_invent_an_ambiguous_navigation_context():
     assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_NAVIGATION_CONTEXT_NOT_UNIQUE'
 
 
+NAVIGATION_SOURCE = b'''<FormModule Name="DELIVERY_REFERENCE">
+<Block Name="OVERVIEW" DatabaseBlock="true">
+ <Item Name="CODE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="20"/>
+</Block>
+<Block Name="TARIFFS" DatabaseBlock="true">
+ <Item Name="LANE" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="20" LovName="LANE_PICK"/>
+ <Item Name="LANE_DESCRIPTION" ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="30" LovName="LANE_PICK"/>
+</Block>
+<LOV Name="LANE_PICK" RecordGroupName="LANES">
+ <LOVColumnMapping Name="LANE_CODE" ReturnItem="TARIFFS.LANE"/>
+</LOV>
+<RecordGroup Name="LANES" RecordGroupQuery="SELECT LANE_CODE FROM REFERENCE_LANES">
+ <RecordGroupColumn Name="LANE_CODE" ColumnDataType="Character" MaximumLength="20"/>
+</RecordGroup>
+</FormModule>'''
+
+
+@pytest.mark.parametrize('global_filter', [False, True])
+def test_unbound_query_uses_all_source_lov_callers_in_one_rendered_block(global_filter):
+    source = NAVIGATION_SOURCE
+    if global_filter:
+        source = source.replace(b'FROM REFERENCE_LANES"', b'FROM REFERENCE_LANES WHERE BRANCH = :GLOBAL.DIVISION"')
+    args = baseline(source)
+    before = deepcopy(args)
+    files, receipt = apply_record_groups(*args)
+    assert args == before and not receipt['gaps']
+    op, = receipt['generated_operations']
+    overview, tariffs = args[3]['blocks']
+    assert op['report_files'] == [tariffs['report_file']]
+    assert files[overview['report_file']] == args[4][overview['report_file']]
+    assert 'FOX_GROUP_1' in files[tariffs['report_file']].decode()
+    chooser = files[op['chooser_file']].decode()
+    page = files[op['page_file']].decode()
+    assert tariffs['table_name'] in chooser and overview['table_name'] not in chooser
+    assert tariffs['table_name'] in page and overview['table_name'] not in page
+    assert '#FOX_ROW_ID#' in chooser and 'checksumRequiredSessionLevel' in page
+    assert 'select count(*)' in page and "l_count <> 1" in page
+    assert not op['source_bindings'] and len(op['global_bindings']) == int(global_filter)
+    assert not receipt['original_reads_enabled'] and not op['original_interface_enabled']
+    assert not op['source_query_executed'] and not op['customer_table_writes']
+    assert not op['runtime_verified'] and not op['business_accepted']
+    assert "NVL(V('" + op['readiness_item'] + "'), 'N') = 'Y'" in page
+
+
+@pytest.mark.parametrize('mutation', [
+    # Both caller items must resolve to the same source block.
+    lambda raw: raw.replace(b'Name="CODE" ItemType=', b'Name="CODE" LovName="LANE_PICK" ItemType='),
+    # Every associated LOV must have a resolvable caller, not just one LOV.
+    lambda raw: raw.replace(b'<RecordGroup Name=', b'<LOV Name="ORPHAN_PICK" RecordGroupName="LANES"/><RecordGroup Name='),
+    lambda raw: raw.replace(b'LovName="LANE_PICK"', b'LovName="MISSING_PICK"'),
+    # An explicit control caller never becomes a database context.
+    lambda raw: raw.replace(b'Name="TARIFFS" DatabaseBlock="true"', b'Name="TARIFFS" DatabaseBlock="false"').replace(
+        b'<LOV Name=', b'<Block Name="THIRD" DatabaseBlock="true"><Item Name="OTHER" ItemType="Text Item" DataType="Char" MaximumLength="20"/></Block><LOV Name='),
+    lambda raw: raw.replace(b'Name="TARIFFS" DatabaseBlock="true"', b'Name="TARIFFS"').replace(
+        b'<LOV Name=', b'<Block Name="THIRD" DatabaseBlock="true"><Item Name="OTHER" ItemType="Text Item" DataType="Char" MaximumLength="20"/></Block><LOV Name='),
+    # A source database block without a rendered caller item is unresolved.
+    lambda raw: raw.replace(b'LovName="LANE_PICK"', b'LovName="LANE_PICK" Rendered="false" ItemType="Image"').replace(
+        b'ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="20" LovName=',
+        b'DataType="Char" DatabaseItem="true" MaximumLength="20" LovName=').replace(
+        b'ItemType="Text Item" DataType="Char" DatabaseItem="true" MaximumLength="30" LovName=',
+        b'DataType="Char" DatabaseItem="true" MaximumLength="30" LovName='),
+])
+def test_unbound_query_rejects_mixed_missing_control_and_unmapped_lov_callers(mutation):
+    args = baseline(mutation(NAVIGATION_SOURCE))
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['generated_operations'] and files == args[4]
+    assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_NAVIGATION_CONTEXT_NOT_UNIQUE'
+
+
+def test_lov_context_does_not_resolve_callers_from_a_different_module():
+    source = b'<Module>' + NAVIGATION_SOURCE.replace(b'LovName="LANE_PICK"', b'LovName="OTHER"') + b'''<FormModule Name="OTHER_MODULE">
+      <Block Name="TARIFFS" DatabaseBlock="true"><Item Name="LANE" ItemType="Text Item" DataType="Char" MaximumLength="20" LovName="LANE_PICK"/></Block>
+    </FormModule></Module>'''
+    args = baseline(source)
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['generated_operations'] and files == args[4]
+    assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_NAVIGATION_CONTEXT_NOT_UNIQUE'
+
+
+def test_multiple_associated_lovs_can_prove_one_caller_block():
+    source = NAVIGATION_SOURCE.replace(b'MaximumLength="30" LovName="LANE_PICK"',
+        b'MaximumLength="30" LovName="LABEL_PICK"').replace(b'<RecordGroup Name=',
+        b'<LOV Name="LABEL_PICK" RecordGroupName="LANES"/><RecordGroup Name=')
+    args = baseline(source)
+    _, receipt = apply_record_groups(*args)
+    assert not receipt['gaps']
+    op, = receipt['generated_operations']
+    assert len(op['associated_lovs']) == 2
+    assert op['report_files'] == [args[3]['blocks'][1]['report_file']]
+
+
+@pytest.mark.parametrize('duplicate', ['block', 'field'])
+def test_source_lov_navigation_refuses_duplicate_target_mappings(duplicate):
+    args = baseline(NAVIGATION_SOURCE)
+    target = args[3]['blocks'][1]
+    if duplicate == 'block':
+        args[3]['blocks'].append(deepcopy(target))
+    else:
+        target['items'].append(deepcopy(target['items'][0]))
+    files, receipt = apply_record_groups(*args)
+    assert not receipt['generated_operations'] and files == args[4]
+    assert receipt['gaps'][0]['reason'] == 'RECORD_GROUP_NAVIGATION_CONTEXT_NOT_UNIQUE'
+
+
 @pytest.mark.parametrize('raw', [
     "SELECT ALL C.CODE, C.DESCRIPTION FROM C WHERE ACTIVE = 'Y' AND CODE NOT IN ('990','992') ORDER BY 1",
     "SELECT CODE ID, (DESCRIPTION) NAME FROM C WHERE ACTIVE = 'Y' ORDER BY 1 DESC",

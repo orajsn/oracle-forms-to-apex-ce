@@ -59,6 +59,35 @@ def change(raw=SOURCE, *, name, tag=None, **properties):
     return ET.tostring(root)
 
 
+def test_effective_multiblock_xml_preserves_normal_choices_and_shared_editor():
+    import json
+    from fox.forms_native_plan import POLICY_ID
+    from fox.prototype_export_only import _members
+    from fox.xml_mapping import generate_xml_package
+
+    root = ET.fromstring(SOURCE)
+    block = root.find("./Block[@Name='LINES']")
+    block.set('DatabaseBlock', 'true')
+    block.set('QueryDataSourceType', 'Table')
+    for item in block.findall('Item'):
+        item.set('DataType', 'Char')
+        item.attrib.setdefault('DatabaseItem', 'true')
+    raw, result = generate_xml_package([('effective.xml', ET.tostring(root))],
+                                       'mapped-editor', 'Mapped row editor', POLICY_ID)
+    files = _members(raw)
+    assert result['metadata']['row_lookup_summary'] == {'editors': 1, 'mapped_returns': 5}
+    workspace, = result['metadata']['saved_lookup_workspaces']
+    assert workspace['choices'] == 3 and workspace['customer_table_writes'] is False
+    receipt = json.loads(files['fox-package/lov-return-receipt.json'])
+    existing = [op for op in receipt['generated_operations'] if op.get('shared_editor')]
+    assert {op['source_caller_name'] for op in existing} == {'TIER', 'UNIT'}
+    for op in existing:
+        assert op['kind'] == 'source_caller_lov_return'
+        assert op['page_file'] in files and op['chooser_file'] in files
+        assert op['shared_editor']['page_file'] == workspace['page_file']
+        assert op['shared_editor']['chooser_file'] in files
+
+
 @pytest.mark.parametrize('renamed', [False, True])
 def test_complete_same_row_contract_is_deterministic_and_preserves_originals(renamed):
     raw = SOURCE

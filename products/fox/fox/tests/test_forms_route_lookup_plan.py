@@ -290,7 +290,12 @@ def test_optional_project_local_original_source():
     assert len(contracts) == 1
     c = contracts[0]
     assert len(c['returns']) == 3 and len([f for f in c['returns'] if f['display_only']]) == 2
-    assert all(f['source_data_type_omitted'] for f in c['fields'])
+    from fox.forms_behavior_plan import _source_objects
+    _, properties = _source_objects(args[0], args[1])
+    for field in c['fields']:
+        declared = properties[field['source_item_id']].get('DataType')
+        assert field['source_data_type_omitted'] == (not declared)
+        assert not declared or declared.upper() in {'CHAR', 'VARCHAR2'}
     assert c['typed_lookup']['source_event'] == 'POST-CHANGE'
     assert 'WHEN-CREATE-RECORD' in {u['source_event'] for u in c['unexecuted_source_events']}
     assert args[-1]['gaps'] # ordinary unsupported LOV callers remain visible

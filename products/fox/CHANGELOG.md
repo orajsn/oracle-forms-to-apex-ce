@@ -200,6 +200,17 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.0] - 2026-11-22
+
+### [fix] Preserve lookup choices when an uploaded form has several database blocks
+
+When a record group has no item bind, FOX uses the source LOV callers to
+identify the owning rendered block. A unique caller can open its shared row
+editor even when Forms2XML supplies complete block metadata. Existing individual
+choice pages stay available. Route and companion selections apply to the
+selected synthetic row and its saved projection. Ambiguous callers and missing
+field bindings remain visible for review.
+
 ## [0.56.0] - 2026-11-22
 
 ### [feature] Open a related form in the same application

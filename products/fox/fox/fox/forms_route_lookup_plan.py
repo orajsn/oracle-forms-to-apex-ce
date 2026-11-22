@@ -1,4 +1,4 @@
-"""Source-proof optional multi-column choosers for omitted caller blocks.
+"""Source-proof optional multi-column choosers for identified caller blocks.
 
 This is a session-draft contract, never an original table mapping or permission
 to execute the caller's other events. Normal reference-query/LOV receipts remain
@@ -19,6 +19,7 @@ from .forms_understanding_packet import _build, generation_sources
 from .forms_route_lookup_typed import compile_typed_lookup
 
 SCOPE = 'fox-source-row-lookup-contract-v1'
+OPTIONAL_CALLER_GAPS = frozenset({'LOV_RETURN_CALLER_BLOCK', 'LOV_RETURN_VALIDATE_FROM_LIST_REQUIRED'})
 
 
 def _need(condition, reason):
@@ -159,7 +160,7 @@ def _policy(block, caller, targets, objects, props, units, chunks):
 
 def _contract(group, lov, caller, objects, props, trace, units, texts, source_binding):
     block = objects[caller['block_id']]
-    _need(not any(b['source_block_id'] == block['id'] for b in trace['blocks']), 'CALLER_ALREADY_MAPPED')
+    rendered = [b for b in trace['blocks'] if b['source_block_id'] == block['id']]
     bp, cp = props[block['id']], props[caller['id']]
     source_table = bp.get('QueryDataSourceName', '').upper()
     groups._identifier(source_table)
@@ -200,6 +201,15 @@ def _contract(group, lov, caller, objects, props, trace, units, texts, source_bi
     _need(len({t['source_item_id'] for t in targets}) == len(columns) and
           {t['source_column'] for t in targets} == set(names), 'COMPLETE_DISTINCT_RETURN_MAPPING_REQUIRED')
     caller_field = _one([t for t in targets if t['source_item_id'] == caller['id']], 'CALLER_NOT_A_RETURN_TARGET')
+    if rendered:
+        host = _one(rendered, 'CALLER_BLOCK_NOT_UNIQUE')
+        _need(host['classification'] == 'database' and host['source_module_id'] == caller['module_id'],
+              'CALLER_PROVIDER')
+        for target in targets:
+            field = _one([f for f in host['items'] if f['source_item_id'] == target['source_item_id']],
+                         'RETURN_ITEM_NOT_RENDERED')
+            _need(field['source_name'] == target['source_name'] and field['data_type'] == 'VARCHAR2',
+                  'RETURN_ITEM_TYPE_MISMATCH')
     _policy(block, caller, targets, objects, props, units, texts)
     omitted = []
     for unit in units:
@@ -253,7 +263,7 @@ def compile_row_lookups(documents, packet, chunks, trace, files, group_receipt, 
         for group in group_receipt['generated_operations']:
             for lov in group['associated_lovs']:
                 if not any(g['source_unit_id'] == group['source_unit_id'] and g['source_lov_id'] == lov['source_lov_id']
-                           and g['reason'] == 'LOV_RETURN_CALLER_BLOCK' for g in lov_receipt['gaps']):
+                           and g['reason'] in OPTIONAL_CALLER_GAPS for g in lov_receipt['gaps']):
                     continue
                 callers = [o for o in objects.values() if o['kind'] == 'Item' and o['module_id'] == group['source_module_id']
                            and props[o['id']].get('LovName', '').upper() == lov['source_lov_name'].upper()]

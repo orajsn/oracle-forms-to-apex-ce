@@ -1,10 +1,10 @@
 {
-  "version": "0.56.0",
+  "version": "0.57.0",
   "released_on": "2026-11-22",
-  "title": "Open related modules in one generated application",
+  "title": "Use record-group choices from the uploaded form",
   "changes": [
-    "A source push button with a single literal CALL_FORM or OPEN_FORM can open a uniquely identified module overview.",
-    "Repeated block names include the owning module. The gap view identifies missing modules and pending Forms call behavior."
+    "Use the source list-of-values callers to resolve a lookup in a module with several database blocks.",
+    "Open the shared synthetic row editor from a structurally mapped source block while retaining the existing individual choices."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
