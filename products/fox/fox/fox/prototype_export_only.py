@@ -167,13 +167,30 @@ def _raw(path):
     return path.read_bytes()
 
 
+def _compiler_evidence_dir(directory):
+    """Keep the full content-addressed log name on Windows with deep data roots."""
+    directory = Path(directory)
+    if os.name == 'nt':
+        absolute = os.path.abspath(directory)
+        log_name = 'offline-' + '0' * 64 + '.log'
+        full_path = os.path.join(absolute, log_name)
+        path_units = len(full_path.encode('utf-16-le', errors='surrogatepass')) // 2
+        if not absolute.startswith('\\\\?\\') and path_units >= 260:
+            if absolute.startswith('\\\\'):
+                absolute = '\\\\?\\UNC\\' + absolute[2:]
+            else:
+                absolute = '\\\\?\\' + absolute
+            return Path(absolute)
+    return directory
+
+
 def validate_offline(raw, directory):
     """Real SQLcl /nolog syntax validation; never connects to Oracle."""
     from .prototype_initial_direct_read_scope import forbid_execution
     forbid_execution()
     from forms2apex.sqlcl import validate_apexlang
     files, sqlcl = _members(raw), _sqlcl_path()
-    directory = Path(directory)
+    directory = _compiler_evidence_dir(directory)
     if directory.is_symlink():
         raise OpafError('Unsafe offline validation storage.')
     directory.mkdir(exist_ok=True)
@@ -320,7 +337,7 @@ def _checked_validation(validation):
 def _validated_log(directory, validation):
     """Validate the actual retained compiler evidence, not just its digest field."""
     checked = _checked_validation(validation)
-    directory = Path(directory)
+    directory = _compiler_evidence_dir(directory)
     path = directory / ('offline-' + checked['validation_log_sha256'] + '.log')
     try:
         for item in (directory, path):

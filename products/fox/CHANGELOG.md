@@ -215,6 +215,12 @@ An earlier package stays bound to its own selection. A changed selection
 requires a new request. On completion the workbench refreshes availability
 and directs the operator back to the saved mapping result.
 
+### [fix] Retain compiler results in deep Windows project folders
+
+FOX now saves and verifies the full SHA-256-named SQLcl log even when its
+Windows path reaches 260 characters. An actual SQLcl run retained its log
+at a 287-character path. Reading a changed log still fails verification.
+
 ## [0.54.0] - 2026-11-22
 
 ### [feature] Save and reopen a row with multiple source-defined choices

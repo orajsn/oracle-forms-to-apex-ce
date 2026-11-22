@@ -3,6 +3,7 @@
 Real isolated SQLite/API/worker; installed compiler fixture is synthetic only.
 No live provider, SQLcl process, Oracle import or business acceptance is asserted.
 """
+import hashlib
 import shutil
 import sqlite3
 import uuid
@@ -12,13 +13,37 @@ from fastapi.testclient import TestClient
 
 from fox import forms_facts, xml_mapping_job as jobs
 from fox.app import create_app
-from fox.prototype_export_only import _members
+from fox.opaf import OpafError
+from fox.prototype_export_only import _compiler_evidence_dir, _members, _validated_log
+from fox.prototype_pipeline import _save_bytes_once
 from fox.worker import process_one
 from test_xml_mapping import source
 from test_xml_mapping_web import (
     ORIGIN, connection, installed_compiler, login, new_project,
     no_external_actions, settings, upload,
 )
+
+
+def test_deep_project_retains_and_rechecks_compiler_log(tmp_path):
+    raw = b'Validation successful.\n'
+    digest = hashlib.sha256(raw).hexdigest()
+    proof = dict(passed=True, return_code=0, connection_mode='/nolog',
+                 sqlcl_version='26.1', validation_log_sha256=digest)
+    filename = 'offline-' + digest + '.log'
+    directory = tmp_path
+    while len(str(directory / filename)) < 275:
+        directory /= 'another-project-level'
+    storage = _compiler_evidence_dir(directory)
+    storage.mkdir(parents=True, exist_ok=True)
+    path = storage / filename
+    try:
+        assert _save_bytes_once(path, raw) == digest
+        assert _validated_log(directory, proof) == proof
+        path.write_bytes(b'Changed compiler log.\n')
+        with pytest.raises(OpafError):
+            _validated_log(directory, proof)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def _files(directory):
