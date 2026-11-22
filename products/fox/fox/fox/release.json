@@ -1,10 +1,9 @@
 {
-  "version": "0.57.0",
-  "released_on": "2026-11-22",
-  "title": "Use record-group choices from the uploaded form",
+  "version": "0.57.1",
+  "released_on": "2026-11-23",
+  "title": "Protect edits when reopening a saved row",
   "changes": [
-    "Use the source list-of-values callers to resolve a lookup in a module with several database blocks.",
-    "Open the shared synthetic row editor from a structurally mapped source block while retaining the existing individual choices."
+    "A saved-row preview checks its selected revision and any edits to the label or editable fields before creating a draft. A changed preview shows a recovery message."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

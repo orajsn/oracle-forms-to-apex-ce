@@ -192,6 +192,13 @@ def action_code(primary, bundle, page, action, choice_index=0):
         code += f"if :P{page}_OPEN is null or not regexp_like(:P{page}_OPEN,'^[A-F0-9]{{32}}$') or :P{page}_SREV is null or not regexp_like(:P{page}_SREV,'^[0-9]{{1,12}}$') then raise_application_error(-20031,'Select a saved row from this application.'); end if;\n"
         code += f"select REVISION,ROW_LABEL,{cols} into l_saved_revision,l_label,{local} from {saved} where {_saved_row(page)} for update nowait;\n"
         code += f"if l_saved_revision<>to_number(:P{page}_SREV) then raise_application_error(-20031,'Saved row changed. Select it again.'); end if;\n"
+        # A saved list entry is only a preview, but its permitted input controls
+        # can still be edited. Never replace those submitted values silently
+        # with the locked saved projection when creating the session draft.
+        checks = [native_buffer._parent_match('l_label', f':P{page}_LABEL')]
+        checks += [native_buffer._parent_match(f"l_f{f['slot']}", f':P{page}_F{f["slot"]}') for f in c['fields'] if f['direct_edit_allowed']]
+        code += "select count(*) into l_count from dual where " + ' and '.join(checks) + ';\n'
+        code += "if l_count<>1 then raise_application_error(-20031,'Saved preview inputs changed. Copy your edits, select the saved row again, Reopen it, then apply your edits to the draft. Nothing was reopened.'); end if;\n"
         code += f"select count(*) into l_count from {table} where {route._owner()};\nif l_count>=100 then raise_application_error(-20031,'Discard an older session draft first.'); end if;\n"
         code += 'l_uuid:=rawtohex(sys_guid());\n'
         code += f"insert into {table}(APP_ID,SESSION_ID,OWNER_NAME,ROW_UUID,ROW_LABEL,REVISION,SAVED_UUID,SAVED_REVISION,{cols}) values(to_number(v('APP_ID')),v('APP_SESSION'),v('APP_USER'),l_uuid,l_label,0,:P{page}_OPEN,l_saved_revision,{local});\n"
@@ -267,7 +274,7 @@ def _load(c, b, fields, names, page, *, choice_index=None):
     sql = f"begin\n{route._auth()}if :REQUEST is null then\n:P{page}_ROW_DISPLAY:=:P{page}_ROW; :P{page}_SESSION_OWNER:=v('APP_USER');\n"
     if not choosing:
         sql += f"if :P{page}_ROW is null then\nif :P{page}_OPEN is not null then\n"
-        sql += f"select ROW_LABEL,{cols},REVISION into :P{page}_LABEL,{into},:P{page}_SREV from {names['saved_table']} where {_saved_row(page)};\nelse\n:P{page}_LABEL:=null; :P{page}_SREV:=null;\n"
+        sql += f"select ROW_LABEL,{cols} into :P{page}_LABEL,{into} from {names['saved_table']} where {_saved_row(page)} and REVISION=to_number(:P{page}_SREV);\nelse\n:P{page}_LABEL:=null; :P{page}_SREV:=null;\n"
         sql += ''.join(f':P{page}_F{f["slot"]}:=null;\n' for f in fields)
         sql += f'end if;\n:P{page}_REV:=null; return; end if;\n'
     else:
@@ -350,6 +357,7 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None):
             description = ('Create a separate draft, Keep permitted inputs, and choose values for this same revision-checked row. '
                            'List-validated fields accept declared chooser returns only. Save synthetic row persists to private app/user storage. '
                            'Select a saved row in the list, then Reopen selected saved row to edit it in this or a new session. '
+                           'Saved rows open as previews. Reopen before editing; changed preview inputs are rejected without creating a draft. '
                            'Keep changes before choosing or saving. Discard removes only the selected session draft; saved rows remain. '
                            'Original business writes, source commits, WHEN-CREATE-RECORD and other omitted events are not executed. '
                            'Only the displayed prototype projection is persisted; other source block fields and events remain unrepresented. '

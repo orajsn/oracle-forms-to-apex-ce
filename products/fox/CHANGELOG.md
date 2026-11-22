@@ -200,6 +200,20 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.1] - 2026-11-23
+
+### [fix] Protect edits made in a saved-row preview
+
+Reopening a synthetic rate now checks the selected saved revision and compares
+the submitted editable values with that saved row. A changed preview shows
+how to keep the edits. A matching preview opens a new session draft with all
+five mapped values.
+
+On an installed APEX 26.1.6 synthetic application, two saved rates reopened
+with their own values in a new session. A changed preview kept the submitted
+label and displayed a rejection. A stale tab could not overwrite a newer
+change, and the second rate retained its values and revision.
+
 ## [0.57.0] - 2026-11-22
 
 ### [fix] Preserve lookup choices when an uploaded form has several database blocks

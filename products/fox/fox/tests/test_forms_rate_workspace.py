@@ -126,6 +126,26 @@ def test_new_transactions_are_bounded_and_rollback_owned_atomic_writes(action,in
         assert "SESSION_ID=v('APP_SESSION')" in code
 
 
+def test_saved_preview_reopen_checks_inputs_under_lock_before_creating_a_draft():
+    c,b = compiled(typed=True)
+    code = native.action_code(c,b,7800,native.REOPEN)
+    assert code.index('for update nowait;') < code.index('from dual where') < code.index('l_uuid:=rawtohex(sys_guid())')
+    assert 'Copy your edits, select the saved row again, Reopen it, then apply your edits to the draft.' in code
+    assert 'Nothing was reopened.' in code
+    assert ':P7800_LABEL:=' not in code and ':P7800_F1:=' not in code
+    assert 'utl_raw.cast_to_raw(l_label),utl_raw.cast_to_raw(:P7800_LABEL)' in code
+    for f in c['fields']:
+        comparison = f"utl_raw.cast_to_raw(l_f{f['slot']}),utl_raw.cast_to_raw(:P7800_F{f['slot']})"
+        assert (comparison in code) == f['direct_edit_allowed']
+    result = native.render_rate_workspace(c,b,7800)
+    editor = result['pages'][0]['text'].decode()
+    assert 'Saved rows open as previews. Reopen before editing' in editor
+    load = native._load(c,b,result['metadata']['draft_fields'],result['metadata'],7800)
+    preview, = re.findall(r'select ROW_LABEL,.*? from FOX_WS_.*?;',load)
+    assert 'and REVISION=to_number(:P7800_SREV)' in preview
+    assert 'into :P7800_LABEL,' in preview and ',:P7800_SREV from' not in preview
+
+
 @pytest.mark.parametrize('mutation',['source','slot','mapping','type','vfl','hash','overlap'])
 def test_tampered_or_aliased_companions_fail_closed(mutation):
     c,b = deepcopy(compiled())
@@ -149,6 +169,7 @@ class SqlBoundary:
         self.fields = self.m['draft_fields']
         self.context = {'APP_ID':'42','APP_SESSION':'314159','APP_USER':'TESTER'}
         self.db = sqlite3.connect(path)
+        self.db.executescript("create temp table dual (DUMMY text); insert into dual values ('X');")
         for name,n,fn in [
             ('v',1,lambda k:self.context.get(k)),('to_number',1,lambda x:int(x) if x is not None else None),
             ('to_char',-1,lambda x,*_:str(x) if x is not None else None),
@@ -268,16 +289,84 @@ class SqlBoundary:
             self.db.execute('release action')
             return False
 
-    def reopen(self,saved,revision):
+    def reopen(self,saved,revision,**submitted):
         code = self.code(native.REOPEN)
         p = {'P7800_OPEN':saved,'P7800_SREV':str(revision),'l_uuid':self.uuid()}
         select = re.search(r'select (REVISION,ROW_LABEL,.*?) into (.*?) from (.*?) where (.*?) for update nowait;',code,re.S)
         values = self.run('select '+select[1]+' from '+select[3]+' where '+select[4],p).fetchall()
         if len(values) != 1 or values[0][0] != revision: return False
         p.update(zip(select[2].split(','),values[0]))
+        p['P7800_LABEL'] = p['l_label']
+        p.update({'P7800_F'+str(f['slot']):p['l_f'+str(f['slot'])] for f in self.c['fields'] if f['direct_edit_allowed']})
+        p.update({'P7800_'+key:value for key,value in submitted.items()})
+        check = re.search(r'select count\(\*\) into l_count (from dual where .*?);',code,re.S)[1]
+        if self.run('select count(*) '+check,p).fetchone()[0] != 1: return False
         insert, = re.findall(r'insert into FOX_WD_.*?;',code,re.S)
         self.run(insert,p)
         return p['l_uuid']
+
+
+@pytest.mark.parametrize('field,value',[
+    ('LABEL','changed'),('LABEL','one '),('LABEL',None),
+    ('F1','changed'),('F1','r1'),('F1','R1 '),('F1',None),
+])
+def test_changed_saved_preview_rejects_without_new_draft_or_changes_to_either_row(field,value):
+    h = SqlBoundary()
+    h.seed()
+    a,b = h.create('one'),h.create('two')
+    saved = []
+    for row,choice in ((a,0),(b,-1)):
+        for rev,index in enumerate((0,1)):
+            assert h.apply(row,rev,h.choices(row,rev,index)[choice][-1],index)
+        saved.append(h.save(row,2))
+    assert all(saved) and saved[0] != saved[1]
+    before_b = h.values(b)
+    before_drafts = h.db.execute('select * from '+h.m['draft_table']+' order by ROW_UUID').fetchall()
+    before_saved = h.db.execute('select * from '+h.m['saved_table']+' order by SAVED_UUID').fetchall()
+    submitted = {field:value}
+    assert not h.reopen(saved[0],0,**submitted)
+    assert h.db.execute('select * from '+h.m['draft_table']+' order by ROW_UUID').fetchall() == before_drafts
+    assert h.db.execute('select * from '+h.m['saved_table']+' order by SAVED_UUID').fetchall() == before_saved
+    # Unchanged previews may deliberately create separate views of the same row.
+    first,second = h.reopen(saved[0],0),h.reopen(saved[0],0)
+    assert first and second and first != second
+    assert h.values(first)[4:] == h.values(second)[4:] == h.values(a)[4:]
+    assert h.values(b) == before_b
+    assert h.db.execute('select * from '+h.m['saved_table']+' order by SAVED_UUID').fetchall() == before_saved
+
+
+def test_reopen_preview_comparison_treats_two_nulls_as_equal():
+    h = SqlBoundary()
+    h.seed()
+    a = h.create('one')
+    for rev,index in enumerate((0,1)):
+        assert h.apply(a,rev,h.choices(a,rev,index)[0][-1],index)
+    saved = h.save(a,2)
+    # Exercise the null-safe comparison independently of required-value Save
+    # validation, using a synthetic retained projection with a null caller.
+    h.db.execute('update '+h.m['saved_table']+' set F001=null where SAVED_UUID=?',(saved,))
+    assert h.reopen(saved,0,F1=None)
+    assert not h.reopen(saved,0,F1='R1')
+
+
+def test_saved_preview_load_rejects_stale_link_and_refreshes_only_from_selected_revision():
+    h = SqlBoundary()
+    h.seed()
+    a = h.create('one')
+    for rev,index in enumerate((0,1)):
+        assert h.apply(a,rev,h.choices(a,rev,index)[0][-1],index)
+    saved = h.save(a,2)
+    load = native._load(h.c,h.b,h.fields,h.m,7800)
+    query = re.search(r'select (ROW_LABEL,.*?) into .*? from (FOX_WS_.*?) where (.*?);',load,re.S)
+    statement = 'select '+query[1]+' from '+query[2]+' where '+query[3]
+    params = {'P7800_OPEN':saved,'P7800_SREV':'0'}
+    assert h.run(statement,params).fetchall() == [('one','R1','A','B','S1',None)]
+    assert h.keep(a,3,label='updated') and h.save(a,4) == saved
+    # Refreshing the original signed link cannot silently adopt the new revision.
+    assert h.run(statement,params).fetchall() == [] and not h.reopen(saved,0)
+    params['P7800_SREV'] = '1'
+    assert h.run(statement,params).fetchall() == [('updated','R1','A','B','S1',None)]
+    assert h.reopen(saved,1)
 
 
 @pytest.mark.parametrize('renamed',[False,True])
