@@ -23,6 +23,7 @@ from .forms_relation_plan import build_relation_plan
 from .forms_assignment_plan import build_assignment_plan
 from .forms_policy_plan import build_policy_plan
 from .forms_order_rules import apply_order_rules
+from .forms_module_navigation import apply_module_navigation
 from .forms_buffer_plan import build_buffer_plan
 from .forms_lookup_plan import build_lookup_plan
 from .forms_guarded_query import apply_guarded_queries
@@ -181,10 +182,13 @@ def mapping_catalog():
          "Recalculate the selected draft's companion fields when keeping a changed input.",
          "The generated editor uses the private synthetic lookup table. It validates a typed value on explicit submission."),
     ]
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 23,
+    rules.append(("fox.navigation.module-button", "One complete push-button event opens a uniquely named project module.",
+                  "Open the module overview and its generated block pages.",
+                  "Original startup, window, return, shared state and transaction behavior require separate bindings."))
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 24,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
-                   for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py",
+                   for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_rate_choices.py", "forms_rate_workspace.py", "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
@@ -886,6 +890,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             {k: op[k] for k in ('source_block_id', 'source_caller_item_id', 'page_file', 'chooser_file')}
             for op in row_lookups]
         files['fox-package/source-to-page.json'] = _bytes(trace)
+    files, module_navigation = apply_module_navigation(documents, packet, chunks, trace, files)
+    navigation_member = "fox-package/module-navigation.json"
+    files[navigation_member] = _bytes(module_navigation)
+    navigation_actions = {op["source_unit_id"]: op for op in module_navigation["operations"]}
+    navigation_gaps = {gap["source_unit_id"]: gap for gap in module_navigation["gaps"]}
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -1042,6 +1051,19 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             if op.get('draft_wiring'):
                 row['reason'] = ('item_entry_draft_callable' if op['draft_wiring']=='routine'
                                  else 'item_entry_draft_connected')
+        if uid in navigation_actions or uid in navigation_gaps:
+            binding = navigation_actions.get(uid) or navigation_gaps[uid]
+            if (binding["source_unit_sha256"] != row["source_unit_sha256"]
+                    or binding["source_owner_id"] != row["source_owner_id"]):
+                raise ValueError("Module navigation differs from the source event.")
+            claimed = row["status"] == "generated_wired_adapted" or row.get("encoding_status") == "generated_unwired"
+            if uid in navigation_actions:
+                if claimed:
+                    raise ValueError("Module navigation overlaps another generated mapping.")
+                row.update(reason="module_navigation_partly_connected", module_target=binding["literal_target"])
+            elif not claimed:
+                row.update(reason="module_navigation_pending", module_target=binding["literal_target"],
+                           module_gap=binding["reason"])
     scalar_events, scalar_sql = build_event_callables(documents, packet, chunks, coverage, project_id)
     if scalar_sql:
         files[SCALAR_EVENT_CODE] = scalar_sql
@@ -1119,6 +1141,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in navigation_actions:
+            row.update(rule_id="fox.navigation.module-button", target=deepcopy(navigation_actions[uid]))
         if uid in scalar_events:
             row.update(rule_id="fox.event.scalar-procedure", target=scalar_events[uid])
         if uid in entry_targets:
@@ -1221,7 +1245,9 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "applied_rule_ids": applied, "source_parser_rebuilt": True,
         "ai_review": {"performed": False, "approval_recorded": False, "origin": "none"},
         "format_validated": False, "validation": None, "native_apex_generated": True,
-        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"]),
+        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"] or navigation_actions),
+        "module_navigation": {"member": navigation_member, "sha256": _sha(files[navigation_member]),
+                              "links": len(navigation_actions), "gaps": len(module_navigation["gaps"])},
         "structural_coverage": deepcopy(native_plan["coverage"]),
         "behavior_coverage": {"total": len(coverage), "counts": counts},
         "context_summary": context_summary,

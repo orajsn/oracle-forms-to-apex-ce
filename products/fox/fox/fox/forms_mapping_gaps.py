@@ -67,7 +67,32 @@ def classify_gaps(packet, chunks, coverage):
             code = _mask_code(semantic)
         except UnsupportedBehavior:
             code = ''
-        if reason == 'scalar_event_host_pending':
+        if reason == 'module_navigation_partly_connected':
+            category = 'engine_context'
+            message = 'A button opens the generated pages for ' + row['module_target'] + '.'
+            action = 'Verify startup, return navigation, shared values and transaction behavior for the original call.'
+        elif reason == 'module_navigation_pending':
+            target = row.get('module_target') or 'the target form'
+            cause = row.get('module_gap')
+            if cause == 'MODULE_NAV_TARGET_SOURCE_ABSENT':
+                category = 'missing_source'
+                message = 'The button names form ' + target + ', which is absent from this project.'
+                action = 'Add the named Forms module to the project and generate a package for the new source selection.'
+            elif cause == 'MODULE_NAV_TARGET_SOURCE_AMBIGUOUS':
+                category = 'review_required'
+                message = 'More than one supplied module is named ' + target + '.'
+                action = 'Select the intended source version for that module and generate again.'
+            elif cause in {'MODULE_NAV_TARGET_HAS_NO_RENDERED_BLOCKS', 'MODULE_NAV_CALLER_BLOCK_NOT_RENDERED'}:
+                category = 'engine_context'
+                message = 'The form action requires a generated page for both its caller and its destination.'
+                action = 'Check block coverage for the calling form and ' + target + '.'
+            elif cause == 'MODULE_NAV_OPERATION_CAPACITY':
+                message = 'This package reached the limit for generated module buttons.'
+                action = 'Review the module-navigation receipt for the affected controls.'
+            else:
+                message = 'This event contains a form call that FOX could not bind to a single push-button destination.'
+                action = 'Review the source event, its arguments and the module-navigation receipt.'
+        elif reason == 'scalar_event_host_pending':
             category = 'engine_context'
             message = 'The complete trigger body is available as a typed PL/SQL procedure in scalar-events.sql.'
             action = 'Use its source-linked parameter list in the mapping ledger to bind the event host, current row and trusted Forms context.'

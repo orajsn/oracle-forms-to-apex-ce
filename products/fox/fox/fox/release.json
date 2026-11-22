@@ -1,10 +1,10 @@
 {
-  "version": "0.55.0",
+  "version": "0.56.0",
   "released_on": "2026-11-22",
-  "title": "Continue conversion with supporting definitions",
+  "title": "Open related modules in one generated application",
   "changes": [
-    "Include selected SQL, package specifications, package bodies and PLD as local declaration evidence alongside Forms XML.",
-    "Review declaration availability on each saved run and refresh the conversion state after the worker finishes."
+    "A source push button with a single literal CALL_FORM or OPEN_FORM can open a uniquely identified module overview.",
+    "Repeated block names include the owning module. The gap view identifies missing modules and pending Forms call behavior."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -200,6 +200,16 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.56.0] - 2026-11-22
+
+### [feature] Open a related form in the same application
+
+FOX connects a push button containing one literal CALL_FORM or OPEN_FORM to
+the named module's generated overview. The overview lists the actual block
+pages. Repeated block names include the owning module. A missing named form
+appears in the gap review. The source action stays partly connected until
+startup, return, shared state and transaction behavior are verified.
+
 ## [0.55.0] - 2026-11-22
 
 ### [feature] Continue mapping after adding supporting source
