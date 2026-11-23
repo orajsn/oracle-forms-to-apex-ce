@@ -94,7 +94,10 @@ def test_normal_generation_connects_bounded_drafts_and_preserves_source_event_st
         assert summary['reset_on_manual_off'] is True
         assert target['page_file'] in report['apex_members']
         assert target['draft_table'].encode() in files['fox-package/supporting-schema.sql']
-        assert f"region checkbox-entry-{target['page_id']} (".encode() in files[group['report_file']]
+        report_page = files[group['report_file']]
+        assert f"column FOX_EDIT_{target['page_id']} (".encode() in report_page
+        assert b'region checkbox-entry-' not in report_page
+        assert target['entry_mode'] == 'source_report_row'
         assert 'source_event_proof' not in summary and 'checked_value' not in summary
 
 
@@ -117,8 +120,12 @@ def test_source_entry_region_and_existing_links_are_preserved():
     original = files[path]
     descriptor = mapping._attach_checkbox_drafts(*args)
     assert fragment.encode() in files[path]
-    assert original[:-2] in files[path]
-    assert files[path].count(b'region checkbox-entry-') == 1
+    assert b'region checkbox-entry-' not in files[path]
+    assert files[path].count(b'        type: interactiveReport\n') == 1
+    assert b'column FOX_EDIT_8100 (' in files[path]
+    for column in trace['blocks'][0]['items']:
+        declaration = f"        column {column['column']} (\n".encode()
+        assert declaration in original and declaration in files[path]
     assert descriptor['generated_group_count'] == 1
 
 
@@ -186,3 +193,121 @@ def test_checkbox_implementation_fingerprints_cover_both_actual_source_files():
     for module in (forms_checkbox_group, forms_checkbox_workspace):
         path = Path(module.__file__)
         assert catalog['implementation_sources'][path.name] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _custom_report(args, projection, suffix=''):
+    block = args[-2]['blocks'][0]
+    table = block['table_name']
+    path = block['report_file']
+    text = args[-1][path].decode()
+    original = f'            type: tableView\n            tableName: {table}\n'
+    assert text.count(original) == 1
+    columns = ['FOX_ROW_ID'] + [item['column'] for item in block['items']]
+    sql = projection(columns) + '\nfrom ' + table + ' r' + suffix
+    formatted = '\n'.join('                ' + line for line in sql.splitlines())
+    args[-1][path] = text.replace(original, '            type: sqlQuery\n            sqlQuery:\n'
+                                 '                \x60\x60\x60sql\n' + formatted + '\n                \x60\x60\x60\n').encode()
+    return path
+
+
+def test_link_uses_exact_filtered_row_and_retains_display_expression_and_order():
+    from textwrap import dedent
+    from test_forms_checkbox_workspace import database
+
+    args = prepare()
+    block = args[-2]['blocks'][0]
+    suffix = '\nwhere r.FOX_ROW_ID > 10\norder by r.FOX_ROW_ID desc'
+    def projection(cols):
+        return 'select ' + ', '.join('r.' + c for c in cols[:-1]) + ', upper(r.' + cols[-1] + ') as ' + cols[-1]
+    path = _custom_report(args, projection, suffix)
+    original = args[-1][path].decode()
+    relation = '    region secondary-action (\n        name: Related rows\n    )\n'
+    args[-1][path] = native_record_groups._append(original, relation).encode()
+    result = mapping._attach_checkbox_drafts(*args)
+    assert result['generated_group_count'] == 1 and not result['gaps']
+    report = args[-1][path].decode()
+    assert relation in report and 'P8100_ID0: "#FOX_ROW_ID#"' in report
+    assert 'P8100_TOKEN: "#FOX_TOKEN_8100#"' in report
+    sql = dedent(re.search(r'\x60{3}sql\n(.*?)\n *\x60{3}', report, re.S)[1])
+    assert sql.endswith(suffix) and projection(['FOX_ROW_ID'] + [i['column'] for i in block['items']]) in sql
+    db = database()
+    fields = [i['column'] for i in block['items']]
+    table = block['table_name']
+    db.execute('create table ' + table + '(FOX_ROW_ID integer,' + ','.join(fields) + ')')
+    db.executemany('insert into ' + table + ' values(?,?,?,?)',
+                   [(10,'Y','Y','N'),(20,'N','Y','N'),(30,'Y','N','N'),(40,None,'N','Y'),(50,'X','Y','Y')])
+    sql = sql.replace('utl_raw.cast_to_raw', 'CAST_TO_RAW')
+    records = db.execute(sql).fetchall()
+    assert [r[0] for r in records] == [50,40,30,20]
+    assert all(r[-3:-1] == (None,None) and r[-1].startswith('Unavailable') for r in records[:2])
+    assert all(len(r[-3]) == 64 and r[-2:] == ('Open draft','Available') for r in records[2:])
+    assert records[2][-3] != records[3][-3]
+
+
+@pytest.mark.parametrize('projection,suffix', [
+    (lambda c: 'select ' + ', '.join(c[1:]), ''),
+    (lambda c: 'select 0 as FOX_ROW_ID, ' + ', '.join(c[1:]), ''),
+    (lambda c: 'select count(*) as FOX_ROW_ID, ' + ', '.join(c[1:]), ''),
+    (lambda c: 'select FOX_ROW_ID, count(*) as ' + c[1] + ', ' + ', '.join(c[2:]), ''),
+    (lambda c: 'select ' + ', '.join(c), ' group by FOX_ROW_ID'),
+])
+def test_report_action_does_not_bind_an_unproved_row(projection, suffix):
+    args = prepare()
+    path = _custom_report(args, projection, suffix)
+    before = args[-1][path]
+    result = mapping._attach_checkbox_drafts(*args)
+    assert result['generated_group_count'] == 0 and result['gap_count'] == 1
+    assert before == args[-1][path]
+    assert not any('fox_checkbox_8100.apx' in n for n in args[-1])
+
+
+def test_two_independent_controllers_link_from_one_report():
+    raw = documents()[0][1]
+    root = ET.fromstring(raw)
+    block = root.find('Block')
+    for item in list(block.findall('Item')):
+        duplicate = ET.fromstring(ET.tostring(item).replace(b'SCHEDULE',b'BACKUP')
+                                  .replace(b'DAY_A',b'ALT_A').replace(b'DAY_B',b'ALT_B'))
+        block.append(duplicate)
+    args = prepare([('delivery.xml',ET.tostring(root))])
+    d = mapping._attach_checkbox_drafts(*args)
+    assert d['generated_group_count'] == 2 and not d['gaps']
+    text = args[-1][args[-2]['blocks'][0]['report_file']].decode()
+    for g in d['groups']:
+        page = g['page_id']
+        assert f'P{page}_TOKEN: "#FOX_TOKEN_{page}#"' in text
+        assert text.count(f'column FOX_EDIT_{page} (') == 1
+    assert text.count('        type: interactiveReport\n') == 1
+
+
+def test_existing_display_projection_and_checkbox_action_share_default_report():
+    from test_forms_display_projection import SOURCE
+    root = ET.fromstring(SOURCE)
+    block = root.find('Block')
+    for item in ET.fromstring(documents()[0][1]).findall('Block/Item'):
+        block.append(item)
+    raw, result = mapping.generate_xml_package([('accounts.xml',ET.tostring(root))], 'display-checkbox',
+                                                'Account schedules',POLICY_ID)
+    files = mapping._members(raw)
+    projections = json.loads(files[result['metadata']['saved_display_fields']['member']])['applied']
+    assert len(projections) == 1
+    entry, = result['checkbox_drafts']['groups']
+    report = files[json.loads(files['fox-package/source-to-page.json'])['blocks'][0]['report_file']].decode()
+    assert 'displayColumn ' + projections[0]['target_column'] in report
+    assert f"displayColumn FOX_EDIT_{entry['page_id']}" in report
+    assert 'region checkbox-entry-' not in report
+
+
+def test_oversize_row_query_keeps_labelled_all_rows_fallback():
+    args = prepare()
+    # This valid base report fits the original SQL budget. The additional
+    # source fingerprint and admission checks cannot share that budget.
+    path = _custom_report(args, lambda cols: 'select ' + ', '.join(cols),
+                          '\nwhere ' + ' and '.join('r.FOX_ROW_ID > 0' for _ in range(1430)))
+    original = args[-1][path]
+    d = mapping._attach_checkbox_drafts(*args)
+    assert d['generated_group_count'] == 1 and not d['gaps']
+    receipt = json.loads(args[-1][d['member']])
+    assert receipt['groups'][0]['native_target']['entry_mode'] == 'all_rows_selector_at_query_limit'
+    assert original[:-2] in args[-1][path]
+    assert b'All saved rows for checkbox drafts (separate from the report filter)' in args[-1][path]

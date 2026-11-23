@@ -764,7 +764,7 @@ def _attach_checkbox_drafts(documents, packet, chunks, trace, files):
                for entry in packet['sources'] for obj in entry['facts']['objects']):
         return None
     from .forms_checkbox_group import build_checkbox_groups
-    from .forms_checkbox_workspace import render_checkbox_workspace
+    from .forms_checkbox_workspace import attach_report_action, render_checkbox_workspace
 
     receipt = build_checkbox_groups(documents, packet, chunks, trace)
     occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
@@ -806,7 +806,21 @@ def _attach_checkbox_drafts(documents, packet, chunks, trace, files):
                        for name, raw in files.items() if name.endswith('.apx'))):
             raise ValueError('Checkbox draft conflicts with an existing page or table.')
         # Validate every identity before changing the package; entry links are additive.
-        files[source] = native_record_groups._append(source_text, rendered['entry_fragment']).encode()
+        block = next(b for b in trace['blocks'] if b['source_block_id'] == group['source_block_id'])
+        try:
+            files[source] = attach_report_action(source_text, block, group, page).encode()
+        except ValueError as error:
+            if str(error) != 'CHECKBOX_WORKSPACE_RECORD_QUERY_CAPACITY':
+                receipt['gaps'].append({**proof, 'reason': str(error)})
+                continue
+            # Preserve access to a previously eligible workspace when an extra
+            # report projection would exceed Oracle's generated SQL limit.
+            title = 'All saved rows for checkbox drafts (separate from the report filter)'
+            fragment = rendered['entry_fragment'].replace('Account checkbox session drafts', title, 1)
+            files[source] = native_record_groups._append(source_text, fragment).encode()
+            target['entry_mode'] = 'all_rows_selector_at_query_limit'
+        else:
+            target['entry_mode'] = 'source_report_row'
         files[pages[0]['page_file']] = pages[0]['text']
         schema += b'\n' + rendered['supporting_sql']
         occupied.add(page)

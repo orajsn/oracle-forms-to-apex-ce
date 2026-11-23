@@ -283,6 +283,120 @@ def _target(source, destination):
                     P{destination}_TOKEN: "&P{source}_TOKEN." }} }}'''
 
 
+def _admission_sql(g, alias):
+    admission = []
+    for field in _fields(g):
+        column = alias + '.' + field['column']
+        choices = ','.join("RAWTOHEX(STANDARD_HASH(" + _value(field[key]) + ",'SHA256'))" for key in ('checked_value', 'unchecked_value'))
+        admission.append(f"({column} is not null and RAWTOHEX(STANDARD_HASH({column},'SHA256')) in ({choices}))")
+    return ' and '.join(admission)
+
+
+def attach_report_action(text, block, group, page):
+    """Link from the current business row without replacing its existing actions."""
+    from textwrap import dedent
+    from forms2apex.native_display_projection import _show_column, _sql_query
+    from forms2apex.native_relations import _projection_columns
+
+    regions = list(re.finditer(r'^    region records \(\n.*?^    \)\n', text, re.M | re.S))
+    _need(len(regions) == 1, 'RECORD_REGION_UNAVAILABLE')
+    region = regions[0].group()
+    _need('        type: interactiveReport\n' in region, 'RECORD_REGION_UNAVAILABLE')
+    sources = list(re.finditer(r'^        source \{\n.*?^        \}', region, re.M | re.S))
+    _need(len(sources) == 1, 'RECORD_QUERY_UNAVAILABLE')
+    source = sources[0].group()
+    table = group['table_name']
+    _need(block['table_name'] == table and block['synthetic_key']['column'] == 'FOX_ROW_ID',
+          'RECORD_IDENTITY_UNAVAILABLE')
+    _need(region.count('        column FOX_ROW_ID (\n') == 1, 'RECORD_IDENTITY_UNAVAILABLE')
+    if source == ('        source {\n            location: localDatabase\n            type: tableView\n'
+                  f'            tableName: {table}\n        }}'):
+        alias = 'r'
+        names = ['FOX_ROW_ID'] + [f['column'] for f in block['items']]
+        for name in names:
+            groups._identifier(name)
+        projection = 'select ' + ', '.join(alias + '.' + n for n in names)
+        position = len(projection)
+        query = projection + f'\nfrom {table} {alias}'
+        trailing = ''
+    else:
+        match = re.fullmatch(r'        source \{\n            location: localDatabase\n            type: sqlQuery\n'
+                             r'            sqlQuery:\n                \x60{3}sql\n(.*?)\n                \x60{3}\n'
+                             r'((?:            pageItemsToSubmit: [A-Z0-9_, ]+\n)?)        \}', source, re.S)
+        _need(match is not None, 'RECORD_QUERY_UNAVAILABLE')
+        query, trailing = dedent(match[1]), match[2]
+        # Match the generated base-table report only. Keep the original SQL and
+        # its filters, ordering, display expressions and submitted items intact.
+        main_from = list(re.finditer(r'^from ([A-Z][A-Z0-9_]*)(?: (r))?$', query, re.M))
+        _need(query.startswith('select ') and len(main_from) == 1 and main_from[0][1] == table,
+              'RECORD_QUERY_UNAVAILABLE')
+        code = re.sub(r"'(?:[^']|'')*'", ' ', query)
+        _need(not re.search(r'\b(union|intersect|minus|group\s+by|having|connect\s+by|model)\b', code, re.I)
+              and not re.match(r'(?i)select\s+(?:distinct|unique)\b', query), 'RECORD_QUERY_UNAVAILABLE')
+        alias = main_from[0][2] or table
+        declared = re.findall(r'^        column ([A-Z][A-Z0-9_]*) \($', region, re.M)
+        position = main_from[0].start() - 1
+        projection = query[7:position].strip()
+        expressions = re.sub(r"'(?:[^']|'')*'", ' ', projection)
+        _need(not re.search(r'\b(?:count|sum|avg|min|max|listagg|stddev|variance)\s*\(', expressions, re.I),
+              'RECORD_IDENTITY_UNAVAILABLE')
+        slots = _projection_columns(projection, declared, row_alias=alias)
+        _need(declared[0] == 'FOX_ROW_ID' and slots[0] in ('FOX_ROW_ID', alias + '.FOX_ROW_ID'),
+              'RECORD_IDENTITY_UNAVAILABLE')
+    token, action = f'FOX_TOKEN_{page}', f'FOX_EDIT_{page}'
+    _need(all(f'        column {name} (\n' not in region for name in (token, action)), 'ROW_ACTION_COLLISION')
+    # The link text is blank on unsupported rows. A separate status column
+    # explains their admission without publishing a usable editor target.
+    status = f'FOX_STATUS_{page}'
+    _need(f'        column {status} (\n' not in region, 'ROW_ACTION_COLLISION')
+    valid = _admission_sql(group, alias)
+    extra = (f"case when {valid} then {_token(group, alias + '.')} end as {token}, "
+             f"case when {valid} then 'Open draft' end as {action}, "
+             f"case when {valid} then 'Available' else 'Unavailable: checkbox value outside the two mapped codes' end as {status}")
+    query = query[:position] + ', ' + extra + query[position:]
+    _need(len(query.encode()) <= 32767, 'RECORD_QUERY_CAPACITY')
+    region = region[:sources[0].start()] + _sql_query(query, trailing) + region[sources[0].end():]
+    anchor = '        savedReport primary (\n'
+    _need(region.count(anchor) == 1, 'PRIMARY_REPORT_UNAVAILABLE')
+    seq = max([int(n) for n in re.findall(r'^                sequence: (\d+)$', region, re.M)] or [0]) + 10
+    title = group['controller'].get('label') or group['controller']['source_name']
+    groups._label(title)
+    columns = f'''        column {token} (
+            type: hidden
+            heading {{ heading: Row snapshot }}
+            layout {{ sequence: {seq} }}
+            source {{ dataType: STRING }}
+        )
+        column {action} (
+            type: link
+            heading {{ heading: {json.dumps(title + ' draft')} }}
+            layout {{ sequence: {seq + 10} }}
+            source {{ dataType: STRING }}
+            link {{
+                target: {{ page: {page}
+                    clearCache: {page}
+                    items: {{
+                        P{page}_ID0: "#FOX_ROW_ID#"
+                        P{page}_TOKEN: "#{token}#"
+                    }}
+                }}
+                linkText: "#{action}#"
+            }}
+        )
+        column {status} (
+            type: plainText
+            heading {{ heading: {json.dumps(title + ' availability')} }}
+            layout {{ sequence: {seq + 20} }}
+            source {{ dataType: STRING }}
+            security {{ escapeSpecialChars: true }}
+        )
+'''
+    region = region.replace(anchor, native_buffer._expand_groups(columns) + anchor, 1)
+    for column in (action, status):
+        region = _show_column(region, column)
+    return text[:regions[0].start()] + region + text[regions[0].end():]
+
+
 def render_checkbox_workspace(group, page):
     """Return one separately allocated page and an additive report entry region.
 
@@ -292,12 +406,7 @@ def render_checkbox_workspace(group, page):
     g = _checked(group)
     _page(g, page)
     source = g['report_page_id']
-    admission = []
-    for field in _fields(g):
-        column = 's.' + field['column']
-        choices = ','.join("RAWTOHEX(STANDARD_HASH(" + _value(field[key]) + ",'SHA256'))" for key in ('checked_value', 'unchecked_value'))
-        admission.append(f"({column} is not null and RAWTOHEX(STANDARD_HASH({column},'SHA256')) in ({choices}))")
-    status = "case when " + ' and '.join(admission) + " then 'Available' else 'Unavailable: NULL or other checkbox value; no draft can be opened.' end"
+    status = "case when " + _admission_sql(g, 's') + " then 'Available' else 'Unavailable: NULL or other checkbox value; no draft can be opened.' end"
     query = f"select s.FOX_ROW_ID FOX_SELECTED_ROW,{_token(g)} FOX_SOURCE_TOKEN,{status} FOX_DRAFT_STATUS from {g['table_name']} s order by s.FOX_ROW_ID"
     link = f'''        link {{ linkColumn: customTarget
             target: {{ page: {page}

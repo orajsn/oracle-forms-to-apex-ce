@@ -200,6 +200,16 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.8] - 2026-11-23
+
+### [improvement] Open checkbox drafts from the selected business row
+
+The saved report can show a draft action alongside the customer's displayed
+fields. Its filter, sort order, calculated reference and existing links are
+preserved. Each action uses the selected row and its snapshot. Rows with
+unsupported stored checkbox codes show the reason in the report. Exceptionally
+large queries retain a separately labelled all-rows selector.
+
 ## [0.57.7] - 2026-11-23
 
 ### [improvement] Keep dependent checkbox choices on the selected session draft

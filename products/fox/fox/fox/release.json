@@ -1,10 +1,10 @@
 {
-  "version": "0.57.7",
+  "version": "0.57.8",
   "released_on": "2026-11-23",
-  "title": "Keep dependent pickup day choices on the selected draft",
+  "title": "Open a schedule draft on the displayed business row",
   "changes": [
-    "A complete Forms checkbox trigger can enable or clear its dependent choices on a selected synthetic session draft.",
-    "The results list the affected fields and gaps. Original business-row saving and record-entry logic keep their separate status."
+    "A supported checkbox draft opens from the same report row as its displayed business fields. The report keeps its filters, order and existing actions.",
+    "The report shows whether the row's stored checkbox codes can open a draft. The internal row snapshot stays hidden."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

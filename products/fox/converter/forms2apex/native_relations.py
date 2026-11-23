@@ -112,7 +112,7 @@ def _originals(files, sources):
               and digests.get(row["sha256"]) == row["bytes"], "ORIGINAL_SOURCE_MISSING_OR_CHANGED")
 
 
-def _projection_columns(projection, columns):
+def _projection_columns(projection, columns, *, row_alias=None):
     """Check generated projection slots without treating literal text as SQL."""
     code = re.sub(r"'(?:[^']|'')*'", " ", projection)
     _need("'" not in code and not any(token in code for token in (";", "--", "/*", "*/"))
@@ -140,7 +140,7 @@ def _projection_columns(projection, columns):
     pieces.append(projection[start:].strip())
     _need(len(pieces) == len(columns), "REPORT_PROJECTION_COLUMNS_MISMATCH")
     for piece, column in zip(pieces, columns, strict=True):
-        _need(piece == column or re.fullmatch(r".+\s+as\s+" + re.escape(column), piece, re.I | re.S),
+        _need(piece == column or (row_alias is not None and piece == f"{row_alias}.{column}") or re.fullmatch(r".+\s+as\s+" + re.escape(column), piece, re.I | re.S),
               "REPORT_PROJECTION_COLUMNS_MISMATCH")
     return pieces
 
