@@ -175,6 +175,9 @@ def mapping_catalog():
         ("fox.query.saved-row-workspace", "A source-bound row editor and validated companion lists belong to the same block.",
          "Choose values on one row, save its mapped fields and reopen a durable synthetic record in a later session.",
          "Saved records belong to an application and user. Source business-table writes and unrelated source events require separate mappings."),
+        ("fox.row.stored-number", "An editable stored number on the same rendered block has a supported decimal picture and a verified input binding.",
+         "Edit the numeric field on the selected synthetic row and retain it through Save and Reopen.",
+         "The source picture and explicit bounds constrain the prototype field. The original database precision and posting logic require independent verification."),
         ("fox.event.scalar-procedure", "A complete scalar trigger assigns global or clock values, optionally guarded by record status or a numeric validation.",
          "Generate a PL/SQL procedure with explicit typed inputs and current-row outputs.",
          "The event host must supply the correct row, trusted Forms context and target field constraints. The procedure is available in scalar-events.sql."),
@@ -185,12 +188,12 @@ def mapping_catalog():
     rules.append(("fox.navigation.module-button", "One complete push-button event opens a uniquely named project module.",
                   "Open the module overview and its generated block pages.",
                   "Original startup, window, return, shared state and transaction behavior require separate bindings."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 24,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 25,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
-                                "forms_rate_choices.py", "forms_rate_workspace.py", "xml_supporting_inputs.py", "intake.py",
+                                "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py", "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -466,6 +469,7 @@ def _approval_interface_links(plans, inventory):
 
 def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns):
     from .forms_rate_choices import compile_rate_choices
+    from .forms_rate_numbers import compile_rate_numbers
     from .forms_rate_workspace import render_rate_workspace
     from .forms_route_lookup_native import render_row_lookup
     from .forms_route_lookup_plan import OPTIONAL_CALLER_GAPS, compile_row_lookups
@@ -481,6 +485,8 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
     anchors = Counter((c['source_module_id'], c['source_block_id']) for c in contracts)
     bundles = {c['contract_id']: compile_rate_choices(documents, packet, chunks, trace, files, groups, returns, c)
                for c in contracts if anchors[(c['source_module_id'], c['source_block_id'])] == 1}
+    number_plans = {c['contract_id']: compile_rate_numbers(documents, packet, chunks, trace, files, groups, returns, c)
+                    for c in contracts if bundles.get(c['contract_id'], {}).get('choices')}
     queries = {op['operation_id']: op for op in groups['generated_operations']}
     occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
     page = 8900
@@ -499,7 +505,11 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
             page += 1
         if page + span > 9900:
             raise ValueError('No native page range is available for the lookup editor.')
-        rendered = render_rate_workspace(contract, bundle, page) if choices else render_row_lookup(contract, page)
+        numbers = number_plans.get(contract['contract_id'])
+        if choices:
+            rendered = render_rate_workspace(contract, bundle, page, numbers=numbers if numbers['fields'] else None)
+        else:
+            rendered = render_row_lookup(contract, page)
         target = rendered['metadata']
         for component in rendered['pages']:
             if component['page_file'] in files or component['page_id'] in occupied:
@@ -595,6 +605,8 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                     existing[0]['shared_editor'] = {'page_file': op['page_file'], 'chooser_file': companion['chooser_file'],
                                                     'operation_id': companion['operation_id']}
                 lookup_pages.append(companion)
+            if numbers['fields'] or numbers['gaps']:
+                op['stored_numbers'] = numbers
         page += span
     returns['session_draft_table_writes'] = True
     return lookup_pages
@@ -1245,6 +1257,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         applied = sorted(set(applied) | {"fox.query.row-lookup-draft"})
     if any(op.get("durable_synthetic_save") for op in row_lookups):
         applied = sorted(set(applied) | {"fox.query.saved-row-workspace"})
+    if any(op.get("stored_numbers", {}).get("fields") for op in row_lookups):
+        applied = sorted(set(applied) | {"fox.row.stored-number"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
@@ -1278,7 +1292,10 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "saved_lookup_workspaces": [
             {"page_file": op["page_file"], "source_block_id": op["source_block_id"],
              "choices": 1 + len(op["native_target"]["companion_choices"]),
-             "saved_table": op["native_target"]["saved_table"], "customer_table_writes": False}
+             "saved_table": op["native_target"]["saved_table"], "customer_table_writes": False,
+             **({"stored_number_fields": [{"id": field["source_item_id"], "name": field["source_name"],
+                                           "column": field["column"]} for field in op["stored_numbers"]["fields"]],
+                 "stored_number_gaps": op["stored_numbers"]["gaps"]} if "stored_numbers" in op else {})}
             for op in row_lookups if op["kind"] == "source_optional_row_lookup" and op.get("durable_synthetic_save")],
         "original_read_adapters": {"embedded": original_reads, "enabled_by_default": False,
             "queries_executed_during_generation": False, "activation_changes_runtime_data_scope": original_reads},

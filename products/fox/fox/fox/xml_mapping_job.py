@@ -146,6 +146,9 @@ def checked_output(c, root, run, *, interface_csv=False):
     details['item_validation_summary'] = _item_validation_fields(metadata, ledger)
     details['synthetic_save_summary'] = _synthetic_save_fields(metadata, ledger)
     details['lookup_summary'] = _lookup_fields(metadata, ledger)
+    number_summary = _rate_number_summary(metadata, files)
+    if number_summary:
+        details['rate_numbers'] = number_summary
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     details['interface_summary'] = _interface_fields(metadata, files)
     if 'supporting_inputs' in metadata:
@@ -208,6 +211,59 @@ def _discrepancy_fields(metadata, ledger, gaps, files):
     # source/version consent, compiler proof and immutable catalog. Do not
     # reclassify an old saved report with a newer parser or mapping registry.
     return validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
+
+
+def _rate_number_summary(metadata, files):
+    """Read field notes from the retained package after byte verification."""
+    expected = {w['page_file']: w for w in metadata.get('saved_lookup_workspaces', [])
+                if 'stored_number_fields' in w}
+    if not expected:
+        return None
+    receipt = json.loads(files['fox-package/lov-return-receipt.json'])
+    items = []
+    pending = {
+        'STATIC_EDIT_DISABLED': 'The source restricts edits to this field.',
+        'DERIVED_NUMBER_UNIMPLEMENTED': 'The source calculates this value. Its calculation still needs a binding.',
+        'SOURCE_DEFAULT_UNIMPLEMENTED': 'The default value or synchronized source item still needs a binding.',
+        'LIST_NUMBER_UNIMPLEMENTED': 'The numeric list selection still needs a binding.',
+        'ITEM_EVENT_UNIMPLEMENTED': 'This item has an event that still needs a binding.',
+        'SOURCE_REFERENCE_UNIMPLEMENTED': 'Other source code refers to this field. Check the event before editing it.',
+        'DYNAMIC_REFERENCE_UNPROVEN': 'A dynamic source reference may affect this field.',
+        'FIELD_CAPACITY': 'This editor reached its limit for numeric fields.',
+    }
+    for op in receipt['generated_operations']:
+        if op.get('kind') != 'source_optional_row_lookup' or 'stored_numbers' not in op:
+            continue
+        plan = op['stored_numbers']
+        workspace = expected.pop(op['page_file'])
+        fields = plan['fields']
+        if (plan['source_binding'] != metadata['source_binding']
+                or plan['source_block_id'] != workspace['source_block_id']
+                or workspace['stored_number_fields'] != [
+                    {'id': f['source_item_id'], 'name': f['source_name'], 'column': f['column']} for f in fields]
+                or workspace['stored_number_gaps'] != plan['gaps']):
+            raise ValueError('Saved numeric field evidence differs from its workspace.')
+        block = op['contract']['source_block_name']
+        for f in fields:
+            note = 'Save and Reopen retain this number using its source picture ' + f['picture'] + '.'
+            if f.get('omitted_legacy_date_callbacks'):
+                note += ' The original date-picker callback remains unverified and does not run in this editor.'
+            if f.get('omitted_source_identifier_references'):
+                note += ' Other source code uses this column name. That code still needs its own mapping.'
+            items.append({'block': block, 'item': f['source_name'], 'label': f['label'], 'stored': True, 'note': note})
+        for gap in plan['gaps']:
+            code = gap['reason'].removeprefix('RATE_NUMBERS_')
+            note = pending.get(code, 'The source column, decimal format or edit policy still needs verification.')
+            source_name = gap['source_name'] or gap['source_item_id']
+            items.append({'block': block, 'item': source_name, 'label': source_name,
+                          'stored': False, 'note': note})
+    if expected:
+        raise ValueError('Saved numeric field receipt is missing.')
+    # Long source labels are display text; retain complete source identity in the package.
+    for row in items[:100]:
+        for key in ('block', 'item', 'label'):
+            row[key] = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', row[key]).strip()[:160] or 'Unnamed source field'
+    return {'items': items[:100], 'limited': len(items) > 100} if items else None
 
 
 def _lookup_fields(metadata, ledger):

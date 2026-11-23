@@ -200,6 +200,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.2] - 2026-11-23
+
+### [improvement] Retain eligible stored numbers in the rate editor
+
+FOX can carry a stored numeric input from the same source block through the
+rate draft, Save and Reopen. The editor checks its declared decimal picture,
+length and explicit limits before storing its Oracle NUMBER value. A blank
+optional value remains null, and zero remains zero. The source table and its
+posting logic still require their original bindings.
+
+In an installed APEX 26.1.6 app, two synthetic rates reopened as 14.99 and
+-0.25 in a new session. The editor kept zero and null distinct, rejected an
+extra decimal place, and prevented a stale tab from overwriting a later price.
+Input uses a dot for the decimal separator and omits digit grouping.
+
 ## [0.57.1] - 2026-11-23
 
 ### [fix] Protect edits made in a saved-row preview

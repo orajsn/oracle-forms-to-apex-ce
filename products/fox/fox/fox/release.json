@@ -1,9 +1,10 @@
 {
-  "version": "0.57.1",
+  "version": "0.57.2",
   "released_on": "2026-11-23",
-  "title": "Protect edits when reopening a saved row",
+  "title": "Keep stored numeric fields with a saved rate",
   "changes": [
-    "A saved-row preview checks its selected revision and any edits to the label or editable fields before creating a draft. A changed preview shows a recovery message."
+    "An eligible numeric input on the rate block can be entered, kept and saved with the selected row.",
+    "Reopening a saved rate retains its numeric value. The editor checks the decimal picture and detects conflicting changes."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",
