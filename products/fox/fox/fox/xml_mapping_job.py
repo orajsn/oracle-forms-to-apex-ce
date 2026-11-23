@@ -152,6 +152,9 @@ def checked_output(c, root, run, *, interface_csv=False):
     parent_summary = _rate_parent_summary(metadata, files)
     if parent_summary:
         details['parent_rates'] = parent_summary
+    coverage_summary = _saved_rate_field_coverage(metadata, files)
+    if coverage_summary:
+        details['rate_field_coverage'] = coverage_summary
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     details['interface_summary'] = _interface_fields(metadata, files)
     if 'supporting_inputs' in metadata:
@@ -214,6 +217,58 @@ def _discrepancy_fields(metadata, ledger, gaps, files):
     # source/version consent, compiler proof and immutable catalog. Do not
     # reclassify an old saved report with a newer parser or mapping registry.
     return validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
+
+
+def _saved_rate_field_coverage(metadata, files):
+    descriptor = metadata.get('rate_field_coverage')
+    if descriptor is None:
+        return None
+    member = 'fox-package/rate-field-coverage.json'
+    raw = files[member]
+    if (descriptor.get('member') != member or descriptor.get('sha256') != sha(raw)
+            or descriptor.get('source_binding') != metadata['source_binding']):
+        raise ValueError('Saved rate field inventory binding changed.')
+    report = json.loads(raw)
+    if (report.get('schema_version') != 1 or report.get('scope') != 'fox-rate-field-coverage-v1'
+            or report.get('source_binding') != metadata['source_binding']):
+        raise ValueError('Saved rate field inventory source changed.')
+    expected = {(w['source_block_id'], w['page_file']) for w in metadata['saved_lookup_workspaces']}
+    workspaces = []
+    statuses = ('saved', 'parent_linked', 'pending', 'control')
+    def clean(value, limit):
+        return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', value).strip()[:limit]
+    for w in report['workspaces']:
+        key = (w['block_id'], w['page_file'])
+        if key not in expected:
+            raise ValueError('Unexpected workspace in saved field inventory.')
+        expected.remove(key)
+        counts = {k: w['counts'][k] for k in statuses}
+        if (any(type(n) is not int or n < 0 for n in counts.values())
+                or sum(counts.values()) != w['counts']['total']):
+            raise ValueError('Invalid saved field inventory counts.')
+        items = w['items']
+        visible = dict.fromkeys(statuses, 0)
+        for f in items:
+            visible[f['status']] += 1
+        if (any(visible[k] > counts[k] for k in statuses)
+                or (not w['limited'] and visible != counts)
+                or len({f['id'] for f in items}) != len(items)):
+            raise ValueError('Saved rate field dispositions disagree with their counts.')
+        if len(workspaces) >= 20:
+            continue
+        if len(items) > 100:
+            items = sorted(items, key=lambda f: f['status'] != 'pending')[:100]
+        rows = []
+        for field in items:
+            name = clean(field['name'] or '', 160) or field['id']
+            rows.append({'name': name, 'label': clean(field['label'] or '', 160) or name,
+                         'status': field['status'], 'database_item': field['database_item'] if type(field['database_item']) is bool else None,
+                         'note': clean(field['note'], 600)})
+        workspaces.append({'block': clean(w['block'] or '', 160) or w['block_id'], 'counts': counts, 'items': rows,
+                           'limited': len(rows) < w['counts']['total']})
+    if expected:
+        raise ValueError('Rate field evidence is missing for a saved workspace.')
+    return {'workspaces': workspaces, 'limited': len(workspaces) < len(report['workspaces'])}
 
 
 def _rate_parent_summary(metadata, files):

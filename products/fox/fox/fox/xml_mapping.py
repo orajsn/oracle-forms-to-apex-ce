@@ -191,13 +191,14 @@ def mapping_catalog():
     rules.append(("fox.navigation.module-button", "One complete push-button event opens a uniquely named project module.",
                   "Open the module overview and its generated block pages.",
                   "Original startup, window, return, shared state and transaction behavior require separate bindings."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 26,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 27,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py",
-                                "forms_rate_parent.py", "forms_rate_parent_page.py", "xml_supporting_inputs.py", "intake.py",
+                                "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py",
+                                "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -219,6 +220,31 @@ def mapping_catalog():
                           "outputs": output, "adaptations": adaptation}
                          for key, guard, output, adaptation in rules]}
     return {**catalog, "catalog_sha256": _sha(_bytes(catalog))}
+
+
+def _attach_rate_field_coverage(files, metadata, report):
+    """Keep counts complete if only part of the supplementary detail fits."""
+    member = 'fox-package/rate-field-coverage.json'
+    meta_path = 'fox-package/metadata.json'
+    if len(files) + 2 > 4096:
+        return
+    base_size = len(_zip(files)) - len(files[meta_path])
+    reserve = len(_bytes(metadata['apex_members'])) + 2048
+    for limit in (None, 100, 20, 0):
+        workspaces = []
+        for w in report['workspaces']:
+            items = w['items']
+            if limit is not None and len(items) > limit:
+                items = sorted(items, key=lambda f: f['status'] != 'pending')[:limit]
+            workspaces.append({**w, 'items': items, 'limited': len(items) < w['counts']['total']})
+        payload = _bytes({**report, 'workspaces': workspaces})
+        descriptor = {'member': member, 'sha256': _sha(payload), 'source_binding': report['source_binding']}
+        updated = _bytes({**metadata, 'rate_field_coverage': descriptor})
+        if base_size + len(updated) + len(payload) + 76 + 2 * len(member) + reserve <= MAX_ZIP:
+            metadata['rate_field_coverage'] = descriptor
+            files[member] = payload
+            files[meta_path] = updated
+            return
 
 
 def _attach_interface_inventory(files, metadata, inventory):
@@ -1410,6 +1436,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             b'preserves their original bytes as text evidence. No supporting script is installed or executed.\n')
     files["fox-package/metadata.json"] = _bytes(metadata)
     _attach_interface_inventory(files, metadata, interface_register)
+    if any(op.get('durable_synthetic_save') for op in row_lookups):
+        from .forms_rate_field_coverage import build_rate_field_coverage
+        report = build_rate_field_coverage(documents, packet, row_lookups, scalar_events)
+        if report['workspaces']:
+            _attach_rate_field_coverage(files, metadata, report)
     candidate = _zip(files)
     _members(candidate)  # Retain existing package size and safe-member limits.
     return candidate, {"schema_version": 1, "scope": SCOPE,

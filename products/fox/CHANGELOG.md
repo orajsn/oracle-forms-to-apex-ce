@@ -200,6 +200,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.5] - 2026-11-23
+
+### [improvement] Explain the saved rate field by field
+
+Open a saved conversion result to see which source items the rate editor
+retains, which are copied only when starting from a parent, and which still
+need a binding. For example, a list-validated item with no list name remains
+pending. A generated procedure for a source event does not make its audit
+outputs saved fields. A counted source item appears once per workspace.
+
+In the public 13-item fixture, the authenticated saved result identified six
+saved fields, two parent-linked fields and five pending fields. Reopening
+the project returned the same field inventory and package bytes. The native
+APEX files matched the previous release for this fixture.
+
 ## [0.57.4] - 2026-11-23
 
 ### [improvement] Associate a synthetic rate with its selected parent
