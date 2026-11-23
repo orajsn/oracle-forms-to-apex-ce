@@ -1,10 +1,10 @@
 {
-  "version": "0.57.3",
+  "version": "0.57.4",
   "released_on": "2026-11-23",
-  "title": "Open the related records for a selected parent",
+  "title": "Create a rate for a selected parent",
   "changes": [
-    "A parent with several eligible detail relations has a chooser for its related reports.",
-    "Composite relations match every declared key. A bare child item can be bound when the source identifies its owner and unique field."
+    "When the source explicitly declares matching parent copies for every join key, start a synthetic rate from the selected parent.",
+    "The linked draft can retain the copied keys through Save and Reopen. Original business posting still requires its own binding."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

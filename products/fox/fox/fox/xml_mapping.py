@@ -178,6 +178,9 @@ def mapping_catalog():
         ("fox.row.stored-number", "An editable stored number on the same rendered block has a supported decimal picture and a verified input binding.",
          "Edit the numeric field on the selected synthetic row and retain it through Save and Reopen.",
          "The source picture and explicit bounds constrain the prototype field. The original database precision and posting logic require independent verification."),
+        ("fox.row.parent-copy", "Every component of a proved parent relation has a matching child item source copy declaration.",
+         "Create an owned synthetic draft for the selected parent and retain its verified keys across Save and Reopen.",
+         "An explicit action copies keys from the synthetic parent. Original record-event timing, business permissions and posting remain separate."),
         ("fox.event.scalar-procedure", "A complete scalar trigger assigns global or clock values, optionally guarded by record status or a numeric validation.",
          "Generate a PL/SQL procedure with explicit typed inputs and current-row outputs.",
          "The event host must supply the correct row, trusted Forms context and target field constraints. The procedure is available in scalar-events.sql."),
@@ -188,12 +191,13 @@ def mapping_catalog():
     rules.append(("fox.navigation.module-button", "One complete push-button event opens a uniquely named project module.",
                   "Open the module overview and its generated block pages.",
                   "Original startup, window, return, shared state and transaction behavior require separate bindings."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 25,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 26,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
-                                "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py", "xml_supporting_inputs.py", "intake.py",
+                                "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py",
+                                "forms_rate_parent.py", "forms_rate_parent_page.py", "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
                                 "forms_numeric_correction.py", "forms_numeric_correction_page.py",
@@ -470,6 +474,8 @@ def _approval_interface_links(plans, inventory):
 def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns):
     from .forms_rate_choices import compile_rate_choices
     from .forms_rate_numbers import compile_rate_numbers
+    from .forms_rate_parent import compile_rate_parent
+    from .forms_rate_parent_page import render_parent_page
     from .forms_rate_workspace import render_rate_workspace
     from .forms_route_lookup_native import render_row_lookup
     from .forms_route_lookup_plan import OPTIONAL_CALLER_GAPS, compile_row_lookups
@@ -487,6 +493,10 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                for c in contracts if anchors[(c['source_module_id'], c['source_block_id'])] == 1}
     number_plans = {c['contract_id']: compile_rate_numbers(documents, packet, chunks, trace, files, groups, returns, c)
                     for c in contracts if bundles.get(c['contract_id'], {}).get('choices')}
+    parent_plans = {c['contract_id']: compile_rate_parent(documents, packet, chunks, trace, files, groups, returns, c)
+                    for c in contracts if c['contract_id'] in number_plans}
+    relation_receipt = json.loads(files.get('fox-package/relation-receipt.json', b'{}'))
+    relation_actions = {r['relation_id']: r for r in relation_receipt.get('generated_operations', [])}
     queries = {op['operation_id']: op for op in groups['generated_operations']}
     occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
     page = 8900
@@ -500,17 +510,33 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                 or group['source_unit_sha256'] != contract['source_unit_sha256']
                 or contract['source_binding'] != packet['source_binding']):
             raise ValueError('Row lookup no longer matches the unresolved caller and source query.')
-        span = 2 + len(choices)
+        parent_plan = parent_plans.get(contract['contract_id'])
+        parent_binding = parent_plan['binding'] if parent_plan else None
+        span = 2 + len(choices) + int(parent_binding is not None)
         while occupied.intersection(range(page, page + span)):
             page += 1
         if page + span > 9900:
             raise ValueError('No native page range is available for the lookup editor.')
         numbers = number_plans.get(contract['contract_id'])
         if choices:
-            rendered = render_rate_workspace(contract, bundle, page, numbers=numbers if numbers['fields'] else None)
+            numbers = numbers if numbers['fields'] else None
+            rendered = render_rate_workspace(contract, bundle, page, numbers=numbers,
+                                             parent=parent_plan if parent_binding is not None else None)
         else:
             rendered = render_row_lookup(contract, page)
         target = rendered['metadata']
+        if parent_binding is not None:
+            relation = relation_actions.get(parent_binding['relation_id'])
+            if (not relation or relation['child_block_id'] != contract['source_block_id']
+                    or relation['source_module_id'] != contract['source_module_id']
+                    or relation['page_file'] not in files):
+                raise ValueError('The parent copy must be reached from its own generated relation.')
+            launcher = render_parent_page(contract, bundle, parent_plan, page, page + span - 1,
+                                          relation, numbers=numbers)
+            rendered['pages'].extend(launcher['pages'])
+            child_page = relation['page_file']
+            files[child_page] = native_record_groups._append(files[child_page].decode(), launcher['entry_fragment']).encode()
+            target['parent_launcher'] = launcher['metadata']
         for component in rendered['pages']:
             if component['page_file'] in files or component['page_id'] in occupied:
                 raise ValueError('Lookup page conflicts with an existing source screen.')
@@ -605,8 +631,11 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                     existing[0]['shared_editor'] = {'page_file': op['page_file'], 'chooser_file': companion['chooser_file'],
                                                     'operation_id': companion['operation_id']}
                 lookup_pages.append(companion)
-            if numbers['fields'] or numbers['gaps']:
-                op['stored_numbers'] = numbers
+            number_report = number_plans[contract['contract_id']]
+            if number_report['fields'] or number_report['gaps']:
+                op['stored_numbers'] = number_report
+            if parent_binding or parent_plan['gaps']:
+                op['parent_copy'] = parent_plan
         page += span
     returns['session_draft_table_writes'] = True
     return lookup_pages
@@ -1259,6 +1288,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         applied = sorted(set(applied) | {"fox.query.saved-row-workspace"})
     if any(op.get("stored_numbers", {}).get("fields") for op in row_lookups):
         applied = sorted(set(applied) | {"fox.row.stored-number"})
+    if any(op.get("parent_copy", {}).get("binding") for op in row_lookups):
+        applied = sorted(set(applied) | {"fox.row.parent-copy"})
     counts = dict(sorted(Counter(row["status"] for row in coverage).items()))
     compatibility = _compatibility(files, trace)
     if behavior_receipt:
@@ -1293,6 +1324,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             {"page_file": op["page_file"], "source_block_id": op["source_block_id"],
              "choices": 1 + len(op["native_target"]["companion_choices"]),
              "saved_table": op["native_target"]["saved_table"], "customer_table_writes": False,
+             **({"parent_launcher_page": op["native_target"]["parent_launcher"]["page_file"],
+                 "copied_parent_keys": [{"parent_item_id": field["parent_item_id"], "child_item_id": field["child_item_id"],
+                                         "column": field["column"]} for field in op["native_target"]["parent_copy_fields"]]}
+                if "parent_launcher" in op["native_target"] else {}),
+             **({"parent_copy_gaps": [g['reason'] for g in op["parent_copy"]["gaps"]]}
+                if op.get("parent_copy", {}).get("gaps") else {}),
              **({"stored_number_fields": [{"id": field["source_item_id"], "name": field["source_name"],
                                            "column": field["column"]} for field in op["stored_numbers"]["fields"]],
                  "stored_number_gaps": op["stored_numbers"]["gaps"]} if "stored_numbers" in op else {})}

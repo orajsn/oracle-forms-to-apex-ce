@@ -200,6 +200,21 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.4] - 2026-11-23
+
+### [improvement] Associate a synthetic rate with its selected parent
+
+When all join keys have matching source copy declarations, the filtered child
+report can offer a parent-specific draft action. The parent values come from
+the stored synthetic parent row. Scope and runtime limitations are retained
+with the mapping receipt.
+
+On APEX 26.1.6, two accounts sharing an ID in different branches created rates
+with different prices. A fresh session reopened only the corresponding saved
+rate from each parent. The copied keys matched the Oracle rows. A separate
+transaction confirmed that editing a parent label preserves the association
+while changing the branch invalidates the previous selection.
+
 ## [0.57.3] - 2026-11-23
 
 ### [improvement] Open related reports using the complete source key

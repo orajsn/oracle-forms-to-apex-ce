@@ -244,8 +244,12 @@ def _companion_query(ch, names, page, *, ordered=False):
     return sql
 
 
-def choice_query(primary, bundle, page, choice_index=0, *, ordered=False, numbers=None):
+def choice_query(primary, bundle, page, choice_index=0, *, ordered=False, numbers=None, parent=None):
     """Exact SELECT emitted for a chooser; zero is the existing route choice."""
+    if parent is not None:
+        from . import forms_rate_parent_page as linked
+        return linked.bound_choice_query(primary, bundle, page, choice_index, ordered=ordered,
+                                         numbers=numbers, parent=parent)
     c, b, _ = _checked(primary, bundle)
     numbers = validate_rate_numbers(numbers, c)
     names = _names(c, b, numbers)
@@ -266,8 +270,12 @@ def _dirty_check(c, names, page, numeric=()):
             "if l_count<>1 then raise_application_error(-20031,'Keep draft changes before saving or choosing.'); end if;\n")
 
 
-def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None):
+def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, parent=None):
     """Complete emitted transaction; no commit, external call or business DML."""
+    if parent is not None:
+        from . import forms_rate_parent_page as linked
+        return linked.bound_action_code(primary, bundle, page, action, choice_index,
+                                        numbers=numbers, parent=parent)
     c, b, fields = _checked(primary, bundle)
     numbers = validate_rate_numbers(numbers, c)
     numeric = numbers['fields'] if numbers else []
@@ -399,8 +407,12 @@ def _load(c, b, fields, names, page, *, choice_index=None, numbers=None):
     return sql
 
 
-def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None):
+def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent=None):
     """Return one editor and one chooser per source-linked LOV, plus empty DDL."""
+    if parent is not None:
+        from . import forms_rate_parent_page as linked
+        return linked.render_bound_workspace(primary, bundle, page, source_page=source_page,
+                                              numbers=numbers, parent=parent)
     c, b, fields = _checked(primary,bundle)
     numbers = validate_rate_numbers(numbers, c)
     numeric = numbers['fields'] if numbers else []

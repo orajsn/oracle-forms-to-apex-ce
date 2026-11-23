@@ -149,6 +149,9 @@ def checked_output(c, root, run, *, interface_csv=False):
     number_summary = _rate_number_summary(metadata, files)
     if number_summary:
         details['rate_numbers'] = number_summary
+    parent_summary = _rate_parent_summary(metadata, files)
+    if parent_summary:
+        details['parent_rates'] = parent_summary
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     details['interface_summary'] = _interface_fields(metadata, files)
     if 'supporting_inputs' in metadata:
@@ -211,6 +214,52 @@ def _discrepancy_fields(metadata, ledger, gaps, files):
     # source/version consent, compiler proof and immutable catalog. Do not
     # reclassify an old saved report with a newer parser or mapping registry.
     return validate_discrepancies(report, ledger, gaps, catalog, dependency_evidence=evidence)
+
+
+def _rate_parent_summary(metadata, files):
+    expected = {row['page_file']: row for row in metadata.get('saved_lookup_workspaces', [])
+                if 'parent_launcher_page' in row or 'parent_copy_gaps' in row}
+    if not expected:
+        return None
+    def label(value):
+        return re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', value).strip()[:160] or 'Unnamed source field'
+    notes = {
+        'RATE_PARENT_EXPLICIT_PARENT_RELATION_REQUIRED': 'The source specifies a field copy, but its parent relation is missing.',
+        'RATE_PARENT_INCOMING_PARENT_RELATION_NOT_UNIQUE': 'More than one incoming relation could supply the parent. Confirm which relation owns this copy.',
+        'RATE_PARENT_MATCHING_NATIVE_RELATION_REQUIRED': 'The parent relation still needs a matching generated detail page.',
+    }
+    items = []
+    receipt = json.loads(files['fox-package/lov-return-receipt.json'])
+    for op in receipt['generated_operations']:
+        if op.get('kind') != 'source_optional_row_lookup' or 'parent_copy' not in op:
+            continue
+        workspace = expected.pop(op['page_file'])
+        plan = op['parent_copy']
+        reasons = [g['reason'] for g in plan['gaps']]
+        if (plan['source_binding'] != metadata['source_binding'] or plan['source_block_id'] != workspace['source_block_id']
+                or reasons != workspace.get('parent_copy_gaps', [])):
+            raise ValueError('Parent-copy summary does not match the saved rate workspace.')
+        child = label(op['contract']['source_block_name'])
+        binding = plan['binding']
+        if binding:
+            pairs = binding['join_pairs']
+            if (workspace.get('parent_launcher_page') != op['native_target']['parent_launcher']['page_file']
+                    or workspace.get('copied_parent_keys') != [
+                        {'parent_item_id': f['parent_item_id'], 'child_item_id': f['child_item_id'],
+                         'column': f['column']} for f in pairs]):
+                raise ValueError('Parent-copy fields do not match their saved source evidence.')
+            note = 'Creating a draft from the selected parent copies these values once. Save and Reopen retain them in synthetic storage.'
+            if 'RATE_PARENT_SOURCE_LENGTH_SEMANTICS_ABSENT_CONSERVATIVE_BYTE_AND_CHAR_LIMIT' in reasons:
+                note += ' A source length has no declared unit. The copy must fit both its byte and character limits.'
+            items.append({'child': child, 'parent': label(binding['parent_name']), 'linked': True,
+                          'fields': [{'parent': label(f['parent_name']), 'child': label(f['child_name'])} for f in pairs],
+                          'note': note})
+        elif reasons:
+            items.append({'child': child, 'parent': 'Unresolved parent', 'linked': False, 'fields': [],
+                          'note': notes.get(reasons[0], 'The declared copy still needs verified source fields, edit rules and a matching parent selection.')})
+    if expected:
+        raise ValueError('Parent-copy evidence is missing for a saved workspace.')
+    return {'items': items[:100], 'limited': len(items) > 100}
 
 
 def _rate_number_summary(metadata, files):
