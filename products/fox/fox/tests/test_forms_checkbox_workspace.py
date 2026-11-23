@@ -194,8 +194,8 @@ def test_entry_labels_null_and_other_source_values_unavailable(group):
     db.executemany(f"insert into {group['table_name']} values(?,?,?,?)", [(1, 'N', 'Y', '1'), (2, None, 'Y', '0'), (3, 'Y', 'X', '0')])
     rows = db.execute(query).fetchall()
     assert rows[0][2] == 'Available'
-    assert rows[1][2].startswith('Unavailable: NULL or other')
-    assert rows[2][2].startswith('Unavailable: NULL or other')
+    assert rows[1][2] == 'Unavailable: Active: blank (Forms setting unconfirmed)'
+    assert rows[2][2] == 'Unavailable: Monday: other code (Forms setting unconfirmed)'
     assert 'Checkbox draft availability' in result['entry_fragment']
 
 
@@ -274,3 +274,62 @@ def test_checkbox_comparison_uses_database_character_set_and_procedural_equality
     assert "to_char(unistr(" in predicate
     assert ' is not null and ' in predicate
     assert 'decode(' not in predicate.lower()
+
+
+def _policy(field, setting, state):
+    field.update(other_values=setting, source_null_other_policy_proven=True,
+                 source_other_values_policy={'source_property': 'CheckBoxOtherValues',
+                                             'source_value': setting, 'display_state': state})
+
+
+def _status(group, row, *, padding=0):
+    db = database()
+    fields = [group['controller'], *group['dependents']]
+    db.execute('create table source(' + ','.join(f['column'] + ' text' for f in fields) + ')')
+    db.execute('insert into source values(' + ','.join('?' for _ in fields) + ')', row)
+    query = native._status_query(group, 's', 'select ' + ' ' * padding, ' from source s')
+    return db.execute(query).fetchone()[0], len(query.encode())
+
+
+def test_report_lists_all_affected_fields_and_only_proved_source_settings(group):
+    fields = [group['controller'], *group['dependents']]
+    for f, policy, state in zip(fields, ['Checked','Unchecked','Not Allowed'], ['checked','unchecked','reject']):
+        _policy(f, policy, state)
+    fields[1]['label'] = "L'été"
+    result, _ = _status(group, [None, 'private raw value', 'other raw value'])
+    assert result == ("Unavailable: Active: blank (Forms displays checked); "
+                      "L'été: other code (Forms displays unchecked); "
+                      "Tuesday: other code (Forms disallows this value)")
+    # Different storage representations are compared exactly; lowercase and
+    # trailing whitespace cannot silently enter the ordinary editable path.
+    result, _ = _status(group, ['y', 'Y ', '0'])
+    assert 'Active: other code' in result and "L'été: other code" in result and 'Tuesday' not in result
+    fields[0]['source_other_values_policy']['display_state'] = 'unchecked'
+    result, _ = _status(group, [None, 'Y', '0'])
+    assert result == 'Unavailable: Active: blank (Forms setting unconfirmed)'
+    assert _status(group, ['N','Y','1'])[0] == 'Available'
+
+
+def test_duplicate_or_long_multibyte_captions_fall_back_to_source_names(group):
+    fields = [group['controller'], *group['dependents']]
+    fields[0]['label'] = fields[1]['label'] = 'Day'
+    fields[2]['label'] = '日' * 40
+    v, _ = _status(group, [None, None, None])
+    for f in fields:
+        assert f['source_name'] + ': blank' in v
+    assert 'Day:' not in v and '日' not in v
+
+
+def test_query_capacity_preserves_the_first_cause_then_compact_availability(group):
+    row = ['N',None,'new raw code']
+    msg, full = _status(group,row)
+    assert 'Monday' in msg and 'Tuesday' in msg
+    padding = 32768 - full
+    msg, compacted = _status(group,row,padding=padding)
+    assert msg.startswith('Unavailable (first field): Monday: blank') and 'Tuesday' not in msg
+    assert compacted <= 32767
+    padding += 32768 - compacted
+    msg, smallest = _status(group,row,padding=padding)
+    assert msg == 'Unavailable: check stored checkbox codes' and smallest <= 32767
+    with pytest.raises(ValueError, match='RECORD_QUERY_CAPACITY'):
+        _status(group,row,padding=padding + 32768 - smallest)

@@ -283,13 +283,56 @@ def _target(source, destination):
                     P{destination}_TOKEN: "&P{source}_TOKEN." }} }}'''
 
 
-def _admission_sql(g, alias):
-    admission = []
-    for field in _fields(g):
+def _field_admission(field, column):
+    options = (_value(field[key]) for key in ('checked_value', 'unchecked_value'))
+    hashes = ','.join("RAWTOHEX(STANDARD_HASH(" + value + ",'SHA256'))" for value in options)
+    return f"({column} is not null and RAWTOHEX(STANDARD_HASH({column},'SHA256')) in ({hashes}))"
+
+
+def _admission_sql(group, alias):
+    return ' and '.join(_field_admission(field, alias + '.' + field['column']) for field in _fields(group))
+
+
+def _status_query(group, alias, prefix, suffix):
+    fields = _fields(group)
+    # Keep diagnostics within Oracle's default 4000-byte VARCHAR2 result.
+    # Long or repeated captions use the unique source item name.
+    labels = [field.get('label') or field['source_name'] for field in fields]
+    names = [field['source_name'] for field in fields]
+    captions = [name if len(label.encode('utf-8')) > 80 or labels.count(label) > 1 else label
+                for name, label in zip(names, labels)]
+    if len({caption.casefold() for caption in captions}) != len(captions):
+        captions = names
+    messages, first_match = [], []
+    outcomes = {'Checked': ('checked', 'Forms displays checked'),
+                'Unchecked': ('unchecked', 'Forms displays unchecked'),
+                'Not Allowed': ('reject', 'Forms disallows this value')}
+    for field, caption in zip(fields, captions):
         column = alias + '.' + field['column']
-        choices = ','.join("RAWTOHEX(STANDARD_HASH(" + _value(field[key]) + ",'SHA256'))" for key in ('checked_value', 'unchecked_value'))
-        admission.append(f"({column} is not null and RAWTOHEX(STANDARD_HASH({column},'SHA256')) in ({choices}))")
-    return ' and '.join(admission)
+        policy = field.get('source_other_values_policy') or {}
+        outcome = outcomes.get(field.get('other_values'))
+        proved = (outcome is not None and field.get('source_null_other_policy_proven') is True
+                  and policy.get('source_property') == 'CheckBoxOtherValues'
+                  and policy.get('source_value') == field['other_values']
+                  and policy.get('display_state') == outcome[0])
+        explanation = outcome[1] if proved else 'Forms setting unconfirmed'
+        # Source item names in the admitted plan are bounded ASCII identifiers.
+        _need(len(caption.encode('utf-8')) <= 80, 'STATUS_LABEL_CAPACITY')
+        valid = _field_admission(field, column)
+        detail = (f"{_value(caption)}||case when {column} is null then ': blank' else ': other code' end"
+                  f"||' ({explanation})'")
+        messages.append(f"case when {valid} then '' else {detail}||'; ' end")
+        first_match.append(f"when not {valid} then 'Unavailable (first field): '||{detail}")
+    valid = _admission_sql(group, alias)
+    complete = (f"case when {valid} then 'Available' else 'Unavailable: '||"
+                "rtrim(" + '||'.join(messages) + ",'; ') end")
+    first = "case " + ' '.join(first_match) + " else 'Available' end"
+    compact = f"case when {valid} then 'Available' else 'Unavailable: check stored checkbox codes' end"
+    for status in (complete, first, compact):
+        query = prefix + status + suffix
+        if len(query.encode('utf-8')) <= 32767:
+            return query
+    raise ValueError('CHECKBOX_WORKSPACE_RECORD_QUERY_CAPACITY')
 
 
 def attach_report_action(text, block, group, page):
@@ -350,11 +393,9 @@ def attach_report_action(text, block, group, page):
     status = f'FOX_STATUS_{page}'
     _need(f'        column {status} (\n' not in region, 'ROW_ACTION_COLLISION')
     valid = _admission_sql(group, alias)
-    extra = (f"case when {valid} then {_token(group, alias + '.')} end as {token}, "
-             f"case when {valid} then 'Open draft' end as {action}, "
-             f"case when {valid} then 'Available' else 'Unavailable: checkbox value outside the two mapped codes' end as {status}")
-    query = query[:position] + ', ' + extra + query[position:]
-    _need(len(query.encode()) <= 32767, 'RECORD_QUERY_CAPACITY')
+    prefix = (query[:position] + f", case when {valid} then {_token(group, alias + '.')} end as {token}, "
+              f"case when {valid} then 'Open draft' end as {action}, ")
+    query = _status_query(group, alias, prefix, f" as {status}" + query[position:])
     region = region[:sources[0].start()] + _sql_query(query, trailing) + region[sources[0].end():]
     anchor = '        savedReport primary (\n'
     _need(region.count(anchor) == 1, 'PRIMARY_REPORT_UNAVAILABLE')
@@ -406,8 +447,9 @@ def render_checkbox_workspace(group, page):
     g = _checked(group)
     _page(g, page)
     source = g['report_page_id']
-    status = "case when " + _admission_sql(g, 's') + " then 'Available' else 'Unavailable: NULL or other checkbox value; no draft can be opened.' end"
-    query = f"select s.FOX_ROW_ID FOX_SELECTED_ROW,{_token(g)} FOX_SOURCE_TOKEN,{status} FOX_DRAFT_STATUS from {g['table_name']} s order by s.FOX_ROW_ID"
+    prefix = f"select s.FOX_ROW_ID FOX_SELECTED_ROW,{_token(g)} FOX_SOURCE_TOKEN,"
+    suffix = f" FOX_DRAFT_STATUS from {g['table_name']} s order by s.FOX_ROW_ID"
+    query = _status_query(g, 's', prefix, suffix)
     link = f'''        link {{ linkColumn: customTarget
             target: {{ page: {page}
                 clearCache: {page}

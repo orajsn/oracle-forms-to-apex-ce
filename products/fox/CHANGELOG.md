@@ -200,6 +200,16 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.9] - 2026-11-23
+
+### [improvement] Identify which checkbox values need attention
+
+The availability column in generated reports names the affected fields and
+distinguishes a blank value from another stored code. For each field it can
+show the Forms configuration for interpreting other values. When a long query
+leaves less space, the report identifies the first affected field or retains
+the compact availability message. Valid selections keep the same draft action.
+
 ## [0.57.8] - 2026-11-23
 
 ### [improvement] Open checkbox drafts from the selected business row
