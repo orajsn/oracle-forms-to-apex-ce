@@ -142,6 +142,7 @@ def _projection_columns(projection, columns):
     for piece, column in zip(pieces, columns, strict=True):
         _need(piece == column or re.fullmatch(r".+\s+as\s+" + re.escape(column), piece, re.I | re.S),
               "REPORT_PROJECTION_COLUMNS_MISMATCH")
+    return pieces
 
 
 def _report_source(text, block):

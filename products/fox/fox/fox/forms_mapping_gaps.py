@@ -67,7 +67,11 @@ def classify_gaps(packet, chunks, coverage):
             code = _mask_code(semantic)
         except UnsupportedBehavior:
             code = ''
-        if reason == 'module_navigation_partly_connected':
+        if reason == 'saved_display_partly_connected':
+            category = 'engine_context'
+            message = 'The report calculates ' + row['display_target'] + ' from the saved row using the source expression.'
+            action = 'Verify the original event timing and the effect of edits before saving. Source database and commit routines keep their own status.'
+        elif reason == 'module_navigation_partly_connected':
             category = 'engine_context'
             message = 'A button opens the generated pages for ' + row['module_target'] + '.'
             action = 'Verify startup, return navigation, shared values and transaction behavior for the original call.'

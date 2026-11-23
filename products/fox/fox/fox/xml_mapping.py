@@ -15,6 +15,8 @@ import re
 
 from forms2apex import native_blueprint, native_behavior, numeric_expression, local_comparison, native_relations, native_assignments, native_policy_rules, native_buffer, record_buffer, native_lookups, source_lookup, native_record_groups
 from forms2apex.native_behavior import render_behavior_package
+from forms2apex import display_expression, native_display_projection
+from .forms_display_projection import build_display_projections
 
 from .forms_blueprint import validate_blueprint
 from .forms_mapping_gaps import classify_gaps
@@ -191,13 +193,15 @@ def mapping_catalog():
     rules.append(("fox.navigation.module-button", "One complete push-button event opens a uniquely named project module.",
                   "Open the module overview and its generated block pages.",
                   "Original startup, window, return, shared state and transaction behavior require separate bindings."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 27,
+    rules.append(("fox.display.saved-row-label", "A source display item has a complete concatenation assignment bound to the same stored row.",
+                  "Calculate the display column in its synthetic reports.", "Other statements, Forms event timing and unsaved buffer behavior require separate bindings."))
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 28,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py",
-                                "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py",
+                                "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py", "forms_display_projection.py",
                                 "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
@@ -207,6 +211,8 @@ def mapping_catalog():
                                 "forms_bag_entry_wiring.py", "forms_note_entry_wiring.py")}
                    | {"forms2apex/native_behavior.py": _sha(Path(native_behavior.__file__).read_bytes()),
                       "forms2apex/numeric_expression.py": _sha(Path(numeric_expression.__file__).read_bytes()),
+                      "forms2apex/display_expression.py": _sha(Path(display_expression.__file__).read_bytes()),
+                      "forms2apex/native_display_projection.py": _sha(Path(native_display_projection.__file__).read_bytes()),
                       "forms2apex/local_comparison.py": _sha(Path(local_comparison.__file__).read_bytes()),
                       "forms2apex/native_relations.py": _sha(Path(native_relations.__file__).read_bytes()),
                       "forms2apex/native_assignments.py": _sha(Path(native_assignments.__file__).read_bytes()),
@@ -977,6 +983,19 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
     files[navigation_member] = _bytes(module_navigation)
     navigation_actions = {op["source_unit_id"]: op for op in module_navigation["operations"]}
     navigation_gaps = {gap["source_unit_id"]: gap for gap in module_navigation["gaps"]}
+    display_plan = build_display_projections(documents, packet, chunks, trace)
+    files, display_receipt = native_display_projection.apply_display_projections(files, trace, display_plan, relation_receipt)
+    display_member = "fox-package/saved-display-fields.json"
+    display_units = {}
+    display_items = {op['source_item_id']: op for op in display_receipt['applied']}
+    if display_receipt["applied"] or display_receipt["gaps"]:
+        files[display_member] = _bytes(display_receipt)
+    for projection in display_receipt["applied"]:
+        for proof in projection["whole_source_units"]:
+            uid = proof["source_unit_id"]
+            if uid in display_units:
+                raise ValueError("More than one display field claims the same source assignment.")
+            display_units[uid] = (proof, projection)
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -1146,6 +1165,12 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             elif not claimed:
                 row.update(reason="module_navigation_pending", module_target=binding["literal_target"],
                            module_gap=binding["reason"])
+        if uid in display_units:
+            proof, projection = display_units[uid]
+            if (proof['source_unit_sha256'] != row['source_unit_sha256'] or proof['source_owner_id'] != row['source_owner_id']
+                    or row['status'] == 'generated_wired_adapted' or row.get('encoding_status') == 'generated_unwired'):
+                raise ValueError("Saved display projection conflicts with a source operation.")
+            row.update(reason="saved_display_partly_connected", display_target=projection['qualified_target'])
     scalar_events, scalar_sql = build_event_callables(documents, packet, chunks, coverage, project_id)
     if scalar_sql:
         files[SCALAR_EVENT_CODE] = scalar_sql
@@ -1210,6 +1235,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             target["value_computation_implemented"] = any(op["kind"] in {
                 "ceil_report_column", "numeric_expression_report_column", "local_comparison_report_column"} for op in item_ops)
             target["generated_behavior_operation_ids"] = [op["operation_id"] for op in item_ops]
+            if row["source_object_id"] in display_items:
+                display = display_items[row["source_object_id"]]
+                target.update(value_computation_implemented=True, computation_scope="synthetic_saved_report",
+                              computation_pages=display['page_files'], computation_member=display_member,
+                              native_event_wired=False)
         ledger_objects.append({**deepcopy(row), "rule_id": rule_id, "rule_revision": 1,
             "source_file": source_files[row["source_object_id"]],
             "disposition": "generated_structural" if target else row["disposition"],
@@ -1223,6 +1253,11 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             "rule_revision": 1, "target": deepcopy(generated.get(row["source_unit_id"]))})
     for row in ledger_units:
         uid = row["source_unit_id"]
+        if uid in display_units:
+            proof, projection = display_units[uid]
+            row.update(rule_id="fox.display.saved-row-label", target={
+                **proof, "source_item_id": projection["source_item_id"], "member": display_member,
+                "page_files": projection["page_files"], "source_event_timing_preserved": False})
         if uid in navigation_actions:
             row.update(rule_id="fox.navigation.module-button", target=deepcopy(navigation_actions[uid]))
         if uid in scalar_events:
@@ -1331,7 +1366,10 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "applied_rule_ids": applied, "source_parser_rebuilt": True,
         "ai_review": {"performed": False, "approval_recorded": False, "origin": "none"},
         "format_validated": False, "validation": None, "native_apex_generated": True,
-        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"] or navigation_actions),
+        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"] or navigation_actions or display_units),
+        **({"saved_display_fields": {"member": display_member, "sha256": _sha(files[display_member]),
+                                     "count": len(display_receipt["applied"]), "pending": len(display_receipt["gaps"])}}
+           if display_member in files else {}),
         "module_navigation": {"member": navigation_member, "sha256": _sha(files[navigation_member]),
                               "links": len(navigation_actions), "gaps": len(module_navigation["gaps"])},
         "structural_coverage": deepcopy(native_plan["coverage"]),

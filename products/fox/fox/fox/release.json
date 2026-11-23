@@ -1,10 +1,10 @@
 {
-  "version": "0.57.5",
+  "version": "0.57.6",
   "released_on": "2026-11-23",
-  "title": "See which source fields a rate retains",
+  "title": "Calculate source-defined display fields on saved reports",
   "changes": [
-    "Saved conversion results identify rate fields that persist, fields copied only from a selected parent, and fields still waiting for source or event bindings.",
-    "The field inventory distinguishes saved synthetic display values from original database items."
+    "A visible Forms display item can show a reference assembled from stored text and a formatted date when the source proves its expression.",
+    "The mapping identifies the exact reports and source assignments. Original trigger timing and other business statements retain separate coverage."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -200,6 +200,22 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.6] - 2026-11-23
+
+### [improvement] Calculate source-defined display references on saved reports
+
+A complete source assignment can give a visible, non-database display item its
+value by joining stored text and a formatted date from the same row. Eligible
+reports calculate that value at read time and include its column in the
+default view. Conflicting source assignments remain open for review. Report
+calculation covers only the recorded expression; unsaved buffers, other
+trigger statements and business posting retain their own requirements.
+
+An installed APEX 26.1.6 report showed the calculated references for two
+synthetic rows by default, after reload, and after a partial report refresh.
+Oracle checks covered year boundaries, leading zeroes, all-null inputs,
+trailing blanks, and multibyte input at and beyond the source byte limit.
+
 ## [0.57.5] - 2026-11-23
 
 ### [improvement] Explain the saved rate field by field
