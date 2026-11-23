@@ -15,6 +15,23 @@ def seal(plan):
     return plan
 
 
+def test_sibling_reports_do_not_grant_a_parent_assignment_context():
+    from fox.forms_native_plan import POLICY_ID
+    from fox.xml_mapping import generate_xml_package
+    from test_forms_relation_plan import sibling_documents
+
+    docs = sibling_documents(count=2, child_extra=(
+        '<Trigger Name="PRE-INSERT" TriggerText=":DETAIL_ID := :CUSTOMERS.CUST_ID;"/>'))
+    _, result = generate_xml_package(docs, 'manual-relation', 'Related records', POLICY_ID)
+    navigation = result['relation_receipt']['generated_operations']
+    assert len(navigation) == 2
+    assert all(not op['write_lifecycle'] for op in navigation)
+    assert {row['reason'] for row in result['relation_plan']['coverage']} == {
+        'manual_navigation_without_assignment_context'}
+    assert not result['assignment_plan']['operations']
+    assert not result['assignment_receipt']['generated_operations']
+
+
 def source(module="SAMPLE", parent="HEADER", child="LINES", text=":COPIED := :ORIGIN;", kind="Char"):
     root = ET.Element("Module", xmlns="http://xmlns.oracle.com/Forms")
     form = ET.SubElement(root, "FormModule", Name=module)

@@ -204,7 +204,7 @@ def _relation_context(block, objects, trace, relation_plan, receipt, source_bind
           and all(relation_plan[k] is False for k in ("native_generated", "runtime_verified", "business_accepted"))
           and relation_plan["plan_sha256"] == _sha(_canonical({k: v for k, v in relation_plan.items() if k != "plan_sha256"}))
           and relation_plan["parent_trace_canonical_sha256"] == _sha(_canonical(trace)), "RELATION_PLAN_BINDING")
-    operation = _one([op for op in relation_plan["operations"] if op["child_block_id"] == block["id"]
+    operation = _one([op for op in native_relations.context_operations(relation_plan) if op["child_block_id"] == block["id"]
                       and op["source_module_id"] == block["module_id"]], "direct_incoming_relation_required")
     _need(set(operation) == native_relations._OP, "RELATION_OPERATION_FIELDS")
     _need(type(receipt) is dict and receipt.get("scope") == native_relations.RENDERER

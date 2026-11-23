@@ -68,6 +68,7 @@ def _proven_relations(relation_plan, packet, objects, metadata, trace):
     freshly rebuild that plan from the source package immediately before use.
     """
     from .forms_relation_plan import _flags, parse_join_condition, relation_attribute_sha256
+    from forms2apex.native_relations import MANUAL_SELECTION_ONLY
     if (type(relation_plan) is not dict or relation_plan.get("scope") != "fox-forms-relation-plan-v1"
             or relation_plan.get("schema_version") != 1
             or relation_plan.get("source_binding") != packet["source_binding"]
@@ -86,6 +87,7 @@ def _proven_relations(relation_plan, packet, objects, metadata, trace):
     if type(operations) is not list or len(operations) > 100:
         raise ValueError("ASSIGNMENT_RELATION_OPERATIONS")
     graph, incoming, relation_ids = {}, {}, set()
+    assignment_contexts = []
     for op in operations:
         try:
             relation = objects[op["relation_id"]]
@@ -108,7 +110,16 @@ def _proven_relations(relation_plan, packet, objects, metadata, trace):
                       and row["module_id"] == block["module_id"]
                       and (row["name"] or "").upper() == (block["name"] or "").upper()],
                      "relation_block_not_unique")
-            pairs = parse_join_condition(props.get("JoinCondition", ""), parent["name"], child["name"])
+            coverage = [row for row in relation_plan["coverage"] if row.get("relation_id") == relation["id"]]
+            if (len(coverage) != 1 or coverage[0].get("status") != "read_navigation_planned"
+                    or coverage[0].get("source_attribute_sha256") != op["source_attribute_sha256"]):
+                raise ValueError("ASSIGNMENT_RELATION_COVERAGE")
+            navigation_only = coverage[0].get("reason") == MANUAL_SELECTION_ONLY
+            child_names = ([item["name"] or "" for item in objects.values()
+                            if item["kind"] == "Item" and item["block_id"] == child["id"]]
+                           if navigation_only else None)
+            pairs = parse_join_condition(props.get("JoinCondition", ""), parent["name"], child["name"],
+                                         child_item_names=child_names)
             expected = []
             for parent_name, child_name in pairs:
                 p = _item([parent_name], parent, objects)
@@ -127,16 +138,18 @@ def _proven_relations(relation_plan, packet, objects, metadata, trace):
                     "report_page_id": mapped["report_page_id"], "row_id_column": mapped["synthetic_key"]["column"]}
                 if op[label] != expected_target:
                     raise ValueError("ASSIGNMENT_RELATION_TARGET_CHANGED")
-            coverage = [row for row in relation_plan["coverage"] if row.get("relation_id") == relation["id"]]
-            if (len(coverage) != 1 or coverage[0].get("status") != "read_navigation_planned"
-                    or coverage[0].get("source_attribute_sha256") != op["source_attribute_sha256"]):
-                raise ValueError("ASSIGNMENT_RELATION_COVERAGE")
-            if parent["id"] in graph or child["id"] in incoming or relation["id"] in relation_ids:
+            if relation["id"] in relation_ids:
+                raise ValueError("ASSIGNMENT_RELATION_AMBIGUOUS")
+            relation_ids.add(relation["id"])
+            if navigation_only:
+                continue
+            if parent["id"] in graph or child["id"] in incoming:
                 raise ValueError("ASSIGNMENT_RELATION_AMBIGUOUS")
             graph[parent["id"]], incoming[child["id"]] = child["id"], parent["id"]
-            relation_ids.add(relation["id"])
+            assignment_contexts.append(op)
         except (KeyError, TypeError, UnsupportedAssignment):
             raise ValueError("ASSIGNMENT_RELATION_PROOF_INVALID") from None
+    operations = assignment_contexts
     for start in graph:
         visited, node = set(), start
         while node in graph:

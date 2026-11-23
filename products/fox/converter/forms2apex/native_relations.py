@@ -18,6 +18,15 @@ import zipfile
 SCOPE = "fox-forms-relation-plan-v1"
 RENDERER = "fox-native-relations-v1"
 MAX_RELATIONS = 50
+MANUAL_SELECTION_ONLY = "manual_navigation_without_assignment_context"
+
+
+def context_operations(plan):
+    """Only pre-existing relation shapes may authorize other Forms event adapters."""
+    manual = {row["relation_id"] for row in plan.get("coverage", ())
+              if row.get("reason") == MANUAL_SELECTION_ONLY}
+    return [op for op in plan.get("operations", ()) if op["relation_id"] not in manual]
+MAX_PAGE_ID = 8999
 MANIFEST = "fox-package/source-manifest.json"
 TRACE = "fox-package/source-to-page.json"
 _PREFIX = "fox-package/relation-"
@@ -179,7 +188,7 @@ def _targets(files):
             _identifier(table)
             _need(type(block_id) is str and block_id not in blocks and table not in tables
                   and type(report) is str and report in files and report not in reports
-                  and type(page) is int and 0 < page < 9000 and page not in pages
+                  and type(page) is int and 0 < page <= MAX_PAGE_ID and page not in pages
                   and block.get("native_component", "report") == "report", "BLOCK_TARGET_INVALID")
             declarations = re.findall(r"\bCREATE TABLE " + re.escape(table) + r" \(\s*(.*?)\n\);", schema, re.S)
             _need(len(declarations) == 1, "DDL_TABLE_MISMATCH")
@@ -235,7 +244,7 @@ def _validate(raw, files, plan):
               and row["status"] in {"read_navigation_planned", "unsupported"}
               and type(row["reason"]) is str and 0 < len(row["reason"]) <= 128, "COVERAGE_INVALID")
         coverage[row["relation_id"]] = row
-    parents, children, ids, bound = set(), set(), set(), []
+    edges, children, ids, bound = set(), set(), set(), []
     for op in plan["operations"]:
         _need(type(op) is dict and set(op) == _OP, "OPERATION_FIELDS_INVALID")
         relation = op["relation_id"]
@@ -246,8 +255,8 @@ def _validate(raw, files, plan):
               and row["source_attribute_sha256"] == op["source_attribute_sha256"]
               and type(op["source_attribute_sha256"]) is str and _SHA.fullmatch(op["source_attribute_sha256"]), "SOURCE_PROOF_MISMATCH")
         p, c = op["parent_block_id"], op["child_block_id"]
-        _need(p in blocks and c in blocks and p != c and p not in parents and c not in children, "GRAPH_AMBIGUOUS")
-        parents.add(p)
+        _need(p in blocks and c in blocks and p != c and (p, c) not in edges and c not in children, "GRAPH_AMBIGUOUS")
+        edges.add((p, c))
         children.add(c)
         for role, block_id in (("parent", p), ("child", c)):
             target, block = op[role], blocks[block_id]
@@ -272,17 +281,25 @@ def _validate(raw, files, plan):
                       and item["data_type"] == pair["data_type"], "JOIN_BINDING_MISMATCH")
         bound.append((op, blocks[p], blocks[c]))
     _need(ids == {key for key, row in coverage.items() if row["status"] == "read_navigation_planned"}, "COVERAGE_OPERATION_MISMATCH")
-    graph = {op["parent_block_id"]: op["child_block_id"] for op, _, _ in bound}
+    graph = {}
+    for p, c in edges:
+        graph.setdefault(p, []).append(c)
+    visited, active = set(), set()
+    def visit(node):
+        _need(node not in active, "GRAPH_CYCLE")
+        if node in visited:
+            return
+        active.add(node)
+        for child in graph.get(node, []):
+            visit(child)
+        active.remove(node)
+        visited.add(node)
     for start in graph:
-        seen, node = set(), start
-        while node in graph:
-            _need(node not in seen, "GRAPH_CYCLE")
-            seen.add(node)
-            node = graph[node]
+        visit(start)
     return bound
 
 
-def _link(text, target_page):
+def _link(text, target_page, label="View related records"):
     pattern = r"^        column FOX_ROW_ID \(\n.*?^        \)"
     matches = list(re.finditer(pattern, text, re.M | re.S))
     _need(len(matches) == 1, "ROW_LINK_COLUMN_MISSING")
@@ -299,7 +316,7 @@ def _link(text, target_page):
                         P{target_page}_PARENT_ID: "#FOX_ROW_ID#"
                     }}
                 }}
-                linkText: View related records
+                linkText: {label}
             }}
 '''
     column = column[:-len("        )")] + link + "        )"
@@ -312,6 +329,93 @@ def _link(text, target_page):
         fragment = "\n            displayColumn FOX_ROW_ID (\n                sequence: 1\n            )"
         text = text[:end] + fragment + text[end:]
     return text
+
+
+def _child_label(child, target):
+    name = child.get("name")
+    if (type(name) is not str or not 0 < len(name) <= 128
+            or any(ord(c) < 32 or c in "&#<>" for c in name)):
+        return f"View related report {target}"
+    return f"View {name} (page {target})"
+
+
+def _selector(outgoing, destinations, page):
+    """One signed row context, with an explicit action for every child report.
+
+    Labels are trace metadata, never APEX substitutions or HTML. Buttons use
+    native redirect targets so APEX signs both the selector and child links.
+    """
+    buttons = []
+    for sequence, (op, _, child) in enumerate(outgoing, 1):
+        target = destinations[op["relation_id"]]
+        label = json.dumps(_child_label(child, target), ensure_ascii=False)
+        buttons.append(f'''    button child-{sequence} (
+        buttonName: FOX_RELATED_{sequence}
+        label: {label}
+        layout {{
+            sequence: {sequence * 10}
+            region: @related-actions
+            slot: regionBody
+        }}
+        appearance {{
+            buttonTemplate: @/text
+        }}
+        behavior {{
+            action: redirectThisApp
+            target: {{
+                page: {target}
+                clearCache: {target}
+                items: {{
+                    P{target}_PARENT_ID: "&P{page}_PARENT_ID."
+                }}
+            }}
+        }}
+    )
+''')
+    return f'''page {page} (
+    name: Choose related records
+    alias: FOX_RELATION_SELECTOR_{page}
+    title: Choose related records
+    appearance {{
+        pageTemplate: @/standard
+        templateOptions: #DEFAULT#
+    }}
+    security {{
+        authentication: required
+        pageAccessProtection: argumentsMustHaveChecksum
+    }}
+    region related-actions (
+        name: Choose a detail report
+        type: staticContent
+        source {{
+            htmlCode: <p>Choose a detail report for the selected parent row. Each report checks every join key against that stored parent. Without a matching parent no related rows are selected. This is manual read-only navigation; automatic query, copying, saving and delete lifecycle remain unconverted.</p>
+        }}
+        layout {{
+            sequence: 10
+            slot: body
+        }}
+        appearance {{
+            template: @/standard
+            templateOptions: #DEFAULT#
+        }}
+    )
+    pageItem P{page}_PARENT_ID (
+        type: hidden
+        layout {{
+            sequence: 10
+            region: @related-actions
+            slot: regionBody
+        }}
+        sessionState {{
+            storage: request
+            dataType: number
+        }}
+        security {{
+            sessionStateProtection: checksumRequiredSessionLevel
+        }}
+    )
+{''.join(buttons)})
+'''.encode("utf-8")
 
 
 def _relation_query(operation, child, page, projection):
@@ -329,13 +433,15 @@ def _relation_query(operation, child, page, projection):
     return query
 
 
-def _clone(text, operation, child, page):
+def _clone(text, operation, child, page, *, request_context=False):
     match, projection = _report_source(text, child)
     query = _relation_query(operation, child, page, projection)
     source = ("        source {\n            location: localDatabase\n            type: sqlQuery\n"
               "            sqlQuery:\n                ```sql\n"
               + "\n".join("                " + line for line in query.splitlines())
-              + "\n                ```\n        }")
+              + "\n                ```\n"
+              + (f"            pageItemsToSubmit: P{page}_PARENT_ID\n" if request_context else "")
+              + "        }")
     text = text[:match.start()] + source + text[match.end():]
     text = text.replace(f"page {child['report_page_id']} (\n", f"page {page} (\n", 1)
     text, count = re.subn(r"^    alias: .*?$", f"    alias: FOX_RELATION_{page}", text, count=1, flags=re.M)
@@ -375,6 +481,10 @@ def _clone(text, operation, child, page):
         }}
     )
 '''
+    if request_context:
+        item = item.replace("            storage: session\n", "            storage: request\n", 1)
+        item = item.replace("A selected parent is retained for this session, including report refreshes; revisiting without a new link may retain the last selection.",
+                            "The report submits this tab's selected parent when it refreshes. Select a parent row to switch context.")
     return text[:-2] + item + ")\n"
 
 
@@ -382,29 +492,63 @@ def render_relation_package(parent_zip, plan):
     """Return deterministic ZIP and generation receipt, requiring fresh gates."""
     raw, infos, files, comment = _archive(parent_zip)
     bound = _validate(raw, files, plan)
-    occupied = {int(m[1]) for name in files if (m := re.fullmatch(r"pages/p(\d+)-[^/]+\.apx", name))}
+    occupied, aliases = set(), set()
+    for name, data in files.items():
+        if match := re.fullmatch(r"pages/p(\d+)-[^/]+\.apx", name):
+            number = int(match[1])
+            _need(number not in occupied and data.startswith(f"page {number} (\n".encode()), "PAGE_IDENTITY_INVALID")
+            occupied.add(number)
+            aliases.update(match[1].strip('"').upper() for match in
+                           re.finditer(r"^    alias: (.+)$", data.decode("utf-8"), re.M))
     additions, changes, destinations = {}, {}, {}
     page = 1
-    for op, _, _ in sorted(bound, key=lambda row: row[0]["relation_id"]):
-        while page in occupied and page < 9000:
+    def allocate():
+        nonlocal page
+        while page in occupied and page <= MAX_PAGE_ID:
             page += 1
-        _need(page < 9000, "PAGE_CAPACITY_EXCEEDED")
+        _need(page <= MAX_PAGE_ID, "PAGE_CAPACITY_EXCEEDED")
         occupied.add(page)
-        destinations[op["relation_id"]] = page
+        return page
+    outgoing = {}
+    for entry in bound:
+        outgoing.setdefault(entry[0]["parent_block_id"], []).append(entry)
+    for op, _, _ in sorted(bound, key=lambda row: row[0]["relation_id"]):
+        destinations[op["relation_id"]] = allocate()
+    selectors = {}
+    for block_id, entries in sorted(outgoing.items()):
+        if len(entries) > 1:
+            selector_page = allocate()
+            _need(f"FOX_RELATION_SELECTOR_{selector_page}" not in aliases, "PAGE_ALIAS_COLLISION")
+            selectors[block_id] = selector_page
+            filename = f"pages/p{selector_page:05d}-fox_relation_selector_{selector_page}.apx"
+            additions[filename] = _selector(sorted(entries, key=lambda row: row[0]["relation_id"]),
+                                            destinations, selector_page)
+
+    def link_outgoing(text, block_id):
+        entries = outgoing.get(block_id, [])
+        if not entries:
+            return text
+        if block_id in selectors:
+            return _link(text, selectors[block_id], "Choose related records")
+        return _link(text, destinations[entries[0][0]["relation_id"]])
     # Add outgoing links to base reports before cloning: every intermediate
     # context clone inherits its own outgoing relation link and validation link.
-    for op, parent, _ in bound:
+    for block_id, entries in outgoing.items():
+        parent = entries[0][1]
         report = parent["report_file"]
-        changes[report] = _link(files[report].decode("utf-8"), destinations[op["relation_id"]]).encode("utf-8")
+        text = files[report].decode("utf-8")
+        _need("        authentication: required\n" in text
+              and "        pageAccessProtection: argumentsMustHaveChecksum\n" in text, "PAGE_SECURITY_UNSUPPORTED")
+        changes[report] = link_outgoing(text, block_id).encode("utf-8")
     generated = []
     for op, _, child in bound:
         page = destinations[op["relation_id"]]
+        _need(f"FOX_RELATION_{page}" not in aliases, "PAGE_ALIAS_COLLISION")
         report = child["report_file"]
         text = files[report].decode("utf-8")
-        cloned = _clone(text, op, child, page)
-        outgoing = [entry for entry, _, _ in bound if entry["parent_block_id"] == op["child_block_id"]]
-        if outgoing:
-            cloned = _link(cloned, destinations[outgoing[0]["relation_id"]])
+        cloned = _clone(text, op, child, page, request_context=op["parent_block_id"] in selectors)
+        _need("        authentication: required\n" in cloned, "PAGE_SECURITY_UNSUPPORTED")
+        cloned = link_outgoing(cloned, op["child_block_id"])
         filename = f"pages/p{page:05d}-fox_relation_{page}.apx"
         _need(filename not in files, "PAGE_COLLISION")
         additions[filename] = cloned.encode("utf-8")
@@ -413,6 +557,14 @@ def render_relation_package(parent_zip, plan):
                           "child_block_id": op["child_block_id"], "parent_report_file": op["parent"]["report_file"],
                           "page_file": filename, "page_id": page, "parent_item": f"P{page}_PARENT_ID",
                           "write_lifecycle": False})
+        if op["parent_block_id"] in selectors:
+            selector_page = selectors[op["parent_block_id"]]
+            siblings = sorted(outgoing[op["parent_block_id"]], key=lambda row: row[0]["relation_id"])
+            sequence = next(i for i, entry in enumerate(siblings, 1) if entry[0]["relation_id"] == op["relation_id"])
+            generated[-1].update(selector_page_id=selector_page,
+                                 selector_page_file=f"pages/p{selector_page:05d}-fox_relation_selector_{selector_page}.apx",
+                                 selector_button=f"child-{sequence}", selector_label=_child_label(child, page),
+                                 selection_storage="request")
     coverage = deepcopy(plan["coverage"])
     for row in coverage:
         if row["status"] == "read_navigation_planned":

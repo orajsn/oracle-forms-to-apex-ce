@@ -1,10 +1,10 @@
 {
-  "version": "0.57.2",
+  "version": "0.57.3",
   "released_on": "2026-11-23",
-  "title": "Keep stored numeric fields with a saved rate",
+  "title": "Open the related records for a selected parent",
   "changes": [
-    "An eligible numeric input on the rate block can be entered, kept and saved with the selected row.",
-    "Reopening a saved rate retains its numeric value. The editor checks the decimal picture and detects conflicting changes."
+    "A parent with several eligible detail relations has a chooser for its related reports.",
+    "Composite relations match every declared key. A bare child item can be bound when the source identifies its owner and unique field."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

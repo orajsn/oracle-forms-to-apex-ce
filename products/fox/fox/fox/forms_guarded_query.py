@@ -160,7 +160,7 @@ def _bind(owner, refs, objects, props, trace, files):
     receipt = json.loads(files["fox-package/relation-receipt.json"])
     _need(plan.get("source_binding") == receipt.get("source_binding") == trace["source_binding"],
           "query_guard_relation_source_mismatch")
-    ops = [o for o in plan["operations"] if o["relation_id"] == relation["id"]]
+    ops = [o for o in native_relations.context_operations(plan) if o["relation_id"] == relation["id"]]
     rendered = [o for o in receipt["generated_operations"] if o["relation_id"] == relation["id"]]
     _need(len(ops) == len(rendered) == 1, "query_guard_generated_relation_required")
     op, rendered = ops[0], rendered[0]

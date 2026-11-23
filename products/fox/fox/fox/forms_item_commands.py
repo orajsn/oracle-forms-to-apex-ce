@@ -11,7 +11,7 @@ from html import escape
 import json
 import re
 
-from forms2apex import native_blueprint, native_buffer
+from forms2apex import native_blueprint, native_buffer, native_relations
 from .forms_behavior_plan import _Parser, _tokens, _source_objects, decode_control_entities
 from .forms_guarded_query import _field
 from .forms_master_detail import _fingerprint, _report
@@ -165,7 +165,7 @@ def _chain_for(block_id, objects, props, trace, files, relation):
         if not incoming:
             break
         rel = _one(incoming, 'INCOMING_RELATION_NOT_UNIQUE')
-        edge = _one([e for e in relation['operations'] if e['relation_id'] == rel['id']], 'RELATION_NOT_PROVED')
+        edge = _one([e for e in native_relations.context_operations(relation) if e['relation_id'] == rel['id']], 'RELATION_NOT_PROVED')
         _need(edge['child_block_id'] == path[-1] and edge['parent_block_id'] == rel['block_id']
               and edge['parent_block_id'] not in path, 'RELATION_PATH')
         edges.append(edge); path.append(edge['parent_block_id'])

@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 
-from forms2apex import native_blueprint, native_buffer
+from forms2apex import native_blueprint, native_buffer, native_relations
 from .forms_behavior_plan import _source_objects, decode_control_entities
 from .forms_guarded_query import _field, _projection
 from .forms_relation_plan import parse_join_condition, relation_attribute_sha256
@@ -193,7 +193,7 @@ def _bind(owner, parsed, objects, props, trace, files):
     plan = json.loads(files['fox-package/relation-plan.json'])
     rendered = json.loads(files['fox-package/relation-receipt.json'])
     _need(plan['source_binding'] == rendered['source_binding'] == trace['source_binding'], 'RELATION_BINDING')
-    edge = _one([e for e in plan['operations'] if e['relation_id'] == relation['id']], 'GENERATED_RELATION_REQUIRED')
+    edge = _one([e for e in native_relations.context_operations(plan) if e['relation_id'] == relation['id']], 'GENERATED_RELATION_REQUIRED')
     target = _one([e for e in rendered['generated_operations'] if e['relation_id'] == relation['id']], 'RENDERED_RELATION_REQUIRED')
     _need(edge['source_attribute_sha256'] == relation_attribute_sha256(attrs)
           and all(e['parent_block_id'] == parent['id'] and e['child_block_id'] == child['id']

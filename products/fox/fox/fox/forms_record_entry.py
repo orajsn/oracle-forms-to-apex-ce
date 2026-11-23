@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 
-from forms2apex import native_policy_rules
+from forms2apex import native_policy_rules, native_relations
 from forms2apex.native_buffer import _expand_groups
 from .forms_behavior_plan import _source_objects
 from .forms_policy_plan import build_policy_plan
@@ -119,7 +119,7 @@ def _chain(op, objects, props, trace, files):
         _need(len([r for r in objects.values() if r["kind"] == "Relation" and r["block_id"] == parent["id"]]) == 1,
               "OUTGOING_RELATION_NOT_UNIQUE")
         _need(plan.get("source_binding") == receipt.get("source_binding") == trace["source_binding"], "RELATION_BINDING")
-        edge = _one([e for e in plan.get("operations", []) if e["relation_id"] == rel["id"]], "RELATION_NOT_PROVED")
+        edge = _one([e for e in native_relations.context_operations(plan) if e["relation_id"] == rel["id"]], "RELATION_NOT_PROVED")
         rendered = _one([e for e in receipt.get("generated_operations", []) if e["relation_id"] == rel["id"]], "RELATION_NOT_RENDERED")
         attrs = props[rel["id"]]
         _need(attrs.get("RelationType", "").upper() == "JOIN", "JOIN_REQUIRED")

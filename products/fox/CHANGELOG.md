@@ -200,6 +200,22 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.3] - 2026-11-23
+
+### [improvement] Open related reports using the complete source key
+
+Where a parent has several eligible child blocks, an operator selects the
+parent row and chooses which related report to open. A composite join checks
+all of its declared key pairs, including a child item identified by its
+unqualified name and source ownership. Standalone reports remain available.
+Automatic query, propagation of values into new records and business writes
+are separate Forms behaviors.
+
+An installed APEX 26.1.6 app distinguished two synthetic accounts with the
+same ID in different branches. Each account opened its own rates and notes.
+Shared-session tabs kept their own branch through page reloads and report
+refreshes. All three fixture tables retained their original rows.
+
 ## [0.57.2] - 2026-11-23
 
 ### [improvement] Retain eligible stored numbers in the rate editor

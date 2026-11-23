@@ -12,7 +12,7 @@ from fox.forms_native_plan import POLICY_ID, build_native_prototype_plan
 from fox.forms_behavior_plan import build_behavior_plan
 from fox.forms_understanding_packet import _build
 from fox.xml_mapping import _blueprint
-from forms2apex import native_blueprint, native_behavior
+from forms2apex import native_blueprint, native_behavior, native_relations
 
 
 def documents(module="SALES", parent="ORDERS", child="LINES", leaf="DETAILS", *,
@@ -107,7 +107,8 @@ def test_repeated_block_names_are_resolved_within_distinct_source_modules():
 
 @pytest.mark.parametrize("condition", [
     "LINES.ORDER_ID = ORDERS.ORDER_ID OR 1=1", "NVL(LINES.ORDER_ID,0) = ORDERS.ORDER_ID",
-    "ORDER_ID = ORDERS.ORDER_ID", "LINES.ORDER_ID = OTHER.ORDER_ID",
+    "LINES.ORDER_ID = OTHER.ORDER_ID", "ORDER_ID = ORDER_ID",
+    "LINES.ORDER_ID = ORDER_ID", "ORDER_ID = LINES.ORDER_ID",
     "LINES.ORDER_ID = ORDERS.ORDER_ID; DELETE FROM X", "LINES.ORDER_ID >= ORDERS.ORDER_ID",
     "LINES.ORDER_ID = ORDERS.ORDER_ID AND LINES.ORDER_ID = ORDERS.ORDER_ID",
     "(LINES.ORDER_ID = ORDERS.ORDER_ID)", "LINES.ORDER_ID = ORDERS.ORDER_ID -- suffix",
@@ -146,15 +147,20 @@ def test_unsupported_source_metadata_has_visible_coverage(old, new):
     assert any(row["status"] == "unsupported" for row in plan["coverage"])
 
 
-@pytest.mark.parametrize("extra", [
-    '<Relation Name="SECOND" RelationType="Join" DetailBlock="LINES" JoinCondition="ORDERS.ORDER_ID=LINES.ORDER_ID"/>',
-    '<Relation Name="BRANCH" RelationType="Join" DetailBlock="DETAILS" JoinCondition="ORDERS.ORDER_ID=DETAILS.ORDER_ID"/>',
-])
-def test_duplicate_or_branching_parent_never_silently_selects_one(extra):
+def test_duplicate_child_declarations_never_silently_select_one():
+    extra = '<Relation Name="SECOND" RelationType="Join" DetailBlock="LINES" JoinCondition="ORDERS.ORDER_ID=LINES.ORDER_ID"/>'
     docs = documents(extra_parent=extra)
     plan = build_relation_plan(docs, package(docs))
     assert not any(len(op["join_pairs"]) == 1 for op in plan["operations"])
     assert sum(row["reason"] == "ambiguous_relation_branching" for row in plan["coverage"]) >= 2
+
+
+def test_multiple_incoming_rejects_both_target_edges_but_keeps_independent_child():
+    docs = documents(extra_parent='<Relation Name="BRANCH" RelationType="Join" DetailBlock="DETAILS" JoinCondition="ORDERS.ORDER_ID=DETAILS.ORDER_ID"/>')
+    plan = build_relation_plan(docs, package(docs))
+    assert len(plan["operations"]) == 1
+    assert len(plan["operations"][0]["join_pairs"]) == 1
+    assert sum(row["reason"] == "ambiguous_relation_branching" for row in plan["coverage"]) == 2
 
 
 def test_cycle_is_rejected_as_whole_graph():
@@ -167,11 +173,176 @@ def test_cycle_is_rejected_as_whole_graph():
     assert {row["reason"] for row in plan["coverage"]} == {"cyclic_relation_context"}
 
 
-def test_unsupported_second_source_edge_still_makes_the_parent_ambiguous():
+def test_unsupported_second_incoming_edge_still_makes_the_child_ambiguous():
     docs = documents(extra_parent='<Relation Name="INVALID_BRANCH" RelationType="Join" DetailBlock="DETAILS" JoinCondition="1=1"/>')
     plan = build_relation_plan(docs, package(docs))
-    assert all(len(op["join_pairs"]) != 1 for op in plan["operations"])
+    assert len(plan["operations"]) == 1
+    assert len(plan["operations"][0]["join_pairs"]) == 1
     assert any(row["reason"] == "ambiguous_relation_branching" for row in plan["coverage"])
+
+
+def sibling_documents(count=6, *, condition=None, parent_extra="", child_extra="", last_extra=""):
+    """Synthetic customer/branch analogue; no original customer input or data."""
+    item = lambda name: f'<Item Name="{name}" ItemType="Text Item" DatabaseItem="true" DataType="Char"/>'
+    relation = lambda i: (f'<Relation Name="CUSTOMER_DETAIL_{i}" RelationType="Join" DetailBlock="DETAIL{i}" '
+        f'JoinCondition="{escape(condition or "DETAIL_ID=CUSTOMERS.CUST_ID AND DETAIL_BRANCH=CUSTOMERS.CUST_BRANCH", quote=True)}" '
+        'AutoQuery="false" Deferred="false" DeleteRecord="Non Isolated" PreventMasterlessOperations="false"/>')
+    xml = ('<FormModule Name="COMPOSITE"><Block Name="CUSTOMERS" DatabaseBlock="true">'
+           + item("CUST_ID") + item("CUST_BRANCH") + parent_extra
+           + ''.join(relation(i) for i in range(count)) + '</Block>'
+           + ''.join(f'<Block Name="DETAIL{i}" DatabaseBlock="true">' + item("DETAIL_ID")
+                     + item("DETAIL_BRANCH") + child_extra + (last_extra if i == count - 1 else "")
+                     + '</Block>' for i in range(count)) + '</FormModule>')
+    return [("composite.xml", xml.encode())]
+
+
+@pytest.mark.parametrize("condition", [
+    "DETAIL_ID=CUSTOMERS.CUST_ID AND DETAIL_BRANCH=CUSTOMERS.CUST_BRANCH",
+    "CUSTOMERS.CUST_ID=DETAIL_ID AND CUSTOMERS.CUST_BRANCH=DETAIL_BRANCH",
+    "DETAIL_ID = CUSTOMERS.CUST_ID AND CUSTOMERS.CUST_BRANCH = DETAIL_BRANCH",
+])
+def test_six_independent_children_bind_both_keys_without_lifecycle_claims(condition):
+    docs = sibling_documents(condition=condition)
+    raw = package(docs)
+    plan = build_relation_plan(docs, raw)
+    assert plan == build_relation_plan(docs, raw)
+    assert len(plan["operations"]) == 6
+    assert len({op["child_block_id"] for op in plan["operations"]}) == 6
+    assert len({op["parent_block_id"] for op in plan["operations"]}) == 1
+    assert all(len(op["join_pairs"]) == 2 for op in plan["operations"])
+    packet, _ = _build(docs)
+    names = {obj["id"]: obj["name"] for entry in packet["sources"] for obj in entry["facts"]["objects"]}
+    for op in plan["operations"]:
+        assert [(names[p["parent_item_id"]], names[p["child_item_id"]]) for p in op["join_pairs"]] == [
+            ("CUST_ID", "DETAIL_ID"), ("CUST_BRANCH", "DETAIL_BRANCH")]
+        assert len({p["parent_item_id"] for p in op["join_pairs"]}) == 2
+        assert len({p["child_item_id"] for p in op["join_pairs"]}) == 2
+        assert {p["data_type"] for p in op["join_pairs"]} == {"VARCHAR2"}
+        assert op["source_flags"] == {"AutoQuery": "false", "Deferred": "false",
+            "DeleteRecord": "Non Isolated", "PreventMasterlessOperations": "false"}
+    assert all(row["reason"] == "manual_navigation_without_assignment_context" for row in plan["coverage"])
+    assert all(row["unimplemented_lifecycle"] == ["AutoQuery", "Deferred", "DeleteRecord", "PreventMasterlessOperations"]
+               for row in plan["coverage"])
+    assert all(plan[key] is False for key in ("native_generated", "runtime_verified", "business_accepted"))
+    unsigned = {key: value for key, value in plan.items() if key != "plan_sha256"}
+    assert plan["plan_sha256"] == native_relations._sha(native_relations._json(unsigned))
+
+
+def test_composite_sibling_navigation_preserves_the_saved_rate_editor():
+    from xml.etree import ElementTree as ET
+    from fox.forms_native_plan import POLICY_ID
+    from fox.xml_mapping import generate_xml_package
+    from test_forms_rate_numbers import SOURCE as rate_source
+
+    form = ET.fromstring(rate_source)
+    parent = form.find("./Block[@Name='HEADER']")
+    rates = form.find("./Block[@Name='LINES']")
+    notes = ET.SubElement(form, 'Block', Name='NOTES', DatabaseBlock='true')
+    for block, fields in ((parent, ['ACCOUNT', 'BRANCH']), (rates, ['BILL_TO', 'BILL_BRANCH']),
+                          (notes, ['NOTE_ACCOUNT', 'NOTE_BRANCH'])):
+        for name in fields:
+            ET.SubElement(block, 'Item', Name=name, ColumnName=name, DatabaseItem='true',
+                          ItemType='Text Item', DataType='Char', MaximumLength='20')
+    for child, keys in [('LINES', ('BILL_TO', 'BILL_BRANCH')), ('NOTES', ('NOTE_ACCOUNT', 'NOTE_BRANCH'))]:
+        ET.SubElement(parent, 'Relation', Name='HEADER_' + child, DetailBlock=child, RelationType='Join',
+                      JoinCondition=f'{keys[0]}=HEADER.ACCOUNT AND {keys[1]}=HEADER.BRANCH', AutoQuery='false')
+    _, generated = generate_xml_package([('shipping.xml', ET.tostring(form))],
+                                         'rates-by-account', 'Rates by account', POLICY_ID)
+    relations = generated['relation_receipt']['generated_operations']
+    assert len(relations) == 2 and len({op['selector_page_id'] for op in relations}) == 1
+    meta = generated['metadata']
+    assert meta['row_lookup_summary'] == {'editors': 1, 'mapped_returns': 5}
+    workspace, = meta['saved_lookup_workspaces']
+    amount, = workspace['stored_number_fields']
+    assert amount['name'] == 'AMOUNT' and amount['column'] == 'N001'
+
+
+def test_bare_child_parser_requires_unique_declared_child_evidence():
+    join = "DETAIL_ID=CUSTOMERS.CUST_ID AND CUSTOMERS.CUST_BRANCH=DETAIL_BRANCH"
+    assert parse_join_condition(join, "CUSTOMERS", "DETAIL0",
+        child_item_names=["detail_id", "detail_branch"]) == [("CUST_ID", "DETAIL_ID"), ("CUST_BRANCH", "DETAIL_BRANCH")]
+    for names in (None, [], ["DETAIL_ID"], ["DETAIL_ID", "DETAIL_BRANCH", "detail_id"]):
+        with pytest.raises(UnsupportedRelation):
+            parse_join_condition(join, "CUSTOMERS", "DETAIL0", child_item_names=names)
+    four = " AND ".join(f"K{i}=CUSTOMERS.P{i}" for i in range(4))
+    assert len(parse_join_condition(four, "CUSTOMERS", "DETAIL0", child_item_names=[f"K{i}" for i in range(4)])) == 4
+
+
+@pytest.mark.parametrize("condition", [
+    "UNKNOWN=CUSTOMERS.CUST_ID", "DETAIL_ID=CUSTOMERS.UNKNOWN", "DETAIL_ID=OTHER.CUST_ID",
+    "DETAIL0.DETAIL_ID=CUST_ID", "DETAIL_ID=CUST_ID", "DETAIL_ID=CUSTOMERS.CUST_ID OR 1=1",
+    "DETAIL_ID=CUSTOMERS.CUST_ID AND DETAIL_BRANCH=CUSTOMERS.CUST_ID",
+    "DETAIL_ID=CUSTOMERS.CUST_ID AND DETAIL_ID=CUSTOMERS.CUST_BRANCH",
+    "DETAIL_ID=CUSTOMERS.CUST_ID /* suffix */", ":DETAIL_ID=CUSTOMERS.CUST_ID",
+])
+def test_unqualified_child_unsupported_shapes_fail_closed(condition):
+    docs = sibling_documents(count=1, condition=condition)
+    plan = build_relation_plan(docs, package(docs))
+    assert plan["operations"] == []
+    assert plan["coverage"][0]["status"] == "unsupported"
+
+
+def test_unsupported_duplicate_child_edge_still_rejects_supported_sibling_edge():
+    extra = '<Relation Name="INVALID_DUPLICATE" RelationType="Join" DetailBlock="DETAIL0" JoinCondition="1=1"/>'
+    docs = sibling_documents(count=2, parent_extra=extra)
+    plan = build_relation_plan(docs, package(docs))
+    assert len(plan["operations"]) == 1
+    assert sum(row["reason"] == "ambiguous_relation_branching" for row in plan["coverage"]) == 1
+
+
+def test_branching_graph_cycle_is_detected_even_with_multiple_outgoing_edges():
+    cycle = '<Relation Name="BACK" RelationType="Join" DetailBlock="CUSTOMERS" JoinCondition="CUSTOMERS.CUST_ID=DETAIL1.DETAIL_ID"/>'
+    docs = sibling_documents(count=2, last_extra=cycle)
+    plan = build_relation_plan(docs, package(docs))
+    assert plan["operations"] == []
+    assert {row["reason"] for row in plan["coverage"]} == {"cyclic_relation_context"}
+
+
+def test_relation_capacity_remains_a_visible_limit(monkeypatch):
+    docs = sibling_documents(count=2)
+    raw = package(docs)
+    monkeypatch.setattr(native_relations, "MAX_RELATIONS", 1)
+    plan = build_relation_plan(docs, raw)
+    assert len(plan["operations"]) == 1
+    assert sum(row["reason"] == "relation_page_limit" for row in plan["coverage"]) == 1
+
+
+@pytest.mark.parametrize("old,new", [
+    ('<Block Name="DETAIL1"', '<Block Name="detail0"'),
+    ('<Block Name="DETAIL1"', '<Block Name="customers"'),
+    ('<Item Name="DETAIL_BRANCH"', '<Item Name="DETAIL_ID"'),
+])
+def test_case_insensitive_source_name_ambiguity_fails_before_relation_package(old, new):
+    name, xml = sibling_documents(count=2)[0]
+    docs = [(name, xml.replace(old.encode(), new.encode(), 1))]
+    with pytest.raises(ValueError, match="Duplicate source block or item identity"):
+        package(docs)
+
+
+def test_unqualified_composite_key_requires_exact_compatible_target_types():
+    name, xml = sibling_documents(count=1)[0]
+    xml = xml.replace(b'Name="DETAIL_BRANCH" ItemType="Text Item" DatabaseItem="true" DataType="Char"',
+                      b'Name="DETAIL_BRANCH" ItemType="Text Item" DatabaseItem="true" DataType="Number"')
+    docs = [(name, xml)]
+    plan = build_relation_plan(docs, package(docs))
+    assert plan["operations"] == []
+    assert plan["coverage"][0]["reason"] == "same_relation_key_types_required"
+
+
+def test_unsupported_cycle_declaration_blocks_supported_context_navigation():
+    cycle = '<Relation Name="BACK" RelationType="Join" DetailBlock="CUSTOMERS" JoinCondition="1=1"/>'
+    docs = sibling_documents(count=2, last_extra=cycle)
+    plan = build_relation_plan(docs, package(docs))
+    assert plan["operations"] == []
+    assert sum(row["reason"] == "cyclic_relation_context" for row in plan["coverage"]) == 2
+
+
+def test_self_relation_is_never_a_manual_context():
+    self_edge = '<Relation Name="SELF" RelationType="Join" DetailBlock="CUSTOMERS" JoinCondition="CUSTOMERS.CUST_ID=CUSTOMERS.CUST_ID"/>'
+    docs = sibling_documents(count=1, parent_extra=self_edge)
+    plan = build_relation_plan(docs, package(docs))
+    assert plan["operations"] == []
+    assert any(row["reason"] == "cyclic_relation_context" for row in plan["coverage"])
 
 
 def test_computed_key_is_not_direct_relation_input_and_varchar2_is_supported():

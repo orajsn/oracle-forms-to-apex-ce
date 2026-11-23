@@ -27,13 +27,13 @@ def pack(files):
     return output.getvalue()
 
 
-def fixture():
+def fixture(block_count=3):
     # Standalone converter fixture: target-bound IR is synthetic, not presented
     # as proof of a source recognizer. Fresh-source grammar tests live in FOX.
     spec = {"schema_version": 1, "profile_id": native_blueprint.PROFILE_ID,
             "data_mode": "synthetic_test_only", "project_id": "relation-renderer",
             "project_name": "Relation renderer", "source_binding": "a" * 64, "blocks": []}
-    for index in range(1, 4):
+    for index in range(1, block_count + 1):
         block_id = source_id(index)
         table = "FOX_NATIVE_" + renderer._sha(renderer._json([spec["project_id"], spec["source_binding"], block_id]))[:19].upper()
         spec["blocks"].append({"source_block_id": block_id, "name": f"BLOCK_{index}", "sequence": index,
@@ -89,6 +89,29 @@ def fixture():
             "reason": "manual_read_navigation_only", "unimplemented_lifecycle":
             ["AutoQuery", "Deferred", "DeleteRecord", "PreventMasterlessOperations"],
             "runtime_verified": False, "business_accepted": False})
+    return raw, reseal(plan)
+
+
+def retarget(raw, operation, parent_index, child_index):
+    """Rebind only synthetic target facts; never infer a source relation."""
+    blocks = json.loads(members(raw)[renderer.TRACE])["blocks"]
+    parent, child = blocks[parent_index], blocks[child_index]
+    for role, block in (("parent", parent), ("child", child)):
+        operation[role + "_block_id"] = block["source_block_id"]
+        operation[role] = {"table": block["table_name"], "report_file": block["report_file"],
+                           "report_page_id": block["report_page_id"], "row_id_column": "FOX_ROW_ID"}
+    for offset, pair in enumerate(operation["join_pairs"]):
+        for role, block in (("parent", parent), ("child", child)):
+            pair[role + "_item_id"] = block["items"][offset]["source_item_id"]
+            pair[role + "_column"] = block["items"][offset]["column"]
+
+
+def fanout_fixture():
+    raw, plan = fixture()
+    # Both children use customer ID AND branch, including the later operation.
+    plan["operations"][0]["join_pairs"].append(deepcopy(plan["operations"][1]["join_pairs"][1]))
+    for index, operation in enumerate(plan["operations"], 1):
+        retarget(raw, operation, 0, index)
     return raw, reseal(plan)
 
 
@@ -240,3 +263,190 @@ def test_generated_projection_preserves_inert_literals_and_checks_exact_slots():
                        "FOX_ROW_ID, 1; COMMIT as OUTPUT", "FOX_ROW_ID, func(1 as OUTPUT"):
         with pytest.raises(ValueError):
             renderer._projection_columns(projection, ["FOX_ROW_ID", "OUTPUT"])
+
+
+def test_single_successor_native_members_remain_exact_0572_bytes():
+    raw, plan = fixture()
+    output, receipt = renderer.render_relation_package(raw, plan)
+    native = {name: renderer._sha(data) for name, data in members(output).items() if name.endswith(".apx")}
+    # Captured from fox-v0.57.2's renderer with this unchanged synthetic fixture.
+    assert renderer._sha(renderer._json(native)) == "e7bea275dc007b66b1d154c66846fa4218a1ad39b160acf0563584f8b4f7d628"
+    assert all("selector_page_id" not in row for row in receipt["generated_operations"])
+
+
+def test_fanout_has_one_secured_request_selector_and_each_distinct_child_action():
+    raw, plan = fanout_fixture()
+    output, receipt = renderer.render_relation_package(raw, plan)
+    assert renderer.render_relation_package(raw, plan) == (output, receipt)
+    files = members(output)
+    rows = receipt["generated_operations"]
+    assert len(receipt["added_pages"]) == 3
+    assert len({row["page_id"] for row in rows}) == 2
+    assert len({row["selector_page_id"] for row in rows}) == 1
+    hub_id = rows[0]["selector_page_id"]
+    hub = files[rows[0]["selector_page_file"]].decode()
+    parent = files[plan["operations"][0]["parent"]["report_file"]].decode()
+    assert parent.count("linkText: Choose related records") == 1
+    assert f'P{hub_id}_PARENT_ID: "#FOX_ROW_ID#"' in parent
+    assert "authentication: required" in hub
+    assert "pageAccessProtection: argumentsMustHaveChecksum" in hub
+    assert "storage: request" in hub and "storage: session" not in hub
+    assert "sessionStateProtection: checksumRequiredSessionLevel" in hub
+    assert len(re.findall(r"^    button ", hub, re.M)) == 2
+    for row, operation in zip(rows, plan["operations"], strict=True):
+        assert f'button {row["selector_button"]} (' in hub
+        assert json.dumps(row["selector_label"]) in hub
+        assert f'page: {row["page_id"]}' in hub
+        assert f'{row["parent_item"]}: "&P{hub_id}_PARENT_ID."' in hub
+        assert row["selection_storage"] == "request"
+        child = files[row["page_file"]].decode()
+        assert "authentication: required" in child and "storage: request" in child
+        assert "storage: session" not in child
+        assert "The report submits this tab's selected parent" in child
+        assert f"pageItemsToSubmit: {row['parent_item']}" in child
+        for pair in operation["join_pairs"]:
+            assert f"fox_parent.{pair['parent_column']} = fox_child.{pair['child_column']}" in child
+        assert not re.search(r"^    (?:process|button)\b", child, re.M)
+    assert all(receipt[key] is False for key in ("write_lifecycle", "runtime_verified", "business_accepted"))
+
+
+def test_every_sibling_query_separates_same_account_branches_null_and_missing_parent():
+    raw, plan = fanout_fixture()
+    output, receipt = renderer.render_relation_package(raw, plan)
+    files = members(output)
+    conn = sqlite3.connect(":memory:")
+    trace = json.loads(files[renderer.TRACE])
+    for block in trace["blocks"]:
+        columns = ", ".join(item["column"] + " number" for item in block["items"])
+        conn.execute(f"create table {block['table_name']}(FOX_ROW_ID number, {columns})")
+    table = plan["operations"][0]["parent"]["table"]
+    pc = [pair["parent_column"] for pair in plan["operations"][0]["join_pairs"]]
+    conn.executemany(f"insert into {table}(FOX_ROW_ID,{','.join(pc)}) values(?,?,?)",
+                     [(1, 10, 20), (2, 10, 30), (3, None, 20), (4, 10, None), (5, 10, 20)])
+    for index, operation in enumerate(plan["operations"], 1):
+        cc = [pair["child_column"] for pair in operation["join_pairs"]]
+        conn.executemany(f"insert into {operation['child']['table']}(FOX_ROW_ID,{','.join(cc)}) values(?,?,?)",
+                         [(index * 100 + n, a, b) for n, a, b in
+                          [(1, 10, 20), (2, 10, 20), (3, 10, 30), (4, 90, 20), (5, None, 20), (6, 10, None)]])
+    before = list(conn.iterdump())
+    for index, row in enumerate(receipt["generated_operations"], 1):
+        query = re.search(r"```sql\n(.*?)\n                ```", files[row["page_file"]].decode(), re.S)[1]
+        def selected(parent_id):
+            return [record[0] for record in conn.execute(query, {row["parent_item"]: parent_id})]
+        assert selected(1) == selected(5) == [index * 100 + 1, index * 100 + 2]
+        assert selected(2) == [index * 100 + 3]
+        assert selected(1) == [index * 100 + 1, index * 100 + 2]  # Tab A after B.
+        assert selected(None) == selected(999) == selected(3) == selected(4) == []
+    assert list(conn.iterdump()) == before
+    conn.execute(f"delete from {table} where FOX_ROW_ID=1")
+    for row in receipt["generated_operations"]:
+        query = re.search(r"```sql\n(.*?)\n                ```", files[row["page_file"]].decode(), re.S)[1]
+        assert conn.execute(query, {row["parent_item"]: 1}).fetchall() == []
+    conn.close()
+
+
+def test_nested_fanout_clone_links_to_its_own_selector():
+    raw, plan = fixture(block_count=5)
+    template, coverage = deepcopy(plan["operations"][0]), deepcopy(plan["coverage"][0])
+    plan["operations"], plan["coverage"] = [], []
+    for index, (parent, child) in enumerate([(0, 1), (0, 2), (1, 3), (1, 4)]):
+        operation, row = deepcopy(template), deepcopy(coverage)
+        operation["relation_id"] = row["relation_id"] = source_id(90 + index)
+        retarget(raw, operation, parent, child)
+        plan["operations"].append(operation)
+        plan["coverage"].append(row)
+    output, receipt = renderer.render_relation_package(raw, reseal(plan))
+    files = members(output)
+    rows = receipt["generated_operations"]
+    assert len(receipt["added_pages"]) == 6
+    assert len({row["selector_page_id"] for row in rows}) == 2
+    next_hub = rows[2]["selector_page_id"]
+    intermediate = files[rows[0]["page_file"]].decode()
+    assert f'P{next_hub}_PARENT_ID: "#FOX_ROW_ID#"' in intermediate
+    assert "linkText: Choose related records" in intermediate
+    assert rows[0]["selector_page_id"] != next_hub
+
+
+@pytest.mark.parametrize("case", ["duplicate", "incoming", "cycle", "branch_cycle"])
+def test_invalid_graphs_reject_every_edge_including_later_siblings(case):
+    raw, plan = fanout_fixture()
+    if case == "duplicate":
+        retarget(raw, plan["operations"][1], 0, 1)
+    elif case == "incoming":
+        retarget(raw, plan["operations"][1], 2, 1)
+    elif case == "cycle":
+        retarget(raw, plan["operations"][1], 1, 0)
+    else:
+        operation, row = deepcopy(plan["operations"][1]), deepcopy(plan["coverage"][1])
+        operation["relation_id"] = row["relation_id"] = source_id(92)
+        retarget(raw, operation, 2, 0)
+        plan["operations"].append(operation)
+        plan["coverage"].append(row)
+    with pytest.raises(renderer.RelationRenderError, match="GRAPH_"):
+        renderer.render_relation_package(raw, reseal(plan))
+
+
+@pytest.mark.parametrize("case", ["parent_public", "child_public", "duplicate_page", "wrong_page", "alias_collision"])
+def test_fanout_rejects_unsafe_page_security_identity_and_labels(case):
+    raw, plan = fanout_fixture()
+    files = members(raw)
+    if case in {"parent_public", "child_public"}:
+        role = "parent" if case == "parent_public" else "child"
+        report = plan["operations"][-1][role]["report_file"]
+        files[report] = files[report].replace(b"authentication: required", b"authentication: public")
+    elif case == "duplicate_page":
+        files["pages/p00001-extra.apx"] = b"page 1 (\n)\n"
+    elif case == "wrong_page":
+        files["pages/p00002-extra.apx"] = b"page 4 (\n)\n"
+    else:
+        files["pages/p00007-extra.apx"] = b"page 7 (\n    alias: FOX_RELATION_SELECTOR_6\n)\n"
+    raw = pack(files)
+    plan["parent_zip_sha256"] = renderer._sha(raw)
+    with pytest.raises(renderer.RelationRenderError):
+        renderer.render_relation_package(raw, reseal(plan))
+
+
+@pytest.mark.parametrize("name", ["Notes #2", "Terms & conditions", "&APP_USER.", "<detail>"])
+def test_unusual_child_labels_get_safe_destination_fallback_without_losing_association(name):
+    raw, plan = fanout_fixture()
+    files = members(raw)
+    trace = json.loads(files[renderer.TRACE])
+    trace["blocks"][-1]["name"] = name
+    files[renderer.TRACE] = renderer._json(trace)
+    plan["parent_trace_sha256"] = renderer._sha(files[renderer.TRACE])
+    plan["parent_trace_canonical_sha256"] = renderer._sha(renderer._json(trace))
+    raw = pack(files)
+    plan["parent_zip_sha256"] = renderer._sha(raw)
+    output, receipt = renderer.render_relation_package(raw, reseal(plan))
+    row = receipt["generated_operations"][-1]
+    assert row["selector_label"] == f"View related report {row['page_id']}"
+    assert row["child_block_id"] == trace["blocks"][-1]["source_block_id"]
+    hub = members(output)[row["selector_page_file"]].decode()
+    assert name not in hub
+    assert json.dumps(row["selector_label"]) in hub
+
+
+def test_selector_counts_toward_page_capacity_and_relations_remain_bounded(monkeypatch):
+    raw, plan = fanout_fixture()
+    monkeypatch.setattr(renderer, "MAX_PAGE_ID", 5)
+    with pytest.raises(renderer.RelationRenderError, match="PAGE_CAPACITY_EXCEEDED"):
+        renderer.render_relation_package(raw, plan)
+    monkeypatch.setattr(renderer, "MAX_PAGE_ID", 8999)
+    monkeypatch.setattr(renderer, "MAX_RELATIONS", 1)
+    with pytest.raises(renderer.RelationRenderError, match="PLAN_LIMIT_INVALID"):
+        renderer.render_relation_package(raw, plan)
+
+
+def test_selector_pages_respect_existing_reserved_page_ids():
+    raw, plan = fanout_fixture()
+    files = members(raw)
+    for number in (2, 4, 6):
+        files[f"pages/p{number:05d}-existing.apx"] = f"page {number} (\n)\n".encode()
+    raw = pack(files)
+    plan["parent_zip_sha256"] = renderer._sha(raw)
+    output, receipt = renderer.render_relation_package(raw, reseal(plan))
+    rows = receipt["generated_operations"]
+    assert [row["page_id"] for row in rows] == [7, 8]
+    assert {row["selector_page_id"] for row in rows} == {9}
+    assert all(members(output)[name] == data for name, data in files.items()
+               if name not in receipt["changed_members"])
