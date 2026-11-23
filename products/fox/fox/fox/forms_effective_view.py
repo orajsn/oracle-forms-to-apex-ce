@@ -22,7 +22,9 @@ from .forms_facts import (
     MAX_FILE_BYTES, MODULE_KINDS, _SECRET, _SECRET_NAME, _identifier,
 )
 
-POLICY_ID = "fox-forms-effective-metadata-copy-missing-v1"
+LEGACY_POLICY_ID = "fox-forms-effective-metadata-copy-missing-v1"
+POLICY_ID = "fox-forms-effective-metadata-copy-missing-v2"
+_CHECKBOX_OTHER = {v.casefold(): v for v in ("Checked", "Unchecked", "Not Allowed")}
 MAX_RECEIPT_PATH_BYTES = 16 * 1024 * 1024
 PROPERTIES = frozenset({
     "Name", "DSCName", "DatabaseBlock", "DatabaseItem", "ItemType", "DataType",
@@ -89,7 +91,7 @@ def _typed(prop: str, value: str, *, element_kind: str | None = None) -> str:
     return value
 
 
-def _parse(raw: bytes) -> tuple[_Node, list[_Node]]:
+def _parse(raw: bytes, *, checkbox_policy=False) -> tuple[_Node, list[_Node]]:
     if not isinstance(raw, bytes) or not raw or len(raw) > MAX_FILE_BYTES:
         raise ValueError("Forms XML must be nonempty and at most 5 MB.")
     try:
@@ -128,6 +130,15 @@ def _parse(raw: bytes) -> tuple[_Node, list[_Node]]:
         uri, local, _ = expanded(tag, scope)
         canonical = local if uri in {"", FORMS_NAMESPACE} else f"{{{uri}}}{local}"
         props, named_secrets, property_values = {}, [], []
+        # ALL also emits checkbox properties on ordinary text items. Ignore
+        # those before interpreting attribute provenance. An overridden Item
+        # may have no ItemType, with its actual type supplied by its ALL peer.
+        checkbox_candidate = checkbox_policy and canonical == "Item"
+        if checkbox_candidate:
+            for key, value in attributes.items():
+                if key.split(":")[-1] == "ItemType" and value.casefold() != "check box":
+                    checkbox_candidate = False
+                    break
         for key, value in attributes.items():
             if key == "xmlns" or key.startswith("xmlns:"):
                 continue
@@ -138,7 +149,8 @@ def _parse(raw: bytes) -> tuple[_Node, list[_Node]]:
                 property_values.append(value)
             if (_SECRET_NAME.fullmatch(field) and value and not value.startswith(":")) or any(p.search(value) for p in _SECRET):
                 raise ValueError("Possible credential detected. Redact the original locally.")
-            if field not in PROPERTIES:
+            is_checkbox_policy = checkbox_candidate and field == "CheckBoxOtherValues"
+            if field not in PROPERTIES and not is_checkbox_policy:
                 continue
             if attr_uri not in {"", FORMS_NAMESPACE}:
                 raise ValueError("Whitelisted Forms metadata has a foreign namespace alias.")
@@ -157,7 +169,12 @@ def _parse(raw: bytes) -> tuple[_Node, list[_Node]]:
                 provenance = "module_" + match[1]
             # Inherited values are intentionally not interpreted, even if they
             # look plausible. Their actual meaning remains unresolved.
-            typed = None if provenance == "inherited" else _typed(field, value, element_kind=canonical)
+            if provenance == "inherited":
+                typed = None
+            elif is_checkbox_policy:
+                typed = _CHECKBOX_OTHER.get(value.casefold())
+            else:
+                typed = _typed(field, value, element_kind=canonical)
             props[field] = (value, typed, provenance, key)
         if canonical == "DataSourceColumn":
             if "Name" in props and "DSCName" in props:
@@ -240,7 +257,8 @@ def _index(root: _Node) -> dict[str, _Node]:
     return indexed
 
 
-def derive_effective_view(original_name: str, original_xml: bytes, all_xml: bytes, *, binary_sha256: str) -> dict:
+def derive_effective_view(original_name: str, original_xml: bytes, all_xml: bytes, *, binary_sha256: str,
+                          policy_id: str = POLICY_ID) -> dict:
     """Return separate XML bytes and a value-free local derivation receipt.
 
     No file, Oracle, provider or network operations occur. The supplied binary
@@ -254,13 +272,17 @@ def derive_effective_view(original_name: str, original_xml: bytes, all_xml: byte
         raise ValueError("Use a simple XML filename without directory paths.")
     if not isinstance(binary_sha256, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", binary_sha256):
         raise ValueError("An original binary SHA-256 is required.")
-    original_root, original_nodes = _parse(original_xml)
-    all_root, _ = _parse(all_xml)
+    if policy_id not in (LEGACY_POLICY_ID, POLICY_ID):
+        raise ValueError("Unrecognized Forms metadata derivation policy.")
+    checkbox_policy = policy_id == POLICY_ID
+    original_root, original_nodes = _parse(original_xml, checkbox_policy=checkbox_policy)
+    all_root, _ = _parse(all_xml, checkbox_policy=checkbox_policy)
     original_hash, all_hash = _hash(original_xml), _hash(all_xml)
     original_index, all_index = _index(original_root), _index(all_root)
     if original_index.keys() != all_index.keys():
         raise ValueError("Original and ALL Forms object structures or exact names differ.")
     changes, unresolved, actions, receipt_path_bytes = [], [], Counter(), 0
+    unknown_checkbox = []
     for path, node in original_index.items():
         source = all_index[path]
         # The index proves parent/name identity; child sets prove the entire
@@ -268,12 +290,19 @@ def derive_effective_view(original_name: str, original_xml: bytes, all_xml: byte
         if node.tag != source.tag or {c.path for c in node.children} != {c.path for c in source.children}:
             raise ValueError("Original and ALL Forms object structures differ.")
         for prop, (value, typed, provenance, key) in source.properties.items():
+            if prop == "CheckBoxOtherValues":
+                item_type = source.properties.get("ItemType")
+                if not item_type or (item_type[1] or "").casefold() != "check box":
+                    continue
             receipt_path_bytes += len(path.encode())
             if receipt_path_bytes > MAX_RECEIPT_PATH_BYTES:
                 raise ValueError("Forms metadata exceeds the bounded receipt limit.")
             if provenance == "inherited":
                 unresolved.append({"path": path, "property": prop})
                 actions["unresolved_inherited"] += 1
+                continue
+            if prop == "CheckBoxOtherValues" and typed is None:
+                unknown_checkbox.append({"path": path, "property": prop})
                 continue
             existing = node.properties.get(prop)
             if existing is not None:
@@ -294,7 +323,7 @@ def derive_effective_view(original_name: str, original_xml: bytes, all_xml: byte
         raise ValueError("Derived Forms XML exceeds the bounded 5 MB limit.")
     # Serialization changes spelling only. This explicit semantic check protects
     # all original content (including unknown/code properties, text and tails).
-    _, derived_nodes = _parse(derived)
+    _, derived_nodes = _parse(derived, checkbox_policy=checkbox_policy)
     if len(original_nodes) != len(derived_nodes):
         raise ValueError("Derived Forms XML did not preserve original structure.")
     for before, after in zip(original_nodes, derived_nodes, strict=True):
@@ -302,7 +331,7 @@ def derive_effective_view(original_name: str, original_xml: bytes, all_xml: byte
                 or before.element.text != after.element.text or before.element.tail != after.element.tail):
             raise ValueError("Derived Forms XML did not preserve original content.")
     receipt = {
-        "schema_version": 1, "scope": "fox-forms-effective-view-v1", "policy_id": POLICY_ID,
+        "schema_version": 1, "scope": "fox-forms-effective-view-v1", "policy_id": policy_id,
         "derivation_status": "LOCAL_SOURCE_DERIVATION_ONLY", "binary_sha256": binary_sha256.lower(),
         "original_sha256": original_hash, "all_sha256": all_hash, "derived_sha256": _hash(derived),
         "original_unchanged": _hash(original_xml) == original_hash,
@@ -314,4 +343,6 @@ def derive_effective_view(original_name: str, original_xml: bytes, all_xml: byte
                    "import_allowed": False, "native_generation_allowed": False,
                    "actual_tool_run_binding_required": True, "oracle_provenance_attested": False},
     }
+    if unknown_checkbox:
+        receipt["unresolved_checkbox_policy"] = unknown_checkbox
     return {"derived_xml": derived, "receipt": receipt}

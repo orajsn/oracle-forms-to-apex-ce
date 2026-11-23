@@ -16,6 +16,60 @@ def derive(original, all_xml):
     return view.derive_effective_view("synthetic.xml", original, all_xml, binary_sha256=BINARY)
 
 
+def checkbox_pair(item_type="Check Box", prop="S_default:CheckBoxOtherValues", value="Checked", original_prop=""):
+    original = (f'<FormModule Name="S"><Item Name="FLAG" {original_prop}/></FormModule>').encode()
+    expanded = (f'<FormModule Name="S" xmlns:S_default="{NS}" xmlns:UNKNOWN_inherited="{NS}" '
+                f'xmlns:other="urn:foreign"><Item Name="FLAG" S_default:ItemType="{item_type}" '
+                f'{prop}="{value}" CheckedValue="1" UncheckedValue="0" InitializeValue="0"/></FormModule>').encode()
+    return original, expanded
+
+
+@pytest.mark.parametrize(("value", "expected"), [("CHECKED", "Checked"), ("Unchecked", "Unchecked"),
+                                                  ("Not Allowed", "Not Allowed")])
+def test_checkbox_policy_materializes_only_bounded_enum(value, expected):
+    raw, expanded = checkbox_pair(value=value)
+    new = derive(raw, expanded)
+    item = XML.fromstring(new["derived_xml"]).find("Item")
+    assert item.attrib == {"Name": "FLAG", "ItemType": "Check Box", "CheckBoxOtherValues": expected}
+    receipt = new["receipt"]
+    assert receipt["policy_id"] == view.POLICY_ID
+    assert [c["qualified_source_key"] for c in receipt["changes"]] == ["S_default:ItemType", "S_default:CheckBoxOtherValues"]
+    legacy = view.derive_effective_view("synthetic.xml", raw, expanded, binary_sha256=BINARY,
+                                        policy_id=view.LEGACY_POLICY_ID)
+    assert b"CheckBoxOtherValues" not in legacy["derived_xml"]
+    assert legacy["receipt"]["policy_id"] == "fox-forms-effective-metadata-copy-missing-v1"
+    assert [c["property"] for c in legacy["receipt"]["changes"]] == ["ItemType"]
+    with pytest.raises(ValueError, match="Unrecognized"):
+        view.derive_effective_view("synthetic.xml", raw, expanded, binary_sha256=BINARY, policy_id="unknown")
+
+
+def test_checkbox_policy_preserves_explicit_and_fails_on_conflict():
+    raw, expanded = checkbox_pair(original_prop='CheckBoxOtherValues="checked"')
+    result = derive(raw, expanded)
+    assert XML.fromstring(result["derived_xml"]).find("Item").get("CheckBoxOtherValues") == "checked"
+    assert result["receipt"]["action_counts"]["preserved_existing"] >= 1
+    with pytest.raises(ValueError, match="conflict"):
+        derive(raw, expanded.replace(b'="Checked"', b'="Unchecked"'))
+
+
+def test_checkbox_policy_leaves_unknown_or_inherited_unresolved():
+    for prop, value, key in [("S_default:CheckBoxOtherValues", "unrecognized", "unresolved_checkbox_policy"),
+                             ("UNKNOWN_inherited:CheckBoxOtherValues", "Checked", "unresolved_inherited")]:
+        raw, expanded = checkbox_pair(prop=prop, value=value)
+        result = derive(raw, expanded)
+        assert b"CheckBoxOtherValues" not in result["derived_xml"]
+        assert result["receipt"][key] == [{"path": "/FormModule[Name=S]/Item[Name=FLAG]", "property": "CheckBoxOtherValues"}]
+        assert value not in json.dumps(result["receipt"][key])
+
+
+def test_checkbox_policy_scopes_foreign_alias_to_checkbox():
+    raw, expanded = checkbox_pair(prop="other:CheckBoxOtherValues")
+    with pytest.raises(ValueError, match="foreign namespace"):
+        derive(raw, expanded)
+    raw, expanded = checkbox_pair(item_type="Text Item", prop="other:CheckBoxOtherValues")
+    assert b"CheckBoxOtherValues" not in derive(raw, expanded)["derived_xml"]
+
+
 def fixture(blocks=9, items=222):
     original = ['<Module><FormModule Name="SYNTHETIC">']
     expanded = [f'<Module xmlns:SYNTHETIC_default="{NS}" xmlns:SYNTHETIC_overridden="{NS}" '

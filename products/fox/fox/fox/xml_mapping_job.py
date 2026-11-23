@@ -155,6 +155,9 @@ def checked_output(c, root, run, *, interface_csv=False):
     coverage_summary = _saved_rate_field_coverage(metadata, files)
     if coverage_summary:
         details['rate_field_coverage'] = coverage_summary
+    checkbox_summary = _saved_checkbox_summary(metadata, ledger, files)
+    if checkbox_summary is not None:
+        details['checkbox_drafts'] = checkbox_summary
     details['discrepancies'] = _discrepancy_fields(metadata, ledger, gaps, files)
     details['interface_summary'] = _interface_fields(metadata, files)
     if 'supporting_inputs' in metadata:
@@ -170,6 +173,139 @@ def checked_output(c, root, run, *, interface_csv=False):
     return payload, {'saved_source_binding': snapshot['source_binding'],
                      'generated_units': generated, 'unsupported_units': counts['total'] - generated,
                      'total_units': counts['total'], 'package_sha256': sha(package), **details}
+
+
+def _saved_checkbox_summary(metadata, ledger, files):
+    """Project only verified display fields from an authenticated retained ZIP.
+
+    No compiler, current parser, source SQL or source event body enters this
+    reader. checked_output authenticates package bytes before calling it.
+    """
+    if 'checkbox_drafts' not in metadata:
+        return None  # Older packages do not acquire a newly inferred capability.
+    def need(ok):
+        if not ok:
+            raise ValueError('Saved checkbox draft evidence is invalid.')
+    def identifier(value):
+        need(type(value) is str and re.fullmatch(r'[A-Za-z][A-Za-z0-9_$#]{0,127}', value))
+        return value
+    def source_id(value):
+        need(type(value) is str and re.fullmatch(r'ff1-[a-f0-9]{24}', value))
+        return value
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            need(key not in value)
+            value[key] = item
+        return value
+    def nonfinite(_):
+        raise ValueError('Nonfinite checkbox evidence.')
+    try:
+        descriptor = metadata['checkbox_drafts']
+        member = 'fox-package/checkbox-drafts.json'
+        need(type(descriptor) is dict and len(encoded(descriptor)) <= 200_000)
+        raw = files[member]
+        need(type(raw) is bytes and 0 < len(raw) <= MAX_SNAPSHOT_BYTES
+             and descriptor.get('member') == member and descriptor.get('sha256') == sha(raw))
+        receipt = json.loads(raw, object_pairs_hook=unique, parse_constant=nonfinite)
+        need(type(receipt) is dict and set(receipt) == {
+            'schema_version', 'scope', 'source_binding', 'project_id', 'groups', 'gaps',
+            'converted_code_unit_count', 'customer_table_writes', 'original_access_rights_proven',
+            'runtime_verified', 'business_accepted', 'scope_note'})
+        need(type(receipt['schema_version']) is int and receipt['schema_version'] == 1
+             and receipt['scope'] == 'fox-source-checkbox-group-v1'
+             and receipt['source_binding'] == metadata['source_binding']
+             and receipt['project_id'] == metadata['project_id']
+             and type(receipt['scope_note']) is str and len(receipt['scope_note']) <= 4000
+             and type(receipt['converted_code_unit_count']) is int and receipt['converted_code_unit_count'] == 0)
+        for key in ('customer_table_writes', 'original_access_rights_proven', 'runtime_verified', 'business_accepted'):
+            need(receipt[key] is False)
+        groups, gaps = receipt['groups'], receipt['gaps']
+        need(type(groups) is list and len(groups) <= 16 and type(gaps) is list and len(gaps) <= 1000)
+        units = {u['source_unit_id']: u for u in ledger['code_units']}
+        blocks = {o['source_object_id']: o['target'] for o in ledger['objects'] if o['kind'] == 'Block'}
+        seen, pages, tables, summaries = set(), set(), set(), []
+        def proof(row):
+            need(type(row) is dict)
+            uid = source_id(row['source_unit_id'])
+            unit = units.get(uid)
+            need(uid not in seen and unit is not None and row['source_unit_sha256'] == unit['source_unit_sha256']
+                 and type(row['source_unit_sha256']) is str and re.fullmatch(r'[a-f0-9]{64}', row['source_unit_sha256']))
+            seen.add(uid)
+            return uid
+        for group in groups:
+            uid = proof(group)
+            bid = source_id(group['source_block_id'])
+            target, block = group['native_target'], blocks.get(bid)
+            need(type(target) is dict and type(block) is dict)
+            page = target['page_id']
+            need(type(page) is int and 8100 <= page <= 9999 and page not in pages)
+            path = f'pages/p{page:05d}-fox_checkbox_{page}.apx'
+            need(target['scope'] == 'fox-native-checkbox-workspace-v1'
+                 and target['page_file'] == path and path in files and path in metadata['apex_members']
+                 and metadata['apex_members'][path] == sha(files[path])
+                 and target['source_page_file'] == group['report_file'] == block['report_file']
+                 and target['source_page_file'] in files
+                 and target['source_page_id'] == group['report_page_id'] == block['report_page_id']
+                 and target['source_unit_id'] == uid and target['source_unit_sha256'] == group['source_unit_sha256']
+                 and target['source_block_id'] == bid
+                 and target['source_binding'] == group['source_binding'] == metadata['source_binding']
+                 and target['project_id'] == group['project_id'] == metadata['project_id']
+                 and target['source_table'] == group['table_name'] == block['table_name'])
+            table = target['draft_table']
+            need(type(table) is str and re.fullmatch(r'FOX_CD_[A-F0-9]{18}', table) and table not in tables)
+            for key in ('business_table_writes', 'durable_synthetic_save', 'source_record_entry_executed',
+                        'original_interface_enabled', 'oracle_compiled', 'runtime_verified', 'business_accepted'):
+                need(target[key] is False)
+            for key in ('record_entry_initialization_implemented', 'original_access_rights_proven',
+                        'original_save_authorized', 'source_widget_equivalence_proven'):
+                need(group[key] is False)
+            need(target['session_draft_table_writes'] is True
+                 and group['source_event'] == target['source_event'] == 'WHEN-CHECKBOX-CHANGED')
+            policy = {'allowed_values': 'exact_checked_or_unchecked_only', 'null_values': 'reject',
+                      'other_values': 'reject', 'source_other_values_policy_proven': True,
+                      'other_value_display_implemented': False}
+            need(group['input_policy'] == target['input_policy'] == policy)
+            fields = [group['controller']] + group['dependents']
+            need(type(group['dependents']) is list and 2 <= len(fields) <= 30 and target['fields'] == fields)
+            item_ids = [source_id(field['source_item_id']) for field in fields]
+            need(len(set(item_ids)) == len(item_ids))
+            field_names = [identifier(field['source_name']) for field in fields]
+            need(len(set(name.upper() for name in field_names)) == len(field_names))
+            summaries.append({'source_unit_id': uid, 'source_unit_sha256': group['source_unit_sha256'],
+                              'source_block_id': bid, 'source_block_name': identifier(group['source_block_name']),
+                              'controller': field_names[0], 'dependents': field_names[1:],
+                              'page_id': page, 'page_file': path, 'reset_on_manual_off': True})
+            pages.add(page)
+            tables.add(table)
+        gap_summaries = []
+        for gap in gaps:
+            uid = proof(gap)
+            reason = gap['reason']
+            need(type(reason) is str and 0 < len(reason) <= 4000)
+            gap_summaries.append({'source_unit_id': uid, 'reason': reason})
+        fixed = {'scope': 'synthetic_session_draft_only', 'converted_code_unit_count': 0,
+                 'exact_checked_unchecked_only': True, 'null_other_values_accepted': False,
+                 'original_access_rights_proven': False, 'record_entry_initialization_implemented': False,
+                 'durable_synthetic_save': False, 'customer_table_writes': False,
+                 'runtime_verified': False, 'business_accepted': False}
+        expected = dict(fixed, member=member, sha256=sha(raw), groups=summaries, gaps=gap_summaries,
+                        generated_group_count=len(groups), gap_count=len(gaps))
+        need(descriptor == expected)
+        for key in ('generated_group_count', 'gap_count', 'converted_code_unit_count'):
+            need(type(descriptor[key]) is int)
+        for key, value in fixed.items():
+            if type(value) is bool:
+                need(descriptor[key] is value)
+        need(all(g['reset_on_manual_off'] is True and type(g['page_id']) is int for g in descriptor['groups']))
+        # Unexpected validator messages remain package evidence, never UI text.
+        safe_gaps = [{'source_unit_id': row['source_unit_id'],
+                      'reason': row['reason'] if re.fullmatch(r'CHECKBOX_(?:GROUP|WORKSPACE|PACKAGE)_[A-Z0-9_]{1,120}', row['reason'])
+                      else 'CHECKBOX_WORKSPACE_ADMISSION_UNRESOLVED'} for row in gap_summaries]
+        return dict(fixed, member=member, sha256=sha(raw), groups=summaries, gaps=safe_gaps,
+                    generated_group_count=len(groups), gap_count=len(gaps))
+    except (KeyError, TypeError, UnicodeError, RecursionError, OverflowError) as error:
+        raise ValueError('Saved checkbox draft evidence is invalid.') from error
 
 
 def _interface_fields(metadata, files):

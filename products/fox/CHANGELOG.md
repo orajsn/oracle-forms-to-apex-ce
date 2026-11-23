@@ -200,6 +200,22 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.7] - 2026-11-23
+
+### [improvement] Keep dependent checkbox choices on the selected session draft
+
+When Forms explicitly defines the controlling checkbox, the checked and
+unchecked values, and the actions for both branches, FOX can generate a linked
+draft for a selected synthetic row. Turning the controller on enables its
+dependent choices. Turning it off clears each choice to its own unchecked
+value. Opening a row whose controller is already off preserves its selections.
+
+The FOX result lists the affected fields and reports unsupported groups.
+The editor accepts the two stored values defined for each checkbox.
+Other fetched values, original record-entry logic and posting to the business
+tables retain separate coverage. Earlier prepared conversions reopen using
+their recorded XML derivation policy.
+
 ## [0.57.6] - 2026-11-23
 
 ### [improvement] Calculate source-defined display references on saved reports

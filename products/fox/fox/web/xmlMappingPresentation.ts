@@ -9,7 +9,18 @@ export type SupportingInputs = {files:{name:string;role:string}[];declaration_ch
 export type RateNumbers = {items:{block:string;item:string;label:string;stored:boolean;note:string}[];limited:boolean};
 export type ParentRates = {items:{child:string;parent:string;linked:boolean;fields:{parent:string;child:string}[];note:string}[];limited:boolean};
 export type RateFieldCoverage = {workspaces:{block:string;counts:Record<'saved'|'parent_linked'|'pending'|'control',number>;items:{name:string;label:string;status:'saved'|'parent_linked'|'pending'|'control';database_item:boolean|null;note:string}[];limited:boolean}[];limited:boolean};
-export type MappingRun = {rate_field_coverage?:RateFieldCoverage;parent_rates?:ParentRates;rate_numbers?:RateNumbers;supporting_inputs?:SupportingInputs;saved_source_binding?:string;id:string;request_id:string|null;project_id:string;source_hash:string;selected_source_set_id:string|null;state:'QUEUED'|'PROCESSING'|'GENERATED'|'ATTENTION';message:string;created:number;updated:number;format_validated:boolean;generated_units:number|null;unsupported_units:number|null;total_units:number|null;download_url:string|null;package_sha256:string|null;current_source:boolean;runtime_verified:false;business_behavior_accepted:false;conversion_profile:'xml-mapping-v1';item_validation_summary?:{wired:number;partial:number;encoded_only:number}|null;interface_summary?:{records:number;csv_available:boolean;json_available:boolean;detail_limited:boolean;size_limited:boolean}|null;synthetic_save_summary?:{screens:number;before_write_events:number}|null;lookup_summary?:{generated_lookup_handlers:number;original_reads_enabled:false}|null;buffer_summary?:{record_validation_flows:number}|null;policy_summary?:{rules_generated_unwired:number}|null;context_summary?:{relations_generated:number;relations_not_converted:number;assignments_generated_unwired:number}|null;gap_summary?:Record<GapCategory,number>|null;gaps_available?:boolean;gaps?:MappingGap[];discrepancies?:Discrepancies|null};
+export type CheckboxDrafts = {
+ member:string; sha256:string;
+ groups:{source_unit_id:string; source_unit_sha256:string; source_block_id:string;
+  source_block_name:string; controller:string; dependents:string[]; page_id:number;
+  page_file:string; reset_on_manual_off:true}[];
+ gaps:{source_unit_id:string; reason:string}[];
+ generated_group_count:number; gap_count:number; scope:'synthetic_session_draft_only';
+ converted_code_unit_count:0; exact_checked_unchecked_only:true; null_other_values_accepted:false;
+ original_access_rights_proven:false; record_entry_initialization_implemented:false;
+ durable_synthetic_save:false; customer_table_writes:false; runtime_verified:false; business_accepted:false;
+};
+export type MappingRun = {checkbox_drafts?:CheckboxDrafts;rate_field_coverage?:RateFieldCoverage;parent_rates?:ParentRates;rate_numbers?:RateNumbers;supporting_inputs?:SupportingInputs;saved_source_binding?:string;id:string;request_id:string|null;project_id:string;source_hash:string;selected_source_set_id:string|null;state:'QUEUED'|'PROCESSING'|'GENERATED'|'ATTENTION';message:string;created:number;updated:number;format_validated:boolean;generated_units:number|null;unsupported_units:number|null;total_units:number|null;download_url:string|null;package_sha256:string|null;current_source:boolean;runtime_verified:false;business_behavior_accepted:false;conversion_profile:'xml-mapping-v1';item_validation_summary?:{wired:number;partial:number;encoded_only:number}|null;interface_summary?:{records:number;csv_available:boolean;json_available:boolean;detail_limited:boolean;size_limited:boolean}|null;synthetic_save_summary?:{screens:number;before_write_events:number}|null;lookup_summary?:{generated_lookup_handlers:number;original_reads_enabled:false}|null;buffer_summary?:{record_validation_flows:number}|null;policy_summary?:{rules_generated_unwired:number}|null;context_summary?:{relations_generated:number;relations_not_converted:number;assignments_generated_unwired:number}|null;gap_summary?:Record<GapCategory,number>|null;gaps_available?:boolean;gaps?:MappingGap[];discrepancies?:Discrepancies|null};
 export type MappingOverview = {project_id:string;source_hash:string;selected_source_set_id:string|null;source_binding:string|null;catalog_sha256:string;available:boolean;reason:string|null;source_count:number|null;code_unit_count:number|null;scope_notice:string;runs:MappingRun[]};
 const record=(v:unknown):v is Record<string,unknown>=>typeof v==='object'&&v!==null&&!Array.isArray(v);
 const hash=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
@@ -50,6 +61,33 @@ export const mappingStorageKey=(source:SourceBinding)=>`fox.xml-mapping.uncertai
 export function hasMappingFence(projectId:string):boolean {try{for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);if(!k?.startsWith('fox.xml-mapping.uncertain:'))continue;try{const v=JSON.parse(k.slice('fox.xml-mapping.uncertain:'.length));if(Array.isArray(v)&&v[0]===projectId&&sessionStorage.getItem(k))return true;}catch{return true;}}return false;}catch{return true;}}
 export function parseRun(value:unknown,source:SourceBinding,expectedId?:string,expectedRequest?:string):MappingRun|null {
  if(!record(value)||typeof value.id!=='string'||!/^fox-[a-f0-9]{20}$/.test(value.id)||value.project_id!==source.project_id||!hash(value.source_hash)||!sid(value.selected_source_set_id)||!['QUEUED','PROCESSING','GENERATED','ATTENTION'].includes(value.state as string)||!text(value.message)||!stamp(value.created)||!stamp(value.updated)||value.updated<value.created||value.conversion_profile!=='xml-mapping-v1'||value.runtime_verified!==false||value.business_behavior_accepted!==false||typeof value.current_source!=='boolean'||typeof value.format_validated!=='boolean'||!count(value.generated_units)||!count(value.unsupported_units)||!count(value.total_units)||!(value.request_id===null||uuid(value.request_id))||!(value.package_sha256===null||hash(value.package_sha256))||!(value.download_url===null||typeof value.download_url==='string'))return null;
+ if(value.checkbox_drafts!==undefined){
+  const c=value.checkbox_drafts;
+  const bounded=(v:unknown)=>typeof v==='string'&&v.length>0&&v.length<=1000;
+  const keys=['member','sha256','groups','gaps','generated_group_count','gap_count','scope',
+   'converted_code_unit_count','exact_checked_unchecked_only','null_other_values_accepted',
+   'original_access_rights_proven','record_entry_initialization_implemented','durable_synthetic_save',
+   'customer_table_writes','runtime_verified','business_accepted'];
+  if(value.state!=='GENERATED'||!record(c)||!exactKeys(c,keys)
+   ||c.member!=='fox-package/checkbox-drafts.json'||!hash(c.sha256)
+   ||c.scope!=='synthetic_session_draft_only'||c.converted_code_unit_count!==0
+   ||c.exact_checked_unchecked_only!==true||c.null_other_values_accepted!==false
+   ||c.original_access_rights_proven!==false||c.record_entry_initialization_implemented!==false
+   ||c.durable_synthetic_save!==false||c.customer_table_writes!==false
+   ||c.runtime_verified!==false||c.business_accepted!==false
+   ||!Array.isArray(c.groups)||c.groups.length>16||!Array.isArray(c.gaps)||c.gaps.length>10000
+   ||c.generated_group_count!==c.groups.length||c.gap_count!==c.gaps.length)return null;
+  const groupKeys=['source_unit_id','source_unit_sha256','source_block_id','source_block_name',
+   'controller','dependents','page_id','page_file','reset_on_manual_off'];
+  const validGroup=(g:unknown)=>record(g)&&exactKeys(g,groupKeys)
+   &&['source_unit_id','source_block_id','source_block_name','controller','page_file'].every(k=>bounded(g[k]))
+   &&hash(g.source_unit_sha256)&&integer(g.page_id)&&g.page_id>0&&g.reset_on_manual_off===true
+   &&Array.isArray(g.dependents)&&g.dependents.length>0&&g.dependents.length<=100
+   &&g.dependents.every(bounded);
+  const validGap=(g:unknown)=>record(g)&&exactKeys(g,['source_unit_id','reason'])
+   &&bounded(g.source_unit_id)&&bounded(g.reason);
+  if(!c.groups.every(validGroup)||!c.gaps.every(validGap))return null;
+ }
  if(value.supporting_inputs!==undefined){
   const s=value.supporting_inputs;
   const short=(v:unknown)=>typeof v==='string'&&v.length<=1000;

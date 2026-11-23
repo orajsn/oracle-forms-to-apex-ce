@@ -1,5 +1,5 @@
 import React,{useMemo,useRef,useState} from 'react';
-import type {Discrepancies, GapRequirements, MappingGap, MappingRun} from './xmlMappingPresentation';
+import type {CheckboxDrafts, Discrepancies, GapRequirements, MappingGap, MappingRun} from './xmlMappingPresentation';
 import './xmlMappingDiscrepancies.css';
 import SupportingFileEvidence from './SupportingFileEvidence';
 
@@ -7,6 +7,17 @@ const statuses={generated:'Generated or adapted',partial:'Partly connected',enco
 const partialReasons=new Set(['policy_rule_partial_draft_guard','item_lookup_partly_connected','item_entry_partly_connected','item_entry_draft_connected','approval_readiness_partly_connected','staged_query_partly_connected','delete_check_partly_connected','master_population_partly_connected',
  'master_query_helper_partly_connected','master_clear_partly_connected','module_navigation_partly_connected','saved_display_partly_connected']);
 const kinds={database_object:'Database object',routine_reference:'Routine reference',forms_api:'Forms behavior',local_routine:'Local routine',report:'Report',source_link:'Source link',forms_library:'Attached Forms library',forms_menu:'Referenced Forms menu'} as const;
+const checkboxGapReasons:Record<string,string>={
+ CHECKBOX_GROUP_EXACT_CHECKBOX_VALUES_REQUIRED:'Checked and unchecked values could not be confirmed.',
+ CHECKBOX_GROUP_EXPLICIT_OTHER_VALUES_POLICY_REQUIRED:'The rule for other values could not be confirmed.',
+ CHECKBOX_GROUP_MAPPED_FIELD_REQUIRED:'A required field could not be mapped.',
+ CHECKBOX_GROUP_EXACT_DISABLE_SET:'The fields disabled by the source could not be matched.',
+ CHECKBOX_GROUP_EXACT_ENABLE_SET:'The fields enabled by the source could not be matched.',
+ CHECKBOX_GROUP_WHOLE_EVENT_GRAMMAR:'The complete checkbox event could not be interpreted safely.',
+ CHECKBOX_GROUP_CAPACITY:'This group exceeds the current generation limit.',
+ CHECKBOX_PACKAGE_PAGE_CAPACITY:'No available draft page was found.',
+ CHECKBOX_WORKSPACE_UPDATE_PERMISSION:'The source update permission needs review.'
+};
 function Requirements({value}:{value:GapRequirements}){
  const groups=[['Database routine calls',value.routines],['Referenced tables or views',value.tables],
   ['Report definitions to verify',value.reports],['Forms session values',value.forms_state],
@@ -14,7 +25,7 @@ function Requirements({value}:{value:GapRequirements}){
  return <>{groups.map(([label,names])=>names.length>0&&<p key={label}><strong>{label}</strong> · {names.join(', ')}</p>)}
   {value.limited&&<p>Reference detail is limited. Review the preserved source for this action.</p>}</>;
 }
-export default function XmlMappingDiscrepancies({report,gaps,previous,initialView='all'}:{report:Discrepancies;gaps?:MappingGap[];previous?:Pick<MappingRun,'discrepancies'|'gaps'>;initialView?:'all'|'remaining'|'external'}){
+export default function XmlMappingDiscrepancies({report,gaps,previous,checkboxDrafts,initialView='all'}:{report:Discrepancies;gaps?:MappingGap[];checkboxDrafts?:CheckboxDrafts;previous?:Pick<MappingRun,'discrepancies'|'gaps'>;initialView?:'all'|'remaining'|'external'}){
  const [filter,setFilter]=useState<string>(initialView),[search,setSearch]=useState('');
  const unitDetails=useRef<HTMLDetailsElement>(null);
  const gapById=useMemo(()=>new Map(gaps?.map(g=>[g.source_unit_id,g])),[gaps]);
@@ -76,6 +87,23 @@ export default function XmlMappingDiscrepancies({report,gaps,previous,initialVie
   <h4>Source behavior and conversion progress</h4>
   <p>Supported parts can be generated while these findings are reviewed. APEX runtime checks and business review are still pending.</p>
   <p>Generated or adapted: {counts.generated} · {counts.partial>0&&<>Partly connected: {counts.partial} · </>}Encoded, awaiting connection: {counts.encoded_unwired} · Not yet implemented: {counts.unimplemented} · Total source units: {report.summary.total_units}</p>
+  {checkboxDrafts&&<details>
+   <summary>Checkbox draft behavior ({checkboxDrafts.generated_group_count} {checkboxDrafts.generated_group_count===1?'group':'groups'})</summary>
+   <p>These controls are generated for a synthetic session draft. The source event remains incomplete; runtime checks and business review are still pending.</p>
+   {checkboxDrafts.groups.length>0?<ul>
+    {checkboxDrafts.groups.map((group,i)=><li key={i}>
+     <strong>{group.source_block_name}.{group.controller}</strong> controls {group.dependents.join(', ')}.
+     Turning it off manually clears the dependent fields.
+    </li>)}
+   </ul>:<p>No complete checkbox groups were generated.</p>}
+   <p>Only the exact checked and unchecked values are supported. Null and other raw values, original permissions, initialization when entering a record, and database saving are not implemented by this draft.</p>
+   {checkboxDrafts.gaps.length>0&&<>
+    <p>Incomplete groups need review:</p>
+    <ul>{checkboxDrafts.gaps.map((gap,i)=><li key={i}>
+     {gap.source_unit_id}: {checkboxGapReasons[gap.reason]??'The source behavior could not be safely mapped.'} (Reference: {gap.reason})
+    </li>)}</ul>
+   </>}
+  </details>}
   <SupportingFileEvidence report={report} gaps={gaps}/>
   {remaining>0&&<div className="xml-discrepancy-actions"><button type="button" onClick={()=>showUnits('remaining')}>Show remaining gaps ({remaining})</button>
    {wiredEntryIds.size>0&&<button type="button" className="secondary" onClick={()=>showUnits('wiring')}>Entry wiring ({wiredEntryIds.size})</button>}

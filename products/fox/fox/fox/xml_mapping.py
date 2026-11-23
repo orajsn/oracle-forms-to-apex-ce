@@ -195,13 +195,17 @@ def mapping_catalog():
                   "Original startup, window, return, shared state and transaction behavior require separate bindings."))
     rules.append(("fox.display.saved-row-label", "A source display item has a complete concatenation assignment bound to the same stored row.",
                   "Calculate the display column in its synthetic reports.", "Other statements, Forms event timing and unsaved buffer behavior require separate bindings."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 28,
+    rules.append(("fox.checkbox.session-draft", "A complete changed-checkbox event and exact stored checkbox values are proved from fresh source.",
+                  "Open a separate selected-row synthetic session draft from the existing report.",
+                  "Only exact checked/unchecked values are admitted. Record entry, original permissions, source NULL/other display behavior and database Save remain separate; no whole source unit is counted as converted."))
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 29,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py",
                                 "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py", "forms_display_projection.py",
+                                "forms_checkbox_group.py", "forms_checkbox_workspace.py",
                                 "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
                                 "forms_staged_query_plan.py", "forms_staged_query.py",
@@ -753,6 +757,81 @@ def _apex_members(files):
             if name.endswith(".apx") or name.startswith(".apex/")}
 
 
+def _attach_checkbox_drafts(documents, packet, chunks, trace, files):
+    """Add independently proved, partial drafts without promoting source events."""
+    # Use the already rebuilt object inventory, not another parse for every form.
+    if not any(obj['kind'] == 'Trigger' and (obj.get('name') or '').upper() == 'WHEN-CHECKBOX-CHANGED'
+               for entry in packet['sources'] for obj in entry['facts']['objects']):
+        return None
+    from .forms_checkbox_group import build_checkbox_groups
+    from .forms_checkbox_workspace import render_checkbox_workspace
+
+    receipt = build_checkbox_groups(documents, packet, chunks, trace)
+    occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
+    for name, raw in files.items():
+        if name.endswith('.apx'):
+            occupied.update(int(m) for m in re.findall(r'(?m)^page\s+(\d+)\s*\(', raw.decode()))
+    schema_member = 'fox-package/supporting-schema.sql'
+    schema = files[schema_member]
+    tables = set(re.findall(rb'\bcreate\s+table\s+([A-Z][A-Z0-9_$#]*)', schema, re.I))
+    tables = {name.decode().upper() for name in tables}
+    generated, summaries = [], []
+    for group in receipt['groups']:
+        page = next((p for p in range(8100, 10000) if p not in occupied), None)
+        proof = {key: group[key] for key in ('source_unit_id', 'source_unit_sha256', 'source_block_id')}
+        if page is None:
+            receipt['gaps'].append({**proof, 'reason': 'CHECKBOX_PACKAGE_PAGE_CAPACITY'})
+            continue
+        try:
+            rendered = render_checkbox_workspace(group, page)
+        except ValueError as error:
+            # A renderer capacity/admission limit leaves the original event visible.
+            receipt['gaps'].append({**proof, 'reason': str(error)})
+            continue
+        target = rendered['metadata']
+        source = group['report_file']
+        if (source not in files or target['source_page_file'] != source
+                or target['source_page_id'] != group['report_page_id']
+                or target['source_unit_sha256'] != group['source_unit_sha256']
+                or target['source_binding'] != packet['source_binding']):
+            raise ValueError('Checkbox draft no longer matches its source report.')
+        source_text = files[source].decode()
+        if not re.search(r'(?m)^page\s+' + str(group['report_page_id']) + r'\s*\(', source_text):
+            raise ValueError('Checkbox source report has a different page identity.')
+        pages = rendered['pages']
+        if (len(pages) != 1 or pages[0]['page_id'] != page or pages[0]['page_file'] in files
+                or target['page_id'] != page or target['page_file'] != pages[0]['page_file']
+                or target['draft_table'].upper() in tables
+                or any(re.search(r'(?m)^\s*alias:\s*' + re.escape(target['page_alias']) + r'\s*$', raw.decode())
+                       for name, raw in files.items() if name.endswith('.apx'))):
+            raise ValueError('Checkbox draft conflicts with an existing page or table.')
+        # Validate every identity before changing the package; entry links are additive.
+        files[source] = native_record_groups._append(source_text, rendered['entry_fragment']).encode()
+        files[pages[0]['page_file']] = pages[0]['text']
+        schema += b'\n' + rendered['supporting_sql']
+        occupied.add(page)
+        tables.add(target['draft_table'].upper())
+        generated.append({**group, 'native_target': target})
+        summaries.append({**proof, 'source_block_name': group['source_block_name'],
+                          'controller': group['controller']['source_name'],
+                          'dependents': [field['source_name'] for field in group['dependents']],
+                          'page_id': page, 'page_file': target['page_file'], 'reset_on_manual_off': True})
+    files[schema_member] = schema
+    receipt['groups'] = generated
+    member = 'fox-package/checkbox-drafts.json'
+    if member in files:
+        raise ValueError('Checkbox draft receipt already exists.')
+    files[member] = _bytes(receipt)
+    return {'member': member, 'sha256': _sha(files[member]),
+            'scope': 'synthetic_session_draft_only', 'groups': summaries,
+            'gaps': [{key: gap[key] for key in ('source_unit_id', 'reason')} for gap in receipt['gaps']],
+            'generated_group_count': len(generated), 'gap_count': len(receipt['gaps']),
+            'converted_code_unit_count': 0, 'exact_checked_unchecked_only': True,
+            'null_other_values_accepted': False, 'original_access_rights_proven': False,
+            'record_entry_initialization_implemented': False, 'durable_synthetic_save': False,
+            'customer_table_writes': False, 'runtime_verified': False, 'business_accepted': False}
+
+
 def generate_xml_package(documents, project_id, project_name, approved_policy_id):
     """Return (candidate bytes, report) from fresh originals, with no parent job.
 
@@ -996,6 +1075,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             if uid in display_units:
                 raise ValueError("More than one display field claims the same source assignment.")
             display_units[uid] = (proof, projection)
+    checkbox_drafts = _attach_checkbox_drafts(documents, packet, chunks, trace, files)
     correctable_approvals = {link["approval_source_unit_id"] for link in numeric_corrections}
     correction_gaps = {gap.get("approval_source_unit_id", gap["source_unit_id"]): gap["reason"]
                        for gap in correction_receipt["gaps"]}
@@ -1345,6 +1425,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         applied = sorted(set(applied) | {"fox.validation.saved-number-correction"})
     if row_lookups:
         applied = sorted(set(applied) | {"fox.query.row-lookup-draft"})
+    if checkbox_drafts and checkbox_drafts['groups']:
+        applied = sorted(set(applied) | {'fox.checkbox.session-draft'})
     if any(op.get("durable_synthetic_save") for op in row_lookups):
         applied = sorted(set(applied) | {"fox.query.saved-row-workspace"})
     if any(op.get("stored_numbers", {}).get("fields") for op in row_lookups):
@@ -1366,7 +1448,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "applied_rule_ids": applied, "source_parser_rebuilt": True,
         "ai_review": {"performed": False, "approval_recorded": False, "origin": "none"},
         "format_validated": False, "validation": None, "native_apex_generated": True,
-        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"] or navigation_actions or display_units),
+        **({'checkbox_drafts': checkbox_drafts} if checkbox_drafts else {}),
+        "data_mode": "synthetic_test_only", "structural_only": not bool(generated or context_summary["relations_generated"] or navigation_actions or display_units or (checkbox_drafts and checkbox_drafts['groups'])),
         **({"saved_display_fields": {"member": display_member, "sha256": _sha(files[display_member]),
                                      "count": len(display_receipt["applied"]), "pending": len(display_receipt["gaps"])}}
            if display_member in files else {}),
@@ -1465,6 +1548,14 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "Extract the entire project including .apex. Fresh SQLcl /nolog validation is required "
         "before a format-validated handoff. Import/schema changes require separate authorization.\n"
     ).encode("utf-8")
+    if checkbox_drafts:
+        files['fox-package/README.md'] += (
+            b'\n## Checkbox session drafts\n\ncheckbox-drafts.json lists separately generated checkbox session drafts and rejected events. '
+            b'The existing source reports and sources are preserved. Only exact checked and unchecked values are accepted; '
+            b'NULL and other stored values are rejected. Manual switch-off clears dependents to their source unchecked values. '
+            b'Record-entry initialization, original permissions, database Save and whole Forms events remain separate. '
+            b'No source unit is counted as converted by this partial adapter. Oracle compilation, installed APEX behavior '
+            b'and business acceptance remain unverified.\n')
     metadata["apex_members"] = _apex_members(files)
     extra = xml_supporting_inputs.attach(files, metadata, documents, supporting)
     if extra:
@@ -1488,6 +1579,7 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
         "behavior_plan": behavior_plan, "renderer_receipt": behavior_receipt,
         "mapping_ledger": ledger, "gap_report": gap_report, "discrepancies": discrepancies, "dependency_evidence": dependency_evidence, "relation_plan": relation_plan,
         "relation_receipt": relation_receipt, "assignment_plan": assignment_plan, "assignment_receipt": assignment_receipt, "policy_plan": policy_plan, "policy_receipt": policy_receipt, "order_receipt": order_receipt, "buffer_plan": buffer_plan, "buffer_receipt": buffer_receipt, "lookup_plan": lookup_plan, "lookup_receipt": lookup_receipt, "record_group_receipt": group_receipt, "guarded_query_receipt": query_receipt, "apex_members": metadata["apex_members"],
+        **({'checkbox_drafts': deepcopy(checkbox_drafts)} if checkbox_drafts else {}),
         "format_validated": False, "runtime_verified": False, "business_behavior_accepted": False}
 
 

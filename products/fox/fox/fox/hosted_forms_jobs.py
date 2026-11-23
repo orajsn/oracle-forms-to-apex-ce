@@ -521,10 +521,12 @@ class HostedFormsJobs:
             else:
                 if set(by_role) != native_roles | {'effective_xml', 'derivation_receipt', 'preservation_receipt'}:
                     _fail()
+                saved_derivation = _decode(contents['derivation_receipt'])
                 derived = derive_effective_view(name, contents['native_overridden'], contents['native_all'],
-                                                binary_sha256=manifest['source']['sha256'])
+                                                binary_sha256=manifest['source']['sha256'],
+                                                policy_id=saved_derivation['policy_id'])
                 if (derived['derived_xml'] != contents['effective_xml']
-                        or _json(derived['receipt']) != _json(_decode(contents['derivation_receipt']))):
+                        or _json(derived['receipt']) != _json(saved_derivation)):
                     _fail()
                 source = result['prepared_source']
                 if (set(source) != {'name', 'sha256', 'bytes', 'xml_path', 'receipt_path'} or source['name'] != name
