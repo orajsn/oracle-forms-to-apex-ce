@@ -1,10 +1,10 @@
 {
-  "version": "0.57.15",
+  "version": "0.57.16",
   "released_on": "2026-11-24",
-  "title": "Initialize rate drafts from source-defined record defaults",
+  "title": "Initialize numeric rate fields from the Forms new-record rule",
   "changes": [
-    "A block-level WHEN-CREATE-RECORD containing only proven text or NULL assignments can initialize a new synthetic rate draft.",
-    "The editor retains module-specific defaults and preserves stored values when an existing rate is reopened."
+    "A complete literal new-record trigger can set a stored rate price whose precision and bounds are proven by its Forms field.",
+    "An operator can replace or clear a price before Create. Reopening a saved rate retains its stored value."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -176,13 +176,23 @@ def _date_omission(unit, semantic, tokens, item, objects, props, units, texts):
             'reason': 'Legacy calendar callback and DATE callers remain unexecuted and unverified. External mutable target state is unknown. Only separate synthetic numeric actions are generated.'}
 
 
-def _events(item, block, objects, props, units, texts):
+def _events(item, block, objects, props, units, texts, create_rule=None):
     """Conservative literal/comment-aware field and indirect mutation scan."""
     _need(not any(o['kind'] == 'Trigger' and o['parent_id'] == item['id']
                   for o in objects.values()), 'ITEM_EVENT_UNIMPLEMENTED')
     proofs, omissions, identifier_mentions = [], [], []
     for unit in units:
         if objects[unit['owner_id']]['module_id'] != item['module_id']:
+            continue
+        if (create_rule is not None and unit['id'] == create_rule['source_unit_id']
+                and unit['sha256'] == create_rule['source_unit_sha256']
+                and unit['owner_id'] == create_rule['source_owner_id']
+                and item['block_id'] == create_rule['source_parent_id']
+                and item['module_id'] == create_rule['source_module_id']
+                and any(n['target']['ref'] == item['id'] for n in create_rule['body'])):
+            # The complete literal-only body has no reads or indirect effects.
+            # The caller must discard this provisional plan if binding fails.
+            proofs.append(_unit_proof(unit, texts))
             continue
         semantic, _ = decode_control_entities(texts[unit['id']]['text'])
         tokens, errors = _lex(semantic)
@@ -250,14 +260,14 @@ def _properties(p, bp, route):
     return column.upper(), numeric_rules(p)
 
 
-def _field(item, block, route, objects, props, units, texts, slot):
+def _field(item, block, route, objects, props, units, texts, slot, create_rule=None):
     p, bp = props[item['id']], props[block['id']]
     _need(item['module_id'] == route['source_module_id'] and item['block_id'] == route['source_block_id'], 'SAME_ROW_REQUIRED')
     _need(item['database_item'] is True, 'EXPLICIT_STORED_NUMBER_REQUIRED')
     column, rules = _properties(p, bp, route)
     # Reuse the route's complete dynamic property scan for this additional field.
     _policy(block, item, [{'source_item_id': item['id']}], objects, props, units, texts)
-    event_proofs, omissions, identifier_mentions = _events(item, block, objects, props, units, texts)
+    event_proofs, omissions, identifier_mentions = _events(item, block, objects, props, units, texts, create_rule)
     return {'source_item_id': item['id'], 'source_name': groups._label(item['name']),
             'source_module_id': item['module_id'], 'source_block_id': block['id'],
             'source_column': column, 'label': groups._label(p.get('Prompt') or item['name']),
@@ -344,6 +354,26 @@ def validate_rate_numbers(receipt, route_contract):
 
 
 def compile_rate_numbers(documents, packet, chunks, trace, files, group_receipt, lov_receipt, route_contract):
+    """Independent number eligibility without any unbound event exemptions."""
+    return _compile_rate_numbers(documents, packet, chunks, trace, files, group_receipt, lov_receipt, route_contract)
+
+
+def compile_rate_defaults(documents, packet, chunks, trace, files, groups, returns, contract,
+                          bundle, policies, properties, parent_keys, baseline):
+    """Accept a provisional number projection only together with its complete event binding."""
+    from .forms_rate_create_defaults import create_default_rule, bind_create_fields
+    rule = create_default_rule(packet, *policies, contract, properties=properties, parent_keys=parent_keys)
+    if not rule:
+        return baseline, None
+    trial = baseline
+    if any(n['target']['data_type'] == 'NUMBER' for n in rule['body']):
+        trial = _compile_rate_numbers(documents, packet, chunks, trace, files, groups, returns, contract,
+                                      _create_rule=rule)
+    init = bind_create_fields(rule, contract, bundle, trial)
+    return (trial, init) if init else (baseline, None)
+
+
+def _compile_rate_numbers(documents, packet, chunks, trace, files, group_receipt, lov_receipt, route_contract, *, _create_rule=None):
     """Compile eligible stored numbers; keep unsupported numeric items visible."""
     with generation_sources(documents):
         objects, props = _normal_receipts(documents, packet, chunks, trace, files, group_receipt, lov_receipt)
@@ -362,7 +392,7 @@ def compile_rate_numbers(documents, packet, chunks, trace, files, group_receipt,
             try:
                 _need(item['id'] not in route_fields, 'OVERLAPPING_ROUTE_FIELD')
                 _need(len(fields) < 8, 'FIELD_CAPACITY')
-                field = _field(item, block, route_contract, objects, props, units, texts, len(fields) + 1)
+                field = _field(item, block, route_contract, objects, props, units, texts, len(fields) + 1, _create_rule)
                 _need(source_columns.count(field['source_column']) == 1, 'DISTINCT_SOURCE_COLUMN_REQUIRED')
                 fields.append(field)
             except ValueError as error:

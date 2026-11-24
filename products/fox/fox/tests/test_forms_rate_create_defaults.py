@@ -75,9 +75,55 @@ def test_repeated_assignment_ends_in_source_null_and_preserves_order():
     assert effective_values(init)=={'F001':'null'}
 
 
-def test_number_target_without_a_proven_editable_projection_stays_a_gap():
-    ops, _, gaps, _ = package([('numbers.xml',source('RATES',"BEGIN :AMOUNT := 12.30; END;"))])
+@pytest.mark.parametrize(('literal','value'), [('12.30','12.30'),('-1.25','-1.25'),('+1.25','+1.25'),('0','0'),('NULL',None)])
+def test_number_default_uses_one_numeric_storage_column(literal,value):
+    ops,pages,gaps,meta=package([('numbers.xml',source('RATES',f"BEGIN :AMOUNT := {literal}; END;"))])
+    op,=ops
+    field,=op['native_target']['numeric_fields']
+    assignment,=op['native_target']['new_record_initializer']['assignments']
+    assert (assignment['column'],assignment['value'])==('N001',value)
+    assert assignment['source_item_id']==field['source_item_id']
+    editor=pages[op['page_file']]
+    insert=editor.split('insert into '+op['native_target']['draft_table']+'(',1)[1].split(')',1)[0].split(',')
+    assert insert.count('N001')==1 and 'l_input_n1:=l_init_N001;' in editor
+    assert 'fox.rate.create-record-default' in meta['applied_rule_ids']
+    assert not any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+
+
+@pytest.mark.parametrize('body',[
+    "BEGIN :VIA := 'V1'; :AMOUNT := 12.345; END;",
+    "BEGIN :VIA := 'V1'; :AMOUNT := 123456789; END;",
+    "BEGIN :VIA := 'V1'; :AMOUNT := '12.30'; END;",
+    "BEGIN :AMOUNT := 12.30; :MISSING := 'x'; END;",
+])
+def test_ineligible_mixed_default_restores_original_guarded_projection(body):
+    ops,_,gaps,meta=package([('numbers.xml',source('RATES',body))])
     assert 'new_record_initializer' not in ops[0]['native_target']
+    assert not ops[0]['stored_numbers']['fields'] and ops[0]['stored_numbers']['gaps']
+    assert 'fox.rate.create-record-default' not in meta['applied_rule_ids']
+    assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+
+
+def test_other_numeric_event_still_blocks_entire_initializer():
+    root=ET.fromstring(source('NUMS',"BEGIN :AMOUNT := 12.30; :VIA := 'V1'; END;"))
+    ET.SubElement(root.find("./Block[@Name='LINES']"),'Trigger',Name='WHEN-VALIDATE-RECORD',
+                  TriggerText='BEGIN IF :AMOUNT IS NULL THEN NULL; END IF; END;')
+    ops,_,_,_=package([('other.xml',ET.tostring(root))])
+    assert not ops[0]['stored_numbers']['fields']
+    assert 'new_record_initializer' not in ops[0]['native_target']
+
+
+def test_capacity_fallback_does_not_publish_provisional_numeric_plan(monkeypatch):
+    import fox.forms_rate_workspace as workspace
+    original=workspace.render_rate_workspace
+    def limited(*args,**kw):
+        if kw.get('initializer'):
+            raise ValueError('RATE_DEFAULT_CAPACITY')
+        return original(*args,**kw)
+    monkeypatch.setattr(workspace,'render_rate_workspace',limited)
+    ops,pages,gaps,meta=package([('size.xml',source('NUMS','BEGIN :AMOUNT := 1; END;'))])
+    assert 'pageItem P8900_N1 (' not in pages[ops[0]['page_file']]
+    assert not ops[0]['stored_numbers']['fields'] and 'new_record_initializer' not in ops[0]['native_target']
     assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
 
 
@@ -107,3 +153,15 @@ def test_source_property_inheritance_is_checked_for_the_current_module(level):
     assert not any(o['native_target'].get('new_record_initializer') for o in ops)
     assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
     assert 'fox.rate.create-record-default' not in meta['applied_rule_ids']
+
+
+def test_parent_numeric_initializer_uses_source_literal_and_one_slot():
+    from fox.forms_rate_parent_page import parent_create_code
+    from test_forms_rate_parent_workspace import compiled
+
+    c,b,p,n=compiled()
+    init={'assignments':[{'column':'N001','data_type':'NUMBER','value':'-0.25'}]}
+    sql=parent_create_code(c,b,p,7800,7900,numbers=n,initializer=init)
+    columns=sql.split('insert into ',1)[1].split('(',1)[1].split(')',1)[0].split(',')
+    assert columns.count('N001')==1 and 'K001' in columns and 'K002' in columns
+    assert 'l_init_N001 number:=-0.25;' in sql and ':P7900_N1' not in sql

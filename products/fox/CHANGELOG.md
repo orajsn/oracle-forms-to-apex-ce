@@ -200,6 +200,17 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.16] - 2026-11-24
+
+### [improvement] Initialize a stored price from the new-record trigger
+
+A complete block-level WHEN-CREATE-RECORD can assign numeric, text and NULL
+literals together. FOX checks each assigned price against its source picture
+and limits. Each module gets its own default. An explicitly edited price,
+including zero or an optional blank, is retained on Create. Reopen loads the
+saved price. If part of a rule cannot be mapped, the complete rule stays
+visible for review.
+
 ## [0.57.15] - 2026-11-24
 
 ### [improvement] Initialize new rate drafts from Forms record defaults

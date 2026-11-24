@@ -136,7 +136,7 @@ def mapping_catalog():
          "The generated editor uses private test tables for the reference catalog and session-owned drafts. Other original events and business persistence remain separate."),
         ("fox.query.guarded-related-query", "Complete item KEY-EXEQRY guard using non-null keys on the selected parent in a proven incoming relation.",
          "Manual Execute query action refreshes the related synthetic report after checking its parent keys.", "Uses the selected persisted row. The related view can also query on initial entry. Automatic coordination and dirty record buffers remain separate."),
-        ("fox.rate.create-record-default", "A complete block-level WHEN-CREATE-RECORD initializes projected fields with typed literals.",
+        ("fox.rate.create-record-default", "A complete block-level WHEN-CREATE-RECORD initializes projected fields with text, numeric or NULL literals.",
          "Initialize a new synthetic rate draft once, with the fields bound to its own module and block.",
          "Reopening a saved rate preserves its stored values. Original business posting and other source events retain their own coverage."),
         ("fox.session.source-default", "Complete form initialization loads one global from a single-row NVL lookup and preserves it on error.",
@@ -202,7 +202,7 @@ def mapping_catalog():
     rules.append(("fox.checkbox.session-draft", "A complete changed-checkbox event and exact stored checkbox values are proved from fresh source.",
                   "Open a separate selected-row synthetic session draft from the existing report.",
                   "Only exact checked/unchecked values are admitted. Record entry, original permissions, source NULL/other display behavior and database Save remain separate; no whole source unit is counted as converted."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 30,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 31,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
@@ -512,9 +512,8 @@ def _approval_interface_links(plans, inventory):
 
 
 def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns, *, create_policies=None):
-    from .forms_rate_create_defaults import bind_rate_create_defaults
     from .forms_rate_choices import compile_rate_choices
-    from .forms_rate_numbers import compile_rate_numbers
+    from .forms_rate_numbers import compile_rate_numbers, compile_rate_defaults
     from .forms_rate_parent import compile_rate_parent
     from .forms_rate_parent_page import render_parent_page
     from .forms_rate_workspace import render_rate_workspace
@@ -551,6 +550,21 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
     if create_policies and any(op['source_event'] == 'WHEN-CREATE-RECORD' for op in create_policies[0]['operations']):
         from .forms_behavior_plan import _source_objects
         _, init_properties = _source_objects(documents, packet)
+    initializers = {}
+    base_number_plans = dict(number_plans)
+    if init_properties is not None:
+        # Resolve all candidate fields against the pristine package. Fall back
+        # as a unit when even one assignment or numeric field is ineligible.
+        for contract in contracts:
+            cid = contract['contract_id']
+            if cid not in number_plans:
+                continue
+            parent = parent_plans.get(cid)
+            binding = parent['binding'] if parent else None
+            keys = {pair['child_item_id'] for pair in binding['join_pairs']} if binding else set()
+            number_plans[cid], initializers[cid] = compile_rate_defaults(
+                documents, packet, chunks, trace, files, groups, returns, contract, bundles[cid],
+                create_policies, init_properties, keys, number_plans[cid])
     page = 8900
     for contract in contracts:
         bundle = bundles.get(contract['contract_id'])
@@ -570,13 +584,9 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         if page + span > 9900:
             raise ValueError('No native page range is available for the lookup editor.')
         numbers = number_plans.get(contract['contract_id'])
-        initializer = None
+        initializer = initializers.get(contract['contract_id'])
         if choices:
             numbers = numbers if numbers['fields'] else None
-            if init_properties is not None:
-                parent_keys = {x['child_item_id'] for x in parent_binding['join_pairs']} if parent_binding else set()
-                initializer = bind_rate_create_defaults(packet, *create_policies, contract, bundle,
-                                                        properties=init_properties, parent_keys=parent_keys)
         relation = None
         if parent_binding is not None:
             relation = relation_actions.get(parent_binding['relation_id'])
@@ -602,6 +612,9 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
                 raise
             # Keep an existing supported workspace; retain the source-event gap.
             initializer = None
+            number_plans[contract['contract_id']] = base_number_plans[contract['contract_id']]
+            numbers = number_plans[contract['contract_id']]
+            numbers = numbers if numbers['fields'] else None
             rendered, launcher = render_editor(None)
         target = rendered['metadata']
         if initializer:

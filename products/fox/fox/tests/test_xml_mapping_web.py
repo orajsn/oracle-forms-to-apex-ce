@@ -868,7 +868,7 @@ def test_source_lookup_handlers_are_generated_but_original_reads_stay_disabled(c
 def test_downloaded_create_rules_remain_bound_to_their_modules(client):
     from test_forms_rate_create_defaults import source as rate_source
 
-    docs = [(name.lower() + '.xml', rate_source(name, "BEGIN :VIA := '" + route + "'; END;"))
+    docs = [(name.lower() + '.xml', rate_source(name, "BEGIN :VIA := '" + route + "'; :AMOUNT := 1.25; END;"))
             for name, route in [('SHIPPING', 'V1'), ('RETURNS', 'V2')]]
     c, _, _, _, run = finish(client, docs)
     result = c.get(run['download_url'])
@@ -884,3 +884,4 @@ def test_downloaded_create_rules_remain_bound_to_their_modules(client):
         target = rule['target']
         assert target['synthetic_create_wired'] and not target['original_forms_runtime_executed']
         assert target['source_unit_sha256'] == rule['source_unit_sha256']
+        assert [(v['data_type'], v['column']) for v in target['assignments']] == [('VARCHAR2','F001'),('NUMBER','N001')]

@@ -434,6 +434,8 @@ def _load(c, b, fields, names, page, *, choice_index=None, numbers=None, initial
         defaults = effective_values(initializer) if initializer else {}
         for field in fields:
             value = defaults.get(field['column'], 'null')
+            if field['data_type'] == 'NUMBER' and value != 'null':
+                value = _number_text(value)
             sql += f':P{page}_{_suffix(field)}:={value};\n'
         sql += f'end if;\n:P{page}_REV:=null; return; end if;\n'
     else:
