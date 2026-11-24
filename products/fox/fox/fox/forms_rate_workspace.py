@@ -224,7 +224,17 @@ create table {names['saved_table']} (
     return sql
 
 
-def _companion_query(ch, names, page, *, ordered=False):
+def _match_count_column(choice):
+    names = {column['name'].upper() for column in choice['columns']}
+    name = 'FOX_MATCH_COUNT'
+    suffix = 0
+    while name in names:
+        suffix += 1
+        name = f'FOX_MATCH_COUNT_{suffix}'
+    return name
+
+
+def _companion_query(ch, names, page, *, ordered=False, match_count=None):
     query = deepcopy(ch['query'])
     query['tables'] = [[_catalog_name(ch)]]
     parts = query['projections'] + [p['left']['parts'] for p in query['predicates']] + [o['parts'] for o in query['order']]
@@ -238,14 +248,20 @@ def _companion_query(ch, names, page, *, ordered=False):
               ("v('APP_SESSION')", 'VARCHAR2'), ("v('APP_USER')", 'VARCHAR2'),
               (f':P{page}_ROW', 'VARCHAR2'), (f':P{page}_REV', 'VARCHAR2')]
     values += [('q.'+col['name'], col['data_type']) for col in ch['columns']]
-    sql = f"select q.*,{_fingerprint(values)} FOX_CHOICE from ({groups.render_query(query,{})}) q where exists (select 1 from {names['draft_table']} where {route._row(None,page,revision=True)})"
+    indicator = ''
+    if match_count is not None:
+        # Match Save's byte-exact, null-safe equality on returned fields.
+        # Display-only columns still belong to the original choice fingerprint.
+        partition = ','.join('utl_raw.cast_to_raw(q.' + f['source_column'] + ')' for f in ch['returns'])
+        indicator = f'count(*) over (partition by {partition}) {match_count},'
+    sql = f"select q.*,{indicator}{_fingerprint(values)} FOX_CHOICE from ({groups.render_query(query,{})}) q where exists (select 1 from {names['draft_table']} where {route._row(None,page,revision=True)})"
     if ordered and ch['query']['order']:
         sql += ' order by ' + ','.join('q.'+o['parts'][-1]+(' '+o['direction'] if o['direction'] else '') for o in ch['query']['order'])
     return sql
 
 
 def choice_query(primary, bundle, page, choice_index=0, *, ordered=False, numbers=None, parent=None):
-    """Exact SELECT emitted for a chooser; zero is the existing route choice."""
+    """Row-bound choice values and fingerprints; zero selects the original route chooser."""
     if parent is not None:
         from . import forms_rate_parent_page as linked
         return linked.bound_choice_query(primary, bundle, page, choice_index, ordered=ordered,
@@ -349,7 +365,11 @@ def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, 
                 present = ' or '.join(f"l_f{f['slot']} is not null" for f in ch['returns'])
                 checks = ' and '.join(native_buffer._parent_match('q.'+f['source_column'],f"l_f{f['slot']}") for f in ch['returns'])
                 code += f"if {present} then\nselect count(*) into l_count from ({_companion_query(ch,names,page)}) q where {checks};\n"
-                code += "if l_count<>1 then raise_application_error(-20031,'A list-validated value changed or is ambiguous. Choose it again before saving.'); end if;\nend if;\n"
+                chooser = route._source_message('Choose ' + ch['source_caller_name'])
+                code += (f"if l_count<>1 then raise_application_error(-20031,{chooser}||"
+                         "case when l_count=0 then ': this selection is no longer available. Select again.' "
+                         "else ': multiple options return these values. Select a unique value or have the list corrected.' end); "
+                         "end if;\nend if;\n")
             code += 'if l_saved_uuid is null then\nl_saved_uuid:=rawtohex(sys_guid());\nl_current:=0;\n'
             code += f"insert into {saved}(APP_ID,OWNER_NAME,SAVED_UUID,ROW_LABEL,REVISION,{cols}) values(to_number(v('APP_ID')),v('APP_USER'),l_saved_uuid,l_label,0,{local});\nelse\n"
             code += f"select REVISION into l_current from {saved} where {_saved_row(page,baseline=True)} for update nowait;\n"
@@ -388,8 +408,10 @@ def _list(c, fields, names, page):
                          numeric_columns=numeric_columns)
 
 
-def _choice_report(page, sql, ch, link):
+def _choice_report(page, sql, ch, link, *, match_count=None):
     specs = [dict(name=col['name'],label=col['name'],data_type=col['data_type'],nullable=True,primary_key=False) for col in ch['columns']]
+    if match_count is not None:
+        specs.append(dict(name=match_count, label='Matching options', data_type='NUMBER', nullable=False, primary_key=False))
     specs.append(dict(name='FOX_CHOICE',label='Choice identity',data_type='VARCHAR2',nullable=False,primary_key=False))
     text = groups._report(page,specs,groups._sql_source(sql),label='Synthetic choices for '+ch['source_caller_name'],link=link)
     return text[text.index('    region records ('):-2]
@@ -454,7 +476,12 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=No
                     P{current}_CHOICE: "#FOX_CHOICE#" }} }}
             linkIcon: Select choice }}
 '''
-            report = _choice_report(current,choice_query(c,b,current,index,ordered=True,numbers=numbers),ch,link)
+            match_count = _match_count_column(ch) if index else None
+            if match_count is None:
+                query = choice_query(c, b, current, index, ordered=True, numbers=numbers)
+            else:
+                query = _companion_query(ch, names, current, ordered=True, match_count=match_count)
+            report = _choice_report(current, query, ch, link, match_count=match_count)
             body += route._button('FOX_ROW_APPLY','Apply choice to this draft',10)
             body += route._process('apply-choice',action_code(c,b,current,'FOX_ROW_APPLY',index,numbers=numbers),action='FOX_ROW_APPLY')
             body += route._branch(current,page,'FOX_ROW_APPLY',revision=True)
@@ -475,6 +502,9 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=No
             description = ('Select one synthetic choice, review its declared returns, then Apply to this row. '
                            'Display-only projections are not assigned to the row. Cancel preserves every draft and saved row. '
                            'Original interfaces and omitted source events are not executed.')
+            if match_count is not None:
+                description += (' Matching options counts list entries that return the same values, including entries '
+                                'hidden by a report filter. A nonempty selection needs one match when saved.')
             label = 'Choose '+ch['source_caller_name']
         else:
             report = _list(c,fields,names,page)

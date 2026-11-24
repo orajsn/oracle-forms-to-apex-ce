@@ -1,10 +1,10 @@
 {
-  "version": "0.57.13",
+  "version": "0.57.14",
   "released_on": "2026-11-24",
-  "title": "Identify the field that prevents saving a rate",
+  "title": "Identify duplicate return values in rate choice lists",
   "changes": [
-    "Rate validation names the field and distinguishes a missing required value from a length limit in bytes or characters.",
-    "For a missing field populated by exactly one generated choice list, Save identifies the matching Choose button."
+    "List-validated rate choosers show how many options return the same values to the row.",
+    "Save names the choice list and distinguishes a removed selection from multiple current matches."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

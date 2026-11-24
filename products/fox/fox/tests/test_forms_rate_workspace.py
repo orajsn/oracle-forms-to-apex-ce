@@ -121,7 +121,7 @@ def test_new_transactions_are_bounded_and_rollback_owned_atomic_writes(action,in
         assert 'l_saved_revision is null or l_current<>l_saved_revision' in code
         assert 'SAVED_REVISION=l_current,REVISION=REVISION+1' in code
         assert 'Keep draft changes before saving or choosing.' in code
-        assert 'list-validated value changed or is ambiguous' in code
+        assert 'this selection is no longer available' in code and 'multiple options return these values' in code
     if action != native.REOPEN:
         assert "SESSION_ID=v('APP_SESSION')" in code
 
@@ -485,3 +485,59 @@ def test_wrong_session_save_discard_and_catalog_mutation_preserve_all_rows():
     delete, = re.findall(r'delete from FOX_WD_.*?;',h.code('FOX_ROW_DISCARD'),re.S)
     assert h.run(delete,h.params(a,0)).rowcount == 0
     assert (h.values(a),h.values(b)) == before
+
+
+def test_companion_report_counts_duplicate_returns_even_when_display_filtered():
+    from textwrap import dedent
+    h = SqlBoundary()
+    row = h.create('counted choices')
+    result = native.render_rate_workspace(h.c, h.b, 7800)
+    def query(index):
+        page = result['pages'][index]['text'].decode()
+        return dedent(re.search(r'\x60{3}sql\n(.*?)\n *\x60{3}',page,re.S)[1])
+    assert 'FOX_MATCH_COUNT' not in query(1)
+    report = query(2)
+    table = h.m['companion_choices'][0]['catalog_table']
+    h.db.executemany('insert into '+table+' values (?,?)',
+                     [('X','A'),('X','B'),('Y','C'),('x','D'),('X ','E'),(None,'F'),(None,'G')])
+    params = {'P7802_ROW':row,'P7802_REV':'0'}
+    rows = h.run(report,params).fetchall()
+    assert {r[1]:r[-2] for r in rows} == {'A':2,'B':2,'C':1,'D':1,'E':1,'F':2,'G':2}
+    plain = native.choice_query(h.c,h.b,7802,1,ordered=True)
+    assert [(*r[:-2],r[-1]) for r in rows] == h.run(plain,params).fetchall()
+    assert h.run("select FOX_MATCH_COUNT from ("+report+") where DESCRIPTION='A' limit 1",params).fetchone()==(2,)
+    assert h.run(report,dict(params,P7802_REV='9')).fetchall()==[]
+
+
+def test_match_count_covers_composite_tuple_and_avoids_source_alias_collision():
+    from copy import deepcopy
+    h = SqlBoundary()
+    row = h.create('composite')
+    ch = deepcopy(h.b['choices'][0])
+    # Exercise the projection builder independently of source eligibility.
+    ch['returns'].append(dict(ch['returns'][0],source_column='DESCRIPTION'))
+    table = native._catalog_name(ch)
+    h.db.execute('create table if not exists '+table+'(CODE text,DESCRIPTION text)')
+    h.db.executemany('insert into '+table+' values (?,?)',
+                     [('X','A'),('X','B'),('X','B'),('X',None),('Y',None),('Y',None)])
+    query = native._companion_query(ch,h.m,7800,match_count='FOX_MATCH_COUNT')
+    rows = h.run(query,h.params(row,0)).fetchall()
+    assert sorted(r[-2] for r in rows if r[0]=='X')==[1,1,2,2]
+    assert [r[-2] for r in rows if r[0]=='Y']==[2,2]
+    assert native._match_count_column({'columns':[{'name':'FOX_MATCH_COUNT'},{'name':'FOX_MATCH_COUNT_1'}]})=='FOX_MATCH_COUNT_2'
+
+
+def test_companion_count_excludes_rows_outside_the_source_query():
+    from copy import deepcopy
+    h = SqlBoundary()
+    row = h.create('filtered')
+    choice = deepcopy(h.b['choices'][0])
+    choice['query']['predicates'] = [
+        {'left':{'kind':'column','parts':[choice['source_table'],'DESCRIPTION']},
+         'op':'=', 'right':{'kind':'string','value':'active'}}]
+    table = native._catalog_name(choice)
+    h.db.execute('create table '+table+'(CODE text, DESCRIPTION text)')
+    h.db.executemany('insert into '+table+' values (?,?)',[('X','active'),('X','archived')])
+    query = native._companion_query(choice,h.m,7800,match_count='FOX_MATCH_COUNT')
+    matches = h.run(query,h.params(row,0)).fetchall()
+    assert len(matches)==1 and matches[0][:3]==('X','active',1)

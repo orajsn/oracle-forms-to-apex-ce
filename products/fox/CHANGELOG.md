@@ -200,6 +200,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.14] - 2026-11-24
+
+### [improvement] Identify matching options in rate choice lists
+
+Rate choice lists that require validation show how many current options
+return the same field values. The count includes options hidden by the
+interactive report filter. Save rechecks the selected values and names the
+choice list if the selection disappeared or has multiple matches.
+
 ## [0.57.13] - 2026-11-24
 
 ### [improvement] Identify the field preventing a rate save
