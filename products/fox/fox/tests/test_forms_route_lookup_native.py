@@ -519,7 +519,8 @@ def test_typed_message_literal_is_not_interpreted_as_code_or_binding():
     message = "Invalid ''route'' & :value <tag>"
     c = typed_contract(body=TYPED_BODY.replace('Invalid routing',message))
     code = action_code(c,7800,'FOX_ROW_KEEP')
-    expression = re.search(r"apex_escape.html\(unistr\('([^']+)'\)\)",code)[1]
+    missing_reference = code.split("exception when no_data_found then", 1)[1]
+    expression = re.search(r"apex_escape.html\(unistr\('([^']+)'\)\)",missing_reference)[1]
     decoded = bytes.fromhex(expression.replace('\\','')).decode('utf-16-be')
     assert decoded==message.replace("''", "'")
     assert '<tag>' not in code and '& :value' not in code
@@ -570,3 +571,37 @@ def test_changed_input_comparison_keeps_sql_only_decode_out_of_procedural_if(act
     assert 'if l_caller_unchanged=0 then' in code
     assert not re.search(r'\bif\s+(?:not\s*\()?decode\(',code,re.I)
     assert 'case when l_caller_unchanged=1 then' in code
+
+
+@pytest.mark.parametrize(('required','enforce','semantics','maximum','value','expected'), [
+    (True, True, 'BYTE', 2, None, 'VIA is required. Use Choose VIA.'),
+    (True, False, 'BYTE', 2, None, None),
+    (False, True, 'BYTE', 2, None, None),
+    (True, True, 'BYTE', 2, 'é', None),
+    (True, True, 'BYTE', 2, '界', 'VIA exceeds the limit of 2 bytes.'),
+    (True, True, 'CHAR', 2, '界界', None),
+    (True, True, 'CHAR', 2, '界界界', 'VIA exceeds the limit of 2 characters.'),
+    (False, True, 'CHAR', 4000, '界'*1400, 'VIA exceeds the storage limit of 4000 bytes.'),
+])
+def test_emitted_field_error_identifies_constraint(required,enforce,semantics,maximum,value,expected):
+    from fox.forms_route_lookup_native import _validate_value
+    from html import escape
+    f={'source_name':'VIA','required':required,'max_length':maximum,'length_semantics':semantics}
+    code=_validate_value(f,':v',required=enforce,chooser='VIA')
+    condition,reason=re.fullmatch(r"if (.*?) then raise_application_error\(-20031,(.*)\); end if;\n",code).groups()
+    db=sqlite3.connect(':memory:')
+    db.create_function('lengthb',1,lambda s:len(s.encode()) if s is not None else None)
+    db.create_function('nvl',2,lambda x,y:y if x is None else x)
+    db.create_function('unistr',1,lambda s:bytes.fromhex(s.replace('\\','')).decode('utf-16-be'))
+    db.create_function('escape_html',1,escape)
+    expression='select case when '+condition+' then '+reason.replace('apex_escape.html','escape_html')+' end'
+    assert db.execute(expression,{'v':value}).fetchone()[0]==expected
+
+
+def test_diagnostic_encodes_source_names_and_never_echoes_submitted_content():
+    from fox.forms_route_lookup_native import _validate_value,_source_message
+    field={'source_name':"Café d'été",'required':True,'max_length':40,'length_semantics':'CHAR'}
+    sql=_validate_value(field,':v',chooser='Options')
+    assert _source_message(field['source_name']) in sql and _source_message('Choose Options') in sql
+    reason=sql.split('raise_application_error(-20031,',1)[1]
+    assert "||:v" not in reason and field['source_name'] not in sql

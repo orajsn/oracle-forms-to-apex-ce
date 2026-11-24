@@ -1,10 +1,10 @@
 {
-  "version": "0.57.12",
+  "version": "0.57.13",
   "released_on": "2026-11-24",
-  "title": "Distinguish same-named rate workspaces by source module",
+  "title": "Identify the field that prevents saving a rate",
   "changes": [
-    "When source block names repeat, the rate editor and its choice pages display their source module and block.",
-    "Single-module rate workspaces retain their existing titles."
+    "Rate validation names the field and distinguishes a missing required value from a length limit in bytes or characters.",
+    "For a missing field populated by exactly one generated choice list, Save identifies the matching Choose button."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

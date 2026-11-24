@@ -335,9 +335,13 @@ def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, 
             code += f"select SAVED_UUID,SAVED_REVISION,ROW_LABEL,{cols} into l_saved_uuid,l_saved_revision,l_label,{local} from {table} where {route._row(c,page,revision=True)};\n"
             for f in fields:
                 if f['data_type'] != 'NUMBER':
-                    code += route._validate_value(f, _local(f))
+                    choices = [choice['source_caller_name'] for choice in (c, *b['choices'])
+                               if any(target['source_item_id'] == f['source_item_id'] for target in choice['returns'])]
+                    chooser = choices[0] if len(choices) == 1 else None
+                    code += route._validate_value(f, _local(f), chooser=chooser)
                 elif f['required']:
-                    code += f"if {_local(f)} is null then raise_application_error(-20031,'A required source number is missing.'); end if;\n"
+                    label = route._source_message(f['label'])
+                    code += f"if {_local(f)} is null then raise_application_error(-20031,{label}||' is required.'); end if;\n"
             # ValidateFromList applies when saving too: a previously selected
             # reference may have disappeared or become ambiguous. Optional
             # all-null mappings remain valid without inventing a catalog row.

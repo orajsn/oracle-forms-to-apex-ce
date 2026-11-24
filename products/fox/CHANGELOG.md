@@ -200,6 +200,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.13] - 2026-11-24
+
+### [improvement] Identify the field preventing a rate save
+
+A rejected rate action names the affected field and explains whether it is
+required, exceeds its Forms length limit, or exceeds the stored byte limit.
+When one choice list supplies a missing field, Save names its Choose button.
+Required numeric fields use the caption displayed in the editor.
+
 ## [0.57.12] - 2026-11-24
 
 ### [improvement] Identify the source module on rate workspace pages

@@ -265,3 +265,12 @@ def test_explicit_plain_block_label_preserves_all_single_module_native_bytes():
     for page in titled['pages']:
         title = json.loads(re.search(r'(?m)^    title: (.+)$',page['text'].decode())[1])
         assert len(title) <= 255 and f"[page {page['page_id']}]" in title
+
+
+def test_save_names_required_numeric_field_using_visible_prompt():
+    from fox.forms_route_lookup_native import _source_message
+    c,b,n=compiled(Required='true',Prompt='Agreed price')
+    code=native.action_code(c,b,7800,native.SAVE,numbers=n)
+    assert _source_message('Agreed price')+"||' is required.'" in code
+    assert 'A required source number is missing.' not in code
+    assert code.index(_source_message('Agreed price')+"||' is required.'") < code.index('insert into '+native.render_rate_workspace(c,b,7800,numbers=n)['metadata']['saved_table'])

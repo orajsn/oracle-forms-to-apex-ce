@@ -187,12 +187,26 @@ def _auth():
 """
 
 
-def _validate_value(field, value, *, required=True):
-    fn = 'lengthb' if field['length_semantics'] == 'BYTE' else 'length'
-    test = f'nvl({fn}({value}),0)>{field["max_length"]} or nvl(lengthb({value}),0)>4000'
+def _validate_value(field, value, *, required=True, chooser=None):
+    checks = []
+    byte_length = field['length_semantics'] == 'BYTE'
+    measure, unit = ('lengthb', 'bytes') if byte_length else ('length', 'characters')
+    limit = field['max_length']
+    checks.append((f'nvl({measure}({value}),0)>{limit}', f"' exceeds the limit of {limit} {unit}.'"))
+    if not byte_length or limit > 4000:
+        checks.append((f'nvl(lengthb({value}),0)>4000', "' exceeds the storage limit of 4000 bytes.'"))
     if required and field['required']:
-        test += f' or {value} is null'
-    return f"if {test} then raise_application_error(-20031,'A value violates a source field length or required constraint.'); end if;\n"
+        missing = "' is required.'"
+        if chooser is not None:
+            missing += "||' Use '||" + _source_message('Choose ' + chooser) + "||'.'"
+        checks.append((f'{value} is null', missing))
+    invalid = ' or '.join(predicate for predicate, _ in checks)
+    reason = checks[-1][1]
+    if len(checks) > 1:
+        reason = ('case ' + ' '.join('when ' + test + ' then ' + message for test, message in checks[:-1])
+                  + ' else ' + reason + ' end')
+    label = _source_message(field['source_name'])
+    return f"if {invalid} then raise_application_error(-20031,{label}||{reason}); end if;\n"
 
 
 def _source_message(value):
