@@ -1,10 +1,10 @@
 {
-  "version": "0.57.9",
-  "released_on": "2026-11-23",
-  "title": "Identify the fields preventing a checkbox draft",
+  "version": "0.57.10",
+  "released_on": "2026-11-24",
+  "title": "Verify the app created from the exported SQL",
   "changes": [
-    "A saved row can name each checkbox whose stored value is blank or outside its two mapped codes, and show its source-defined Forms setting.",
-    "When the report query approaches its SQL size limit, FOX shows the first affected field or a compact availability message."
+    "A conventional SQL release checks the login page of the fresh reimported application and verifies the app ID served by APEX.",
+    "New release evidence links this check to the SQL file hash. A retry can reuse a completed database import."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

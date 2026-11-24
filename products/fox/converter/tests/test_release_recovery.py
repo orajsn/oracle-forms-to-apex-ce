@@ -75,6 +75,8 @@ def job(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(release, '_run_script', sqlcl)
     monkeypatch.setattr('forms2apex.sqlcl._run_script', sqlcl)
     monkeypatch.setattr(release, 'runtime_login_check', lambda url: {'passed': True, 'scope': 'login_page_reachability'})
+    from forms2apex.release_login import _identity
+    monkeypatch.setattr('forms2apex.release.check_copy_login', lambda settings, orig, receipt: _identity(orig, receipt))
     return SimpleNamespace(root=root, workflow=workflow, calls=calls, sqlcl=sqlcl)
 
 
@@ -350,3 +352,22 @@ def test_changed_sql_during_reimport_never_receives_verified_receipt(job, monkey
     forbid_external(monkeypatch)
     with pytest.raises(RuntimeError, match='changed or are incomplete'):
         finish(job)
+
+
+def test_copy_login_failure_reuses_reimport_receipt_on_retry(job, monkeypatch):
+    from forms2apex.release_login import _identity
+    seen = []
+    def probe(settings, original, receipt):
+        seen.append((original, receipt['application_id'], receipt['sql_sha256']))
+        if len(seen) == 1:
+            raise RuntimeError('Synthetic copy login unavailable')
+        return _identity(original, receipt)
+    monkeypatch.setattr(release, 'check_copy_login', probe)
+    with pytest.raises(RuntimeError, match='copy login unavailable'):
+        finish(job)
+    assert (job.root / 'package-reimport.json').is_file()
+    assert not (job.root / 'apex-package.zip').exists()
+    calls = list(job.calls)
+    proof = finish(job)
+    assert seen[0] == seen[1] and seen[0][0] != seen[0][1]
+    assert job.calls == calls and proof['reimport_login']['application_id'] == seen[1][1]

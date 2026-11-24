@@ -9,6 +9,7 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
+from .release_login import check_copy_login, validate_saved_copy_login
 from .security import alias_for_job
 from .sqlcl import _run_script, _target_guard, _candidate_application_ids, _IMPORT_LOCK, validate_apexlang
 
@@ -246,6 +247,7 @@ def _verify_cached_release(root,job_id,binding):
         _verify_completed_export(root,job_id,binding,app_id,alias_for_job(job_id))
     receipt_path=root/'package-reimport.json'
     receipt=_verify_reimport_receipt(sql,receipt_path,alias_for_job(job_id+'-sqlcheck'))
+    validate_saved_copy_login(evidence, receipt)
     if evidence.get('package_reimport')!=receipt:
         raise RuntimeError('Cached release reimport evidence changed')
     exported_app=(root/'export'/alias_for_job(job_id).lower()) if 'export_completion_sha256' in integrity else None
@@ -378,10 +380,11 @@ def finalize_release(workflow,job_id):
             checked={'passed':True,'application_id':test_id,'application_alias':test_alias,'sql_sha256':sql_digest}
             if preflight is not None:checked['target_preflight']=preflight
             _atomic_json(receipt,checked)
-    _verify_reimport_receipt(sql,receipt,test_alias)
+    checked_receipt = _verify_reimport_receipt(sql,receipt,test_alias)
     smoke=runtime_login_check(app['application_url'])
     (root/'smoke-test-report.json').write_text(json.dumps(smoke,indent=2),encoding='utf-8')
     if not smoke['passed']: raise RuntimeError('The imported APEX login page is not reachable')
+    copy_login = check_copy_login(settings, app_id, checked_receipt)
     manifest=json.loads((root/'intake/manifest.json').read_text())
     spec=json.loads((root/'migration-spec.json').read_text())
     is_native='native_form' in spec
@@ -393,7 +396,7 @@ def finalize_release(workflow,job_id):
         'reviewer':spec.get('reviewer'),'remediation_items':spec.get('remediation_items',[]),'mapping_summary':spec.get('mapping_summary'),
         'reviewer_approved':True,'sqlcl_valid':True,'import_passed':True,'runtime_smoke_passed':True,
         'runtime_smoke_scope':'login_page_reachability_only','business_acceptance_required':True,
-        'package_reimport_passed':True,'application_id':app_id,'application_alias':alias,
+        'reimport_login':copy_login,'package_reimport_passed':True,'application_id':app_id,'application_alias':alias,
         'application_url':app['application_url'],'prototype_scope':scope,
         'conversion_profile':'native-table-form-v1' if is_native else 'read-only-html-prototype',
         'reviewer_execution_verified':is_native,

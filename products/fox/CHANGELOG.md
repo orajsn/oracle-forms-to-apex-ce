@@ -200,6 +200,17 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.10] - 2026-11-24
+
+### [fix] Check the application created from the exported SQL
+
+Single-form and project SQL releases check the login form returned by the
+reimported app's own APEX route. Its hidden app ID must match the new app ID
+recorded by Oracle. New package evidence records the app ID, alias and SQL
+hash. An unavailable or mismatched page leaves the successful import receipt
+available for a retry. Earlier packages retain their recorded verification
+scope. An authenticated business workflow requires its own test.
+
 ## [0.57.9] - 2026-11-23
 
 ### [improvement] Identify which checkbox values need attention

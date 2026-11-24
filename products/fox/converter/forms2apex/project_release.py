@@ -368,6 +368,7 @@ def validate_project_package(package, *, expected_project=None, expected_evidenc
                  and {name for name in members if name.startswith("sql/")} == {f"sql/f{app_id}.sql"},
                  "Project package must contain one conventional SQL export")
         reimport = _json(members["evidence/package-reimport.json"])
+        release.validate_saved_copy_login(evidence, reimport)
         _require(reimport == evidence.get("package_reimport") and reimport.get("passed") is True
                  and reimport.get("sql_sha256") == manifest[f"sql/f{app_id}.sql"]
                  and type(reimport.get("application_id")) is int and reimport["application_id"] > 0
@@ -586,6 +587,7 @@ def finalize_project_release(workflow, job_id):
     smoke = release.runtime_login_check(app["application_url"])
     release._atomic_json(root / "smoke-test-report.json", smoke)
     _require(smoke.get("passed") is True, "The project APEX login page is not reachable")
+    copy_login = release.check_copy_login(workflow.settings, app_id, receipt)
     trace = native_project.project_trace(project)
     preparation = root / "schema-preparation.json"
     _require(release._read_object(preparation).get("all_ready") is True, "Project schema preparation evidence is required")
@@ -598,7 +600,7 @@ def finalize_project_release(workflow, job_id):
         "review_proof_scope": "authenticated_executor_per_form_v2_environment_and_candidate_binding_not_vendor_attestation",
         "sqlcl_valid": True, "import_passed": True, "runtime_smoke_passed": True,
         "runtime_smoke_scope": "login_page_reachability_only", "business_acceptance_required": True,
-        "package_reimport_passed": True, "package_reimport": receipt,
+        "package_reimport_passed": True, "package_reimport": receipt, "reimport_login": copy_login,
         "application_id": app_id, "application_alias": alias, "application_url": app["application_url"],
         "imported_application_sha256": release._file_digest(root / "imported-application.json"),
         "export_completion_sha256": release._file_digest(export / release._EXPORT_MANIFEST),

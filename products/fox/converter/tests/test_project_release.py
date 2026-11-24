@@ -165,6 +165,8 @@ def project_job(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(project_release, "_run_script", sqlcl)
     monkeypatch.setattr("forms2apex.sqlcl._run_script", sqlcl)
     monkeypatch.setattr(release, "runtime_login_check", lambda url: {"passed": True, "scope": "login_page_reachability"})
+    from forms2apex.release_login import _identity
+    monkeypatch.setattr('forms2apex.release.check_copy_login', lambda settings, orig, receipt: _identity(orig, receipt))
     return SimpleNamespace(root=root, workflow=workflow, project=project, binding=binding, sqlcl=sqlcl, calls=calls)
 
 
@@ -409,6 +411,8 @@ def build_actual_project_release(tmp_path_factory, monkeypatch, *, source_snapsh
     monkeypatch.setattr("forms2apex.schema_bootstrap.SqlclSchemaExecutor", lambda: database)
     monkeypatch.setattr("forms2apex.project_workflow.runtime_login_check", lambda url: {"passed": True})
     monkeypatch.setattr(release, "runtime_login_check", lambda url: {"passed": True})
+    from forms2apex.release_login import _identity
+    monkeypatch.setattr('forms2apex.release.check_copy_login', lambda settings, orig, receipt: _identity(orig, receipt))
     assert w.validate(jid)["passed"] is True
     assert w.prepare_schema(jid)["state"] == "READY"
     imported = w.import_draft(jid)
@@ -526,3 +530,25 @@ def test_rehashed_ordinary_package_cannot_change_source_target_or_import_contrac
             archive.writestr(name, raw)
     with pytest.raises(RuntimeError, match="Project package integrity"):
         project_release.validate_project_package(stream.getvalue())
+
+
+def test_project_copy_login_retry_preserves_its_database_import(project_job, monkeypatch):
+    from forms2apex.release_login import _identity
+    job = project_job
+    attempts = []
+    def check(settings, source_id, receipt):
+        attempts.append((source_id, receipt['application_id']))
+        if len(attempts) == 1:
+            raise RuntimeError('Project copy has no matching login page')
+        return _identity(source_id, receipt)
+    monkeypatch.setattr(release, 'check_copy_login', check)
+    with pytest.raises(RuntimeError, match='matching login page'):
+        finish(job)
+    assert (job.root / 'package-reimport.json').is_file()
+    assert not (job.root / 'apex-package.zip').exists()
+    earlier = list(job.calls)
+    evidence = finish(job)
+    assert attempts[0] == attempts[1] and attempts[0][0] != attempts[0][1]
+    assert job.calls == earlier
+    assert evidence['reimport_login']['sql_sha256'] == evidence['package_reimport']['sql_sha256']
+    assert evidence['reimport_login']['application_id'] == attempts[0][1]

@@ -132,6 +132,8 @@ def external_boundaries(api, monkeypatch, project):
     monkeypatch.setattr("forms2apex.schema_bootstrap.SqlclSchemaExecutor", lambda: database)
     monkeypatch.setattr("forms2apex.project_workflow.runtime_login_check", lambda url: {"passed": True})
     monkeypatch.setattr(release, "runtime_login_check", lambda url: {"passed": True})
+    from forms2apex.release_login import _identity
+    monkeypatch.setattr('forms2apex.release.check_copy_login', lambda settings, orig, receipt: _identity(orig, receipt))
     return SimpleNamespace(database=database, calls=calls, application_ids=application_ids, preflights=preflights)
 
 

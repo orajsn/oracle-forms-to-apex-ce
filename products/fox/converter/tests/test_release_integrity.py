@@ -188,6 +188,8 @@ def test_new_release_writes_verified_sidecar(cached_release,monkeypatch):
     workflow.settings=SimpleNamespace(apex_workspace='FORMS2APEX_POC',sqlcl_connection_name='F2A_APEX',sqlcl_path=root/'sql')
     monkeypatch.setattr('forms2apex.release._run_script',lambda *a,**k:pytest.fail('Existing export/receipt should not call SQLcl'))
     monkeypatch.setattr('forms2apex.release.runtime_login_check',lambda *a,**k:{'passed':True})
+    from forms2apex.release_login import _identity
+    monkeypatch.setattr('forms2apex.release.check_copy_login', lambda settings, orig, receipt: _identity(orig, receipt))
     evidence=finalize_release(workflow,JOB_ID)
     assert evidence['artifact_binding']==BINDING
     assert len(calls)==4
