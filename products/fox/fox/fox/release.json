@@ -1,10 +1,10 @@
 {
-  "version": "0.57.11",
+  "version": "0.57.12",
   "released_on": "2026-11-24",
-  "title": "Sort and filter stored rate prices as numbers",
+  "title": "Distinguish same-named rate workspaces by source module",
   "changes": [
-    "Draft and saved rate reports retain the Oracle NUMBER type and the Forms field caption for mapped prices.",
-    "APEX can sort and compare prices numerically. The editor retains its source-bound decimal validation and preserves the difference between an empty price and zero."
+    "When source block names repeat, the rate editor and its choice pages display their source module and block.",
+    "Single-module rate workspaces retain their existing titles."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

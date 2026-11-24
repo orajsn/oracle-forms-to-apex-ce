@@ -127,10 +127,16 @@ def _landing(page, alias, label):
 '''.encode('utf-8')
 
 
-def _qualify_labels(files, blocks, modules):
-    """Change only known display fields; all existing targets/actions survive."""
+def source_modules(packet):
+    modules = [(entry['source']['name'], obj['id'], obj) for entry in packet['sources']
+               for obj in entry['facts']['objects'] if obj['kind'] == 'FormModule']
+    return {mid: obj for _, mid, obj in sorted(modules, key=lambda item: item[:2])}
+
+
+def block_labels(blocks, modules):
+    """Source-bound names shared by navigation and generated workspaces."""
     counts = Counter(b['name'].upper() for b in blocks)
-    labels, changed = {}, []
+    labels = {}
     module_names = Counter((m['name'] or '').upper() for m in modules.values())
     module_numbers = {mid: n for n, mid in enumerate(modules, 1)}
     proposed = {}
@@ -156,6 +162,15 @@ def _qualify_labels(files, blocks, modules):
         # metadata from becoming syntax. APEX substitutions remain forbidden.
         native._label(label)
         labels[bid] = label
+    return labels
+
+
+def _qualify_labels(files, blocks, modules):
+    labels = block_labels(blocks, modules)
+    changed = []
+    for b in blocks:
+        bid = b['source_block_id']
+        label = labels[bid]
         if label == b['name']:
             continue
         for filename, field in [('shared-components/lists.apx', 'label'),
@@ -198,8 +213,7 @@ def apply_module_navigation(documents, packet, chunks, trace, files):
     result = dict(files)
     objects, properties = _source_objects(documents, fresh)
     sources = {o['id']: entry['source'] for entry in fresh['sources'] for o in entry['facts']['objects']}
-    modules = {k: objects[k] for k in sorted(objects, key=lambda k: (sources[k]['name'], k))
-               if objects[k]['kind'] == 'FormModule'}
+    modules = source_modules(fresh)
     by_name, rendered = defaultdict(list), defaultdict(list)
     for mid, m in modules.items():
         if m['name']:

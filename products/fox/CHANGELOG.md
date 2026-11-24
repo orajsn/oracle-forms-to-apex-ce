@@ -200,6 +200,13 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.12] - 2026-11-24
+
+### [improvement] Identify the source module on rate workspace pages
+
+When two Forms modules use the same block name, the rate editor and its
+choice pages show their source module and block. Each workspace keeps its original numeric rules and lookup targets.
+
 ## [0.57.11] - 2026-11-24
 
 ### [fix] Sort and filter rate prices as numbers

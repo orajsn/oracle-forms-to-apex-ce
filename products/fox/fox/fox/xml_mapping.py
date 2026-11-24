@@ -25,7 +25,7 @@ from .forms_relation_plan import build_relation_plan
 from .forms_assignment_plan import build_assignment_plan
 from .forms_policy_plan import build_policy_plan
 from .forms_order_rules import apply_order_rules
-from .forms_module_navigation import apply_module_navigation
+from .forms_module_navigation import apply_module_navigation, block_labels, source_modules
 from .forms_buffer_plan import build_buffer_plan
 from .forms_lookup_plan import build_lookup_plan
 from .forms_guarded_query import apply_guarded_queries
@@ -535,6 +535,13 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
     relation_actions = {r['relation_id']: r for r in relation_receipt.get('generated_operations', [])}
     queries = {op['operation_id']: op for op in groups['generated_operations']}
     occupied = {int(m[1]) for name in files if (m := re.fullmatch(r'pages/p(\d+)-[^/]+\.apx', name))}
+    label_blocks = {block['source_block_id']: block for block in trace['blocks']}
+    # An eligible editor can also come from a transient block with no structural page.
+    for contract in contracts:
+        bid = contract['source_block_id']
+        label_blocks.setdefault(bid, {'source_block_id': bid, 'source_module_id': contract['source_module_id'],
+                                      'name': contract['source_block_name']})
+    labels = block_labels(label_blocks.values(), source_modules(packet))
     page = 8900
     for contract in contracts:
         bundle = bundles.get(contract['contract_id'])
@@ -556,7 +563,9 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         numbers = number_plans.get(contract['contract_id'])
         if choices:
             numbers = numbers if numbers['fields'] else None
+            block_label = labels[contract['source_block_id']]
             rendered = render_rate_workspace(contract, bundle, page, numbers=numbers,
+                                             block_label=block_label,
                                              parent=parent_plan if parent_binding is not None else None)
         else:
             rendered = render_row_lookup(contract, page)

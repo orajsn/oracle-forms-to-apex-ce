@@ -6,6 +6,7 @@ explicitly modelled. The separate target gate must execute the emitted parser.
 from copy import deepcopy
 from decimal import Decimal
 from functools import lru_cache
+import json
 import re
 import sqlite3
 from xml.etree import ElementTree as ET
@@ -18,8 +19,7 @@ from fox.forms_rate_numbers import compile_rate_numbers, validate_numeric_value
 from test_forms_rate_choices import SOURCE, prepare
 
 
-@lru_cache(maxsize=8)
-def compiled(**properties):
+def _source_with_price(**properties):
     root = ET.fromstring(SOURCE)
     block = root.find("./Block[@Name='LINES']")
     block.set('DatabaseBlock', 'true')
@@ -32,7 +32,12 @@ def compiled(**properties):
         'ItemType': 'Text Item', 'DataType': 'Number', 'DatabaseItem': 'true',
         'FormatMask': '99,999,990.90', 'MaximumLength': '12', 'Required': 'false',
         **properties})
-    args, c = prepare(ET.tostring(root))
+    return ET.tostring(root)
+
+
+@lru_cache(maxsize=8)
+def compiled(**properties):
+    args, c = prepare(_source_with_price(**properties))
     b = compile_rate_choices(*args, c)
     n = compile_rate_numbers(*args, c)
     return c, b, n
@@ -215,3 +220,48 @@ def test_report_helper_requires_an_explicit_numeric_binding():
     from fox import forms_route_lookup_native as route
     text=route._report(1,'select CODE,PRICE from DEMO',[('CODE','Code'),('PRICE','Price')],'Demo','')
     assert text.count('dataType: STRING') == 2 and 'dataType: NUMBER' not in text
+
+
+def test_two_modules_share_block_names_but_not_editor_or_chooser_titles():
+    from fox.forms_native_plan import POLICY_ID
+    from fox.xml_mapping import generate_xml_package, _members
+
+    forms = []
+    expected = {'SHIPPING': ('Outbound charge', 2), 'RETURNS': ('Inbound charge', 3)}
+    for module, (prompt, scale) in expected.items():
+        form = ET.fromstring(_source_with_price(Prompt=prompt, FormatMask='990.' + '0' * scale))
+        form.set('Name', module)
+        forms.append((module.lower()+'.xml', ET.tostring(form)))
+    package, _ = generate_xml_package(forms, 'module-tariff-test', 'Module tariffs', POLICY_ID)
+    files = _members(package)
+    operations = json.loads(files['fox-package/lov-return-receipt.json'])['generated_operations']
+    rates = [op for op in operations if op.get('kind') == 'source_optional_row_lookup']
+    assert len(rates) == 2
+    seen, titles, tables = set(), set(), set()
+    for op in rates:
+        target = op['native_target']
+        field, = target['numeric_fields']
+        module, = [name for name, spec in expected.items() if spec == (field['label'],field['scale'])]
+        seen.add(module)
+        for key in ('draft_table','saved_table'):
+            assert target[key] not in tables
+            tables.add(target[key])
+        for pid in range(op['page_id'], op['page_id'] + target['page_count']):
+            path, = [n for n in files if n.startswith(f'pages/p{pid:05d}-')]
+            page = files[path].decode()
+            title = json.loads(re.search(r'(?m)^    title: (.+)$',page)[1])
+            assert title.startswith(module+' / LINES / ')
+            assert title not in titles
+            titles.add(title)
+    assert seen == set(expected)
+
+
+def test_explicit_plain_block_label_preserves_all_single_module_native_bytes():
+    c, b, n = compiled()
+    original = native.render_rate_workspace(c, b, 7800, numbers=n)
+    assert native.render_rate_workspace(c, b, 7800, numbers=n, block_label=c['source_block_name']) == original
+    long_context = 'A' * 185 + ' / ' + 'B' * 125
+    titled = native.render_rate_workspace(c, b, 7800, numbers=n, block_label=long_context)
+    for page in titled['pages']:
+        title = json.loads(re.search(r'(?m)^    title: (.+)$',page['text'].decode())[1])
+        assert len(title) <= 255 and f"[page {page['page_id']}]" in title

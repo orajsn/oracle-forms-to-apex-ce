@@ -414,7 +414,7 @@ def _load(c, b, fields, names, page, *, choice_index=None, numbers=None):
     return sql
 
 
-def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent=None):
+def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent=None, block_label=None):
     """Return one editor and one chooser per source-linked LOV, plus empty DDL."""
     if parent is not None:
         from . import forms_rate_parent_page as linked
@@ -494,6 +494,12 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=No
                            'Only the displayed prototype projection is persisted; other source block fields and events remain unrepresented. '
                            'The existing source POST-CHANGE is wired to changed route inputs on Keep and route Apply when proved; catalogs start empty.')
             label = 'Synthetic row workspace for '+c['source_block_name']
+        if block_label and block_label != c['source_block_name']:
+            action = 'Choose ' + ch['source_caller_name'] if choosing else 'Rate workspace'
+            label = block_label + ' / ' + action
+            if len(label) > 255:
+                # Keep the title distinguishable even for shared long prefixes.
+                label = f'{block_label[:120]}... / {action[:110]} [page {current}]'
         if numeric:
             description += ' Source number inputs use a dot decimal separator without grouping or exponents; values outside the source picture or length are rejected without rounding.'
         body += route._process('load-shared-row',_load(c,b,fields,names,current,choice_index=index if choosing else None,numbers=numbers),point='beforeHeader')
