@@ -200,6 +200,19 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.15] - 2026-11-24
+
+### [improvement] Initialize new rate drafts from Forms record defaults
+
+A complete block-level WHEN-CREATE-RECORD rule can initialize projected text
+fields with source literals or NULL. A new row inherits the defaults of its
+own module. An explicit edit of the route caller uses its existing lookup
+validation. Reopen loads the saved row, including any later changes.
+
+The conversion report records the source event, ordered assignments and
+target fields. Conflicting, conditional or unsupported rules remain listed
+for review.
+
 ## [0.57.14] - 2026-11-24
 
 ### [improvement] Identify matching options in rate choice lists

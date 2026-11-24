@@ -66,6 +66,7 @@ _BEHAVIOR_RULES = {
     "selected_record_entry_assignment": "fox.policy.selected-record-entry",
     "source_filtered_block_query": "fox.query.source-block-filter",
     "source_session_default": "fox.session.source-default",
+    "rate_new_draft_default": "fox.rate.create-record-default",
     "guarded_related_query": "fox.query.guarded-related-query",
     "record_group_reference_report": "fox.query.record-group-report",
     "source_select_into_lookup": "fox.lookup.source-read-event",
@@ -135,6 +136,9 @@ def mapping_catalog():
          "The generated editor uses private test tables for the reference catalog and session-owned drafts. Other original events and business persistence remain separate."),
         ("fox.query.guarded-related-query", "Complete item KEY-EXEQRY guard using non-null keys on the selected parent in a proven incoming relation.",
          "Manual Execute query action refreshes the related synthetic report after checking its parent keys.", "Uses the selected persisted row. The related view can also query on initial entry. Automatic coordination and dirty record buffers remain separate."),
+        ("fox.rate.create-record-default", "A complete block-level WHEN-CREATE-RECORD initializes projected fields with typed literals.",
+         "Initialize a new synthetic rate draft once, with the fields bound to its own module and block.",
+         "Reopening a saved rate preserves its stored values. Original business posting and other source events retain their own coverage."),
         ("fox.session.source-default", "Complete form initialization loads one global from a single-row NVL lookup and preserves it on error.",
          "Runs on the first mapped module page visited in an enabled application session.", "Trusted source context and a verified original interface are required. A new APEX session adapts Forms launch timing. Subsequent visits retain the initialized value."),
         ("fox.query.source-block-filter", "Whole block filter consists of direct source column equalities with literals and trusted globals.",
@@ -198,13 +202,13 @@ def mapping_catalog():
     rules.append(("fox.checkbox.session-draft", "A complete changed-checkbox event and exact stored checkbox values are proved from fresh source.",
                   "Open a separate selected-row synthetic session draft from the existing report.",
                   "Only exact checked/unchecked values are admitted. Record entry, original permissions, source NULL/other display behavior and database Save remain separate; no whole source unit is counted as converted."))
-    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 29,
+    catalog = {"schema_version": 1, "catalog_id": CATALOG_ID, "revision": 30,
                "origin": "deterministic_rules", "policy_id": POLICY_ID,
                "implementation_sources": {name: _sha(Path(__file__).with_name(name).read_bytes())
                    for name in ("xml_mapping.py", "forms_native_plan.py", "forms_behavior_plan.py", "forms_module_navigation.py",
                                 "forms_route_lookup_plan.py", "forms_route_lookup_native.py", "forms_route_lookup_typed.py", "forms_event_callables.py",
                                 "forms_rate_choices.py", "forms_rate_workspace.py", "forms_rate_numbers.py",
-                                "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py", "forms_display_projection.py",
+                                "forms_rate_create_defaults.py", "forms_rate_parent.py", "forms_rate_parent_page.py", "forms_rate_field_coverage.py", "forms_display_projection.py",
                                 "forms_checkbox_group.py", "forms_checkbox_workspace.py",
                                 "xml_supporting_inputs.py", "intake.py",
                                 "forms_facts.py", "forms_understanding_packet.py", "forms_blueprint.py", "forms_mapping_gaps.py", "forms_relation_plan.py", "forms_assignment_plan.py", "forms_policy_plan.py", "forms_order_rules.py", "forms_buffer_plan.py", "forms_discrepancies.py", "forms_lookup_plan.py", "forms_guarded_query.py", "forms_session_defaults.py", "forms_manifest_filter.py", "forms_record_entry.py", "forms_draft_policy.py", "forms_synthetic_save.py", "forms_lov_return.py", "forms_master_detail.py", "forms_detail_clear.py", "forms_item_validation.py", "forms_draft_providers.py", "forms_interface_inventory.py", "forms_approval_plan.py", "forms_approval_action.py",
@@ -507,7 +511,8 @@ def _approval_interface_links(plans, inventory):
     return links
 
 
-def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns):
+def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns, *, create_policies=None):
+    from .forms_rate_create_defaults import bind_rate_create_defaults
     from .forms_rate_choices import compile_rate_choices
     from .forms_rate_numbers import compile_rate_numbers
     from .forms_rate_parent import compile_rate_parent
@@ -542,6 +547,10 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         label_blocks.setdefault(bid, {'source_block_id': bid, 'source_module_id': contract['source_module_id'],
                                       'name': contract['source_block_name']})
     labels = block_labels(label_blocks.values(), source_modules(packet))
+    init_properties = None
+    if create_policies and any(op['source_event'] == 'WHEN-CREATE-RECORD' for op in create_policies[0]['operations']):
+        from .forms_behavior_plan import _source_objects
+        _, init_properties = _source_objects(documents, packet)
     page = 8900
     for contract in contracts:
         bundle = bundles.get(contract['contract_id'])
@@ -561,23 +570,43 @@ def _attach_row_lookups(documents, packet, chunks, trace, files, groups, returns
         if page + span > 9900:
             raise ValueError('No native page range is available for the lookup editor.')
         numbers = number_plans.get(contract['contract_id'])
+        initializer = None
         if choices:
             numbers = numbers if numbers['fields'] else None
-            block_label = labels[contract['source_block_id']]
-            rendered = render_rate_workspace(contract, bundle, page, numbers=numbers,
-                                             block_label=block_label,
-                                             parent=parent_plan if parent_binding is not None else None)
-        else:
-            rendered = render_row_lookup(contract, page)
-        target = rendered['metadata']
+            if init_properties is not None:
+                parent_keys = {x['child_item_id'] for x in parent_binding['join_pairs']} if parent_binding else set()
+                initializer = bind_rate_create_defaults(packet, *create_policies, contract, bundle,
+                                                        properties=init_properties, parent_keys=parent_keys)
+        relation = None
         if parent_binding is not None:
             relation = relation_actions.get(parent_binding['relation_id'])
             if (not relation or relation['child_block_id'] != contract['source_block_id']
                     or relation['source_module_id'] != contract['source_module_id']
                     or relation['page_file'] not in files):
                 raise ValueError('The parent copy must be reached from its own generated relation.')
-            launcher = render_parent_page(contract, bundle, parent_plan, page, page + span - 1,
-                                          relation, numbers=numbers)
+
+        def render_editor(init):
+            if not choices:
+                return render_row_lookup(contract, page), None
+            workspace = render_rate_workspace(contract, bundle, page, numbers=numbers,
+                block_label=labels[contract['source_block_id']], initializer=init,
+                parent=parent_plan if relation else None)
+            launcher = (render_parent_page(contract, bundle, parent_plan, page, page + span - 1,
+                        relation, numbers=numbers, initializer=init) if relation else None)
+            return workspace, launcher
+
+        try:
+            rendered, launcher = render_editor(initializer)
+        except ValueError as error:
+            if not initializer or not str(error).endswith('CAPACITY'):
+                raise
+            # Keep an existing supported workspace; retain the source-event gap.
+            initializer = None
+            rendered, launcher = render_editor(None)
+        target = rendered['metadata']
+        if initializer:
+            target['new_record_initializer'] = initializer
+        if launcher:
             rendered['pages'].extend(launcher['pages'])
             child_page = relation['page_file']
             files[child_page] = native_record_groups._append(files[child_page].decode(), launcher['entry_fragment']).encode()
@@ -1060,7 +1089,8 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
             raise ValueError("Entry wiring receipt is for a different source.")
         files[f'fox-package/{scope}-entry-wiring-receipt.json'] = _bytes(wiring)
         _connect_entry_drafts(entry_targets, wiring, files, scope)
-    row_lookups = _attach_row_lookups(documents, packet, chunks, trace, files, group_receipt, lov_receipt)
+    row_lookups = _attach_row_lookups(documents, packet, chunks, trace, files, group_receipt, lov_receipt,
+                                      create_policies=(policy_plan, policy_receipt))
     files["fox-package/lov-return-receipt.json"] = _bytes(lov_receipt)
     final_groups = _final_record_groups(group_receipt, lov_receipt)
     for group in final_groups:
@@ -1147,8 +1177,19 @@ def _generate_xml_package(documents, project_id, project_name, approved_policy_i
                 raise ValueError("Typed lookup does not match its caller and native pages.")
             typed_lookups.append(dict(typed, kind="typed_draft_lookup",
                                       operation_id="typed-lookup-" + typed["source_unit_id"], page_file=op["page_file"]))
+    create_rules = []
+    for op in row_lookups:
+        init = op['native_target'].get('new_record_initializer')
+        if init is None or op['kind'] != 'source_optional_row_lookup':
+            continue
+        uid = init['source_unit_id']
+        prior = policy_encoded.pop(uid, None)
+        if prior is None or prior['source_unit_sha256'] != init['source_unit_sha256'] or uid in partial_policies:
+            raise ValueError('Create default differs from its unique source policy')
+        create_rules.append(dict(init, kind='rate_new_draft_default', page_file=op['page_file'], page_id=op['page_id']))
     source_adapters = {}
     for receipt, reason in (
+        ({"generated_operations": create_rules}, "source_literal_new_draft_default"),
         ({"generated_operations": typed_lookups}, "typed_lookup_draft_generated"),
         (commands, "item_command_generated"),
         (item_validation, "item_lookup_validation_wired_to_draft"),

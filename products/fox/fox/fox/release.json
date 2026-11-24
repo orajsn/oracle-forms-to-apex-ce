@@ -1,10 +1,10 @@
 {
-  "version": "0.57.14",
+  "version": "0.57.15",
   "released_on": "2026-11-24",
-  "title": "Identify duplicate return values in rate choice lists",
+  "title": "Initialize rate drafts from source-defined record defaults",
   "changes": [
-    "List-validated rate choosers show how many options return the same values to the row.",
-    "Save names the choice list and distinguishes a removed selection from multiple current matches."
+    "A block-level WHEN-CREATE-RECORD containing only proven text or NULL assignments can initialize a new synthetic rate draft.",
+    "The editor retains module-specific defaults and preserves stored values when an existing rate is reopened."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

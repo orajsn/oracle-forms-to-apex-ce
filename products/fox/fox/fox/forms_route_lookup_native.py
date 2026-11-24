@@ -262,6 +262,16 @@ end;"""
     return sql
 
 
+def _typed_read(typed, table, value):
+    selected = ','.join(a['source_column'] for a in typed['assignments'])
+    into = ','.join(f'l_typed{i}' for i in range(1,len(typed['assignments'])+1))
+    code = f'begin\nselect {selected} into {into} from {table} where {typed["key_column"]}={value};\n'
+    code += "exception when no_data_found then\n raise_application_error(-20031," + _source_message(typed['no_data_message']) + ");\nend;\n"
+    for i,a in enumerate(typed['assignments'],1):
+        code += _validate_value(a['field'],f'l_typed{i}')
+    return code
+
+
 def action_code(contract, page, action):
     """The complete emitted transaction boundary, exposed for target verification."""
     c = _checked(contract)
@@ -344,12 +354,7 @@ values(to_number(v('APP_ID')),v('APP_SESSION'),v('APP_USER'),l_uuid,:P{page}_LAB
                 code += f'select case when {same} then 1 else 0 end into l_caller_unchanged from dual;\n'
                 code += 'if l_caller_unchanged=0 then\n'
                 if typed:
-                    selected = ','.join(a['source_column'] for a in typed['assignments'])
-                    into = ','.join(f'l_typed{i}' for i in range(1,len(typed['assignments'])+1))
-                    code += f'begin\nselect {selected} into {into} from {names["catalog_table"]} where {typed["key_column"]}={value};\n'
-                    code += "exception when no_data_found then\n raise_application_error(-20031," + _source_message(typed['no_data_message']) + ");\nend;\n"
-                    for i,a in enumerate(typed['assignments'],1):
-                        code += _validate_value(a['field'],f'l_typed{i}')
+                    code += _typed_read(typed, names['catalog_table'], value)
                     # A single update below publishes caller and companions.
                     # On an unchanged caller, Apply retains ordinary LOV values.
                     code += 'end if;\n'

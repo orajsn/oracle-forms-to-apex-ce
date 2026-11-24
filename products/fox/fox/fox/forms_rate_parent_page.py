@@ -121,9 +121,9 @@ def bound_choice_query(primary, bundle, page, choice_index=0, *, ordered=False, 
     return _replace(workspace.choice_query(c, b, page, choice_index, ordered=ordered, numbers=n), c, b, p, n)
 
 
-def bound_action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, parent):
+def bound_action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, parent, initializer=None):
     c, b, p, n, _ = _checked(primary, bundle, parent, numbers)
-    code = workspace.action_code(c, b, page, action, choice_index, numbers=n)
+    code = workspace.action_code(c, b, page, action, choice_index, numbers=n, initializer=initializer)
     if not p.get('binding'):
         return code
     names = _names(c, b, p, n)
@@ -186,9 +186,9 @@ def _extra_load(p, names, page, choosing):
     return code + 'end if;\nend if;\nend;'
 
 
-def render_bound_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent):
+def render_bound_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent, block_label=None, initializer=None):
     c, b, p, n, _ = _checked(primary, bundle, parent, numbers)
-    result = workspace.render_rate_workspace(c, b, page, source_page=source_page, numbers=n)
+    result = workspace.render_rate_workspace(c, b, page, source_page=source_page, numbers=n, block_label=block_label, initializer=initializer)
     if not p.get('binding'):
         return result
     names = _names(c, b, p, n)
@@ -207,8 +207,8 @@ def render_bound_workspace(primary, bundle, page, *, source_page=None, numbers=N
             *((action, 0) for action in ('FOX_ROW_CREATE', 'FOX_ROW_KEEP', workspace.SAVE, workspace.REOPEN, 'FOX_ROW_DISCARD')),
             *(('FOX_ROW_CHOOSE', i) for i in range(1 + len(b['choices'])))]
         for action, choice in actions:
-            old = workspace.action_code(c, b, current, action, choice, numbers=n)
-            new = bound_action_code(c, b, current, action, choice, numbers=n, parent=p)
+            old = workspace.action_code(c, b, current, action, choice, numbers=n, initializer=initializer)
+            new = bound_action_code(c, b, current, action, choice, numbers=n, parent=p, initializer=initializer)
             if action == 'FOX_ROW_CHOOSE':
                 request = 'FOX_RATE_CHOOSE_' + str(choice)
                 old = old.replace("'FOX_ROW_CHOOSE'", "'" + request + "'")
@@ -277,7 +277,7 @@ def _selection_guard(p, page, *, lock):
     return code
 
 
-def parent_create_code(primary, bundle, parent, editor_page, page, *, numbers=None):
+def parent_create_code(primary, bundle, parent, editor_page, page, *, numbers=None, initializer=None):
     c, b, p, n, _ = _checked(primary, bundle, parent, numbers)
     _need(bool(p.get('binding')), 'BINDING_REQUIRED')
     names = _names(c, b, p, n)
@@ -296,6 +296,10 @@ def parent_create_code(primary, bundle, parent, editor_page, page, *, numbers=No
     code += ("exception when no_data_found then rollback to fox_rate_parent; raise_application_error(-20031,'Parent changed or has a missing key. Nothing was created.');\n"
              "when too_many_rows then rollback to fox_rate_parent; raise_application_error(-20031,'Parent is ambiguous. Nothing was created.');\n"
              "when others then rollback to fox_rate_parent; raise;\nend;")
+    if initializer:
+        from .forms_rate_create_defaults import create_sql
+        fields = c['fields'] + b['fields'] + (n['fields'] if n else [])
+        code = create_sql(code, initializer, fields, c, names, page, parent_launcher=True)
     _need(len(code.encode()) <= 32767, 'PROCESS_CAPACITY')
     return code
 
@@ -314,7 +318,7 @@ def scoped_query(primary, bundle, parent, page, *, numbers=None):
     return base + ' order by r.ROW_LABEL,r.SAVED_UUID'
 
 
-def render_parent_page(primary, bundle, parent, editor_page, launcher_page, relation_context, *, numbers=None):
+def render_parent_page(primary, bundle, parent, editor_page, launcher_page, relation_context, *, numbers=None, initializer=None):
     """Lead inserts entry_fragment only into the exact filtered child page.
 
     Allocate launcher_page separately from the editor and its choosers. Supporting
@@ -352,7 +356,7 @@ def render_parent_page(primary, bundle, parent, editor_page, launcher_page, rela
     load += "end if;\nexception when no_data_found then raise_application_error(-20031,'Parent changed or has a missing key. Select it again.');\nend;"
     body += workspace.route._process('load-selected-parent', load, point='beforeHeader')
     body += workspace.route._button(CREATE, 'Create a draft for this parent', 10)
-    body += workspace.route._process('create-linked-rate', parent_create_code(c,b,p,editor_page,page,numbers=n), action=CREATE)
+    body += workspace.route._process('create-linked-rate', parent_create_code(c,b,p,editor_page,page,numbers=n,initializer=initializer), action=CREATE)
     body += workspace.route._branch(page, editor_page, CREATE, revision=True)
     saved_link = f'''        link {{ linkColumn: customTarget
             target: {{ page: {editor_page}

@@ -1,0 +1,109 @@
+"""Normal-generation checks for source defaults on new synthetic drafts."""
+from io import BytesIO
+import json
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
+
+import pytest
+
+from fox.forms_native_plan import POLICY_ID
+from fox.xml_mapping import generate_xml_package
+from test_forms_rate_number_workspace import _source_with_price
+
+
+def source(module, body, other_event=False):
+    root = ET.fromstring(_source_with_price())
+    root.set('Name',module)
+    block = root.find("./Block[@Name='LINES']")
+    trigger = block.find("./Trigger[@Name='WHEN-CREATE-RECORD']")
+    if trigger is None:
+        trigger = ET.SubElement(block,'Trigger',Name='WHEN-CREATE-RECORD')
+    trigger.set('TriggerText',body)
+    if other_event:
+        ET.SubElement(root,'Trigger',Name='WHEN-CREATE-RECORD',TriggerText="BEGIN :LINES.VIA := 'OTHER'; END;")
+    return ET.tostring(root)
+
+
+def package(docs):
+    candidate, report = generate_xml_package(docs,'rate-defaults-test','Rate defaults',POLICY_ID)
+    with ZipFile(BytesIO(candidate)) as archive:
+        read=lambda n:json.loads(archive.read('fox-package/'+n+'.json'))
+        ops=[o for o in read('lov-return-receipt')['generated_operations'] if o.get('kind')=='source_optional_row_lookup']
+        pages={o['page_file']:archive.read(o['page_file']).decode() for o in ops}
+        return ops,pages,read('mapping-gaps')['gaps'],read('metadata')
+
+
+def test_two_modules_bind_complete_default_to_own_create_only():
+    docs=[(m+'.xml',source(m,"BEGIN :VIA := '"+v+"'; END;")) for m,v in [('RATES_A','V1'),('RATES_B','V2')]]
+    ops,pages,gaps,metadata=package(docs)
+    assert len(ops)==2 and not any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+    assert 'fox.rate.create-record-default' in metadata['applied_rule_ids']
+    ids=set();values=set()
+    for op in ops:
+        init=op['native_target']['new_record_initializer']
+        target,=init['assignments']
+        assert (target['source_name'],target['column'])==('VIA','F001')
+        assert init['source_block_id']==op['source_block_id']
+        assert init['source_module_id']==op['contract']['source_module_id']
+        assert 'l_init_F001' in pages[op['page_file']]
+        assert 'A new draft starts with the initial values' in pages[op['page_file']]
+        ids.add(target['source_item_id']);values.add(target['value'])
+    assert len(ids)==2 and values=={'V1','V2'}
+
+
+@pytest.mark.parametrize('body,other_event',[
+    ("BEGIN IF :VIA IS NULL THEN :VIA := 'V1'; END IF; END;",False),
+    ("BEGIN :VIA := :START_AT; END;",False),
+    ("BEGIN :VIA := 'V1'; :DOES_NOT_EXIST := 'X'; END;",False),
+    ("BEGIN :VIA := '" + 'X'*300 + "'; END;",False),
+    ("BEGIN :VIA := 'V1'; END;",True),
+])
+def test_nonliteral_incomplete_oversize_or_competing_rule_is_not_partly_applied(body,other_event):
+    ops,pages,gaps,meta=package([('case.xml',source('RATES',body,other_event))])
+    assert len(ops)==1
+    assert 'new_record_initializer' not in ops[0]['native_target']
+    assert 'l_init_F001' not in pages[ops[0]['page_file']]
+    assert 'fox.rate.create-record-default' not in meta['applied_rule_ids']
+    assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+
+
+def test_repeated_assignment_ends_in_source_null_and_preserves_order():
+    from fox.forms_rate_create_defaults import effective_values
+    ops,_,_,_=package([('one.xml',source('RATES',"BEGIN :VIA := 'V1'; :VIA := NULL; END;"))])
+    init=ops[0]['native_target']['new_record_initializer']
+    assert [a['value'] for a in init['assignments']]==['V1',None]
+    assert effective_values(init)=={'F001':'null'}
+
+
+def test_number_target_without_a_proven_editable_projection_stays_a_gap():
+    ops, _, gaps, _ = package([('numbers.xml',source('RATES',"BEGIN :AMOUNT := 12.30; END;"))])
+    assert 'new_record_initializer' not in ops[0]['native_target']
+    assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+
+
+def test_parent_launcher_initializes_draft_without_using_editor_inputs():
+    from fox.forms_rate_parent_page import parent_create_code, render_bound_workspace
+    from test_forms_rate_parent_workspace import compiled
+
+    c,b,p,n = compiled()
+    f = c['caller']
+    init = {'assignments':[{'column':f['column'], 'data_type':'VARCHAR2', 'value':'V1'}]}
+    launcher = parent_create_code(c,b,p,7800,7900,numbers=n,initializer=init)
+    inserted = launcher.split('insert into ',1)[1].split(');',1)[0]
+    assert f['column'] in inserted and all(k in inserted for k in ('PARENT_ID','PARENT_STAMP','K001','K002'))
+    assert 'l_init_F001' in inserted and ':P7900_F1' not in launcher
+    bound = render_bound_workspace(c,b,7800,numbers=n,parent=p,initializer=init)
+    assert 'l_init_F001' in bound['pages'][0]['text'].decode()
+
+
+@pytest.mark.parametrize('level',['block','trigger','target'])
+def test_source_property_inheritance_is_checked_for_the_current_module(level):
+    root = ET.fromstring(source('RATES',"BEGIN :VIA := 'V1'; END;"))
+    block = root.find("./Block[@Name='LINES']")
+    node = {'block':block,'target':block.find("./Item[@Name='VIA']"),
+            'trigger':block.find("./Trigger[@Name='WHEN-CREATE-RECORD']")}[level]
+    node.set('PropertyClass','EXTERNAL_CLASS')
+    ops,_,gaps,meta=package([('inherited.xml',ET.tostring(root))])
+    assert not any(o['native_target'].get('new_record_initializer') for o in ops)
+    assert any(g['source_name']=='WHEN-CREATE-RECORD' for g in gaps)
+    assert 'fox.rate.create-record-default' not in meta['applied_rule_ids']

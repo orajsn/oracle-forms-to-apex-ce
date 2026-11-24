@@ -863,3 +863,24 @@ def test_source_lookup_handlers_are_generated_but_original_reads_stay_disabled(c
     files=_members(package.content)
     assert files['shared-components/app-items.apx'].count(b'sessionStateProtection: restricted')==3
     assert not result['runtime_verified']
+
+
+def test_downloaded_create_rules_remain_bound_to_their_modules(client):
+    from test_forms_rate_create_defaults import source as rate_source
+
+    docs = [(name.lower() + '.xml', rate_source(name, "BEGIN :VIA := '" + route + "'; END;"))
+            for name, route in [('SHIPPING', 'V1'), ('RETURNS', 'V2')]]
+    c, _, _, _, run = finish(client, docs)
+    result = c.get(run['download_url'])
+    assert result.status_code == 200 and jobs.sha(result.content) == run['package_sha256']
+    files = _members(result.content)
+    rules = [unit for unit in json.loads(files['fox-package/mapping-ledger.json'])['code_units']
+             if unit['reason'] == 'source_literal_new_draft_default']
+    assert len(rules) == 2
+    detailed = {unit['source_unit_id']:unit for unit in run['discrepancies']['units']}
+    for rule in rules:
+        assert rule['rule_id'] == 'fox.rate.create-record-default'
+        assert detailed[rule['source_unit_id']]['status'] == 'generated'
+        target = rule['target']
+        assert target['synthetic_create_wired'] and not target['original_forms_runtime_executed']
+        assert target['source_unit_sha256'] == rule['source_unit_sha256']

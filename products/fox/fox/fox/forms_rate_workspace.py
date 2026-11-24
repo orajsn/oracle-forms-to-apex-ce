@@ -286,12 +286,12 @@ def _dirty_check(c, names, page, numeric=()):
             "if l_count<>1 then raise_application_error(-20031,'Keep draft changes before saving or choosing.'); end if;\n")
 
 
-def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, parent=None):
+def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, parent=None, initializer=None):
     """Complete emitted transaction; no commit, external call or business DML."""
     if parent is not None:
         from . import forms_rate_parent_page as linked
         return linked.bound_action_code(primary, bundle, page, action, choice_index,
-                                        numbers=numbers, parent=parent)
+                                        numbers=numbers, parent=parent, initializer=initializer)
     c, b, fields = _checked(primary, bundle)
     numbers = validate_rate_numbers(numbers, c)
     numeric = numbers['fields'] if numbers else []
@@ -300,7 +300,12 @@ def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, 
     _need(type(choice_index) is int and 0 <= choice_index <= len(b['choices']), 'CHOICE_INDEX')
     if action in route.REQUESTS and (choice_index == 0 or action != 'FOX_ROW_APPLY'):
         code = _replace_route(route.action_code(c, page, action), c, names)
-        return _numeric_route_action(code,c,names,page,action,numeric) if numeric else code
+        if numeric:
+            code = _numeric_route_action(code, c, names, page, action, numeric)
+        if initializer and action == 'FOX_ROW_CREATE':
+            from .forms_rate_create_defaults import create_sql
+            code = create_sql(code, initializer, fields, c, names, page)
+        return code
     _need(action in (SAVE, REOPEN, 'FOX_ROW_APPLY'), 'ACTION')
     table, saved = names['draft_table'], names['saved_table']
     declarations = 'l_revision number;l_count number;l_saved_uuid varchar2(32);l_saved_revision number;l_current number;l_uuid varchar2(32);'
@@ -417,7 +422,7 @@ def _choice_report(page, sql, ch, link, *, match_count=None):
     return text[text.index('    region records ('):-2]
 
 
-def _load(c, b, fields, names, page, *, choice_index=None, numbers=None):
+def _load(c, b, fields, names, page, *, choice_index=None, numbers=None, initializer=None):
     cols = ','.join(_number_text(f['column']) if f['data_type'] == 'NUMBER' else f['column'] for f in fields)
     into = ','.join(f':P{page}_{_suffix(f)}' for f in fields)
     choosing = choice_index is not None
@@ -425,7 +430,11 @@ def _load(c, b, fields, names, page, *, choice_index=None, numbers=None):
     if not choosing:
         sql += f"if :P{page}_ROW is null then\nif :P{page}_OPEN is not null then\n"
         sql += f"select ROW_LABEL,{cols} into :P{page}_LABEL,{into} from {names['saved_table']} where {_saved_row(page)} and REVISION=to_number(:P{page}_SREV);\nelse\n:P{page}_LABEL:=null; :P{page}_SREV:=null;\n"
-        sql += ''.join(f':P{page}_{_suffix(f)}:=null;\n' for f in fields)
+        from .forms_rate_create_defaults import effective_values
+        defaults = effective_values(initializer) if initializer else {}
+        for field in fields:
+            value = defaults.get(field['column'], 'null')
+            sql += f':P{page}_{_suffix(field)}:={value};\n'
         sql += f'end if;\n:P{page}_REV:=null; return; end if;\n'
     else:
         sql += route._identity(page)
@@ -440,12 +449,12 @@ def _load(c, b, fields, names, page, *, choice_index=None, numbers=None):
     return sql
 
 
-def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent=None, block_label=None):
+def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=None, parent=None, block_label=None, initializer=None):
     """Return one editor and one chooser per source-linked LOV, plus empty DDL."""
     if parent is not None:
         from . import forms_rate_parent_page as linked
         return linked.render_bound_workspace(primary, bundle, page, source_page=source_page,
-                                              numbers=numbers, parent=parent)
+                                              numbers=numbers, parent=parent, block_label=block_label, initializer=initializer)
     c, b, fields = _checked(primary,bundle)
     numbers = validate_rate_numbers(numbers, c)
     numeric = numbers['fields'] if numbers else []
@@ -511,7 +520,7 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=No
             actions = [('FOX_ROW_CREATE','Create a separate draft'),('FOX_ROW_KEEP','Keep draft changes'),(SAVE,'Save synthetic row'),(REOPEN,'Reopen selected saved row'),('FOX_ROW_DISCARD','Discard selected draft')]
             for seq,(action,label) in enumerate(actions,1):
                 body += route._button(action,label,seq*10)
-                body += route._process(action.lower(),action_code(c,b,page,action,numbers=numbers),action=action)
+                body += route._process(action.lower(),action_code(c,b,page,action,numbers=numbers,initializer=initializer),action=action)
                 body += route._branch(page,page,action,revision=True)
             for i,ch in enumerate(choices):
                 request = 'FOX_RATE_CHOOSE_'+str(i)
@@ -534,9 +543,13 @@ def render_rate_workspace(primary, bundle, page, *, source_page=None, numbers=No
             if len(label) > 255:
                 # Keep the title distinguishable even for shared long prefixes.
                 label = f'{block_label[:120]}... / {action[:110]} [page {current}]'
+        if initializer and not choosing:
+            description = description.replace('source commits, WHEN-CREATE-RECORD and other omitted',
+                                              'source commits and other omitted')
+            description += ' A new draft starts with the initial values defined for this source block.'
         if numeric:
             description += ' Source number inputs use a dot decimal separator without grouping or exponents; values outside the source picture or length are rejected without rounding.'
-        body += route._process('load-shared-row',_load(c,b,fields,names,current,choice_index=index if choosing else None,numbers=numbers),point='beforeHeader')
+        body += route._process('load-shared-row',_load(c,b,fields,names,current,choice_index=index if choosing else None,numbers=numbers,initializer=initializer),point='beforeHeader')
         path = f'pages/p{current:05d}-fox_rate_{current}.apx'
         text = route._shell(current,label,description,report,body)
         text = text.replace(f'alias: FOX_ROW_{current}\n'.encode(),f'alias: FOX_RATE_{current}\n'.encode())
