@@ -442,9 +442,9 @@ def _shell(page, label, description, report, body):
     return native_buffer._expand_groups(groups._append(text, report + body)).encode()
 
 
-def _report(page, sql, columns, label, link):
-    specs = [dict(name=name, label=title, data_type='VARCHAR2', nullable=True, primary_key=False)
-             for name, title in columns]
+def _report(page, sql, columns, label, link, *, numeric_columns=()):
+    specs = [dict(name=name, label=title, data_type='NUMBER' if name in numeric_columns else 'VARCHAR2',
+                  nullable=True, primary_key=False) for name, title in columns]
     text = groups._report(page, specs, groups._sql_source(sql), label=label, link=link)
     return text[text.index('    region records ('):-2]
 

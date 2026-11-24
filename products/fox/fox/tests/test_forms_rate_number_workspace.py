@@ -53,7 +53,7 @@ def test_number_projection_is_source_bound_and_absence_keeps_existing_output():
     assert 'number(' not in result['supporting_sql'].decode().lower()
     editor = result['pages'][0]['text'].decode()
     assert 'pageItem P7800_N1 (' in editor and 'label: "Price"' in editor
-    assert native._number_text('N001')+' N001' in editor
+    assert native._number_text('N001') in editor
     assert 'without rounding' in editor
     for page in result['pages'][1:]:
         text = page['text'].decode()
@@ -194,3 +194,24 @@ def test_reused_or_tampered_numeric_receipt_is_rejected():
     other,_,_ = compiled(MaximumLength='13')
     with pytest.raises(ValueError):
         native.action_code(other,b,7800,native.SAVE,numbers=n)
+
+
+def test_report_keeps_price_numeric_and_preserves_text_in_other_columns():
+    c, b, n = compiled()
+    editor = native.render_rate_workspace(c, b, 7800, numbers=n)['pages'][0]['text'].decode()
+    region = re.search(r'^    region records \(\n.*?^    \)$', editor, re.M | re.S)[0]
+    column = lambda name: re.search(r'^        column '+name+r' \(\n.*?^        \)$',region,re.M | re.S)[0]
+    assert 'dataType: NUMBER' in column('N001') and 'heading: "Price"' in column('N001')
+    assert 'dataType: STRING' in column('REVISION_TEXT') and 'dataType: STRING' in column('F001')
+    query = re.search(r'\x60{3}sql\n(.*?)\n\s*\x60{3}',region,re.S)[1]
+    branches = query.lower().split('union all')
+    assert len(branches) == 2 and all(',n001 from ' in part for part in branches)
+    assert 'to_char(n001' not in query.lower()
+    assert "to_char(N001,'TM9'" in editor  # The editor still reloads canonical input.
+    assert 'P7800_ROW: "#ROW_UUID#"' in region and 'P7800_OPEN: "#OPEN_ID#"' in region
+
+
+def test_report_helper_requires_an_explicit_numeric_binding():
+    from fox import forms_route_lookup_native as route
+    text=route._report(1,'select CODE,PRICE from DEMO',[('CODE','Code'),('PRICE','Price')],'Demo','')
+    assert text.count('dataType: STRING') == 2 and 'dataType: NUMBER' not in text

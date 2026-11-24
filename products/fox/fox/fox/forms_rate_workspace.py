@@ -362,7 +362,8 @@ def action_code(primary, bundle, page, action, choice_index=0, *, numbers=None, 
 
 
 def _list(c, fields, names, page):
-    cols = ','.join((_number_text(f['column'])+' '+f['column']) if f['data_type'] == 'NUMBER' else f['column'] for f in fields)
+    cols = ','.join(f['column'] for f in fields)
+    numeric_columns = {f['column'] for f in fields if f['data_type'] == 'NUMBER'}
     query = (f"select 'Draft' ROW_KIND,ROW_UUID,to_char(REVISION,'TM9') REVISION_TEXT,cast(null as varchar2(32)) OPEN_ID,cast(null as varchar2(32)) SAVED_REVISION_TEXT,ROW_LABEL,{cols} from {names['draft_table']} where {route._owner()} "
              f"union all select 'Saved synthetic row' ROW_KIND,cast(null as varchar2(32)) ROW_UUID,cast(null as varchar2(32)) REVISION_TEXT,SAVED_UUID OPEN_ID,to_char(REVISION,'TM9') SAVED_REVISION_TEXT,ROW_LABEL,{cols} from {names['saved_table']} where {_saved_owner()} order by ROW_KIND,ROW_LABEL")
     link = f'''        link {{ linkColumn: customTarget
@@ -374,7 +375,13 @@ def _list(c, fields, names, page):
                     P{page}_SREV: "#SAVED_REVISION_TEXT#" }} }}
             linkIcon: Open row }}
 '''
-    return route._report(page,query,[('ROW_KIND','Row kind'),('ROW_LABEL','Row label'),('ROW_UUID','Session draft identity'),('REVISION_TEXT','Draft revision'),('OPEN_ID','Saved row identity'),('SAVED_REVISION_TEXT','Saved revision')]+[(f['column'],f['source_name']) for f in fields], 'Your session drafts and durable synthetic saved rows',link)
+    columns = [('ROW_KIND', 'Row kind'), ('ROW_LABEL', 'Row label'), ('ROW_UUID', 'Session draft identity'),
+               ('REVISION_TEXT', 'Draft revision'), ('OPEN_ID', 'Saved row identity'),
+               ('SAVED_REVISION_TEXT', 'Saved revision')]
+    columns.extend((f['column'], f['label'] if f['data_type'] == 'NUMBER' else f['source_name'])
+                   for f in fields)
+    return route._report(page, query, columns, 'Your session drafts and durable synthetic saved rows', link,
+                         numeric_columns=numeric_columns)
 
 
 def _choice_report(page, sql, ch, link):

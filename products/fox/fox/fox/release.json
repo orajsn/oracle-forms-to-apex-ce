@@ -1,10 +1,10 @@
 {
-  "version": "0.57.10",
+  "version": "0.57.11",
   "released_on": "2026-11-24",
-  "title": "Verify the app created from the exported SQL",
+  "title": "Sort and filter stored rate prices as numbers",
   "changes": [
-    "A conventional SQL release checks the login page of the fresh reimported application and verifies the app ID served by APEX.",
-    "New release evidence links this check to the SQL file hash. A retry can reuse a completed database import."
+    "Draft and saved rate reports retain the Oracle NUMBER type and the Forms field caption for mapped prices.",
+    "APEX can sort and compare prices numerically. The editor retains its source-bound decimal validation and preserves the difference between an empty price and zero."
   ],
   "limitations": [
     "Development preview: source and local checks do not establish a public deployment or completed fresh-customer installation.",

@@ -200,6 +200,15 @@ runtime verification or business acceptance. Unsupported mappings remain explici
 Remove an extra trailing blank line reported by the staged whitespace check.
 No runtime behavior, generated asset or software version changes.
 
+## [0.57.11] - 2026-11-24
+
+### [fix] Sort and filter rate prices as numbers
+
+The APEX report lists draft and saved prices as Oracle numbers and uses the
+caption from Forms. Ascending order puts 2 before 10, and numeric filters
+compare the amount. A blank price remains NULL and zero remains a number.
+The editor continues to validate input against the source decimal picture.
+
 ## [0.57.10] - 2026-11-24
 
 ### [fix] Check the application created from the exported SQL
